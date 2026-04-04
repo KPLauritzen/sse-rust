@@ -43,27 +43,27 @@ It is unknown whether SSE is decidable in general. There is no known algorithm t
 ### Foundational
 
 - **R.F. Williams (1973)** — "Classification of subshifts of finite type." Introduced SSE and proved it characterises conjugacy of SFTs.
-- **Kim & Roush (1999)** — "Williams's conjecture is false for irreducible subshifts." Proved SE ≠ SSE, disproving the Williams conjecture.
+- **Kim & Roush (1999)** — ["Williams's conjecture is false for irreducible subshifts."](references/kim-roush-1999-math9907095.pdf) Proved SE ≠ SSE, disproving the Williams conjecture.
 - **Wagoner (1999)** — "Strong shift equivalence theory and the shift equivalence problem." Survey connecting SSE to algebraic K-theory. Notes that machine computations of the Φ₂ invariant detected counterexamples.
 - **Lind & Marcus (2021)** — *An Introduction to Symbolic Dynamics and Coding* (2nd ed., Cambridge). The standard textbook. Chapter 7 covers conjugacy, SSE, and SE in detail with worked examples.
 
 ### Computational
 
-- **Eilers & Kiming (2008)** — "On some new invariants for strong shift equivalence for shifts of finite type" (arXiv:0809.2713). **Key paper for this project.** Introduces a new computable invariant for SSE based on earlier work of Trow, Boyle, and Marcus. Includes a large-scale numerical experiment on all irreducible 2×2 matrices with entry sum < 25. Demonstrates cases where the new invariant disproves SSE where other invariants fail.
+- **Eilers & Kiming (2008)** — "On some new invariants for strong shift equivalence for shifts of finite type" ([arXiv:0809.2713](references/eilers-kiming-2008-0809.2713.pdf)). **Key paper for this project.** Introduces a new computable invariant for SSE based on earlier work of Trow, Boyle, and Marcus. Includes a large-scale numerical experiment on all irreducible 2×2 matrices with entry sum < 25. Demonstrates cases where the new invariant disproves SSE where other invariants fail.
 - **Kim & Roush (1990)** — "An algorithm for sofic shift equivalence." Published in Ergodic Theory and Dynamical Systems.
-- **Boyle, Kim & Roush (2013)** — "Path methods for strong shift equivalence of positive matrices" (arXiv:1209.5096). Develops path-based techniques for establishing SSE over dense subrings of ℝ.
+- **Boyle, Kim & Roush (2013)** — "Path methods for strong shift equivalence of positive matrices" ([arXiv:1209.5096](references/boyle-kim-roush-2013-1209.5096.pdf)). Develops path-based techniques for establishing SSE over dense subrings of ℝ.
 
 ### Recent theoretical advances (Kevin Aguyar Brix and collaborators)
 
-- **Brix (2022)** — "Balanced strong shift equivalence, balanced in-splits, and eventual conjugacy." Ergodic Theory and Dynamical Systems. Introduces balanced SSE, connecting it to one-sided eventual conjugacy via graph operations (out-splits and balanced in-splits).
-- **Carlsen, Dor-On & Eilers (2024)** — "Shift equivalences through the lens of Cuntz-Krieger algebras." Introduces compatible, aligned, and balanced shift equivalence as intermediary relations between SE and SSE. **Notably, algorithms implementing aligned shift equivalence for a fixed lag perform better than naive SSE search** — this is a potential avenue for the explorer.
-- **Brix, Dor-On, Hazrat & Ruiz (2025)** — "Unital aligned shift equivalence and the graded classification conjecture." Accepted in Mathematische Zeitschrift. Connects shift equivalence to Leavitt path algebras.
-- **Brix & Ruiz (2025)** — "Unital shift equivalence" (arXiv:2504.09889). Shows unital SE does not imply (balanced) SSE.
-- **Brix, Mundey & Rennie (2024)** — "Splittings for C*-correspondences and strong shift equivalence." Extends in-splits to C*-correspondences.
+- **Brix (2022)** — ["Balanced strong shift equivalence, balanced in-splits, and eventual conjugacy."](references/brix-2022-1912.05212.pdf) Ergodic Theory and Dynamical Systems. Introduces balanced SSE, connecting it to one-sided eventual conjugacy via graph operations (out-splits and balanced in-splits).
+- **Carlsen, Dor-On & Eilers (2024)** — ["Shift equivalences through the lens of Cuntz-Krieger algebras."](references/carlsen-doron-eilers-2024-2011.10320.pdf) Introduces compatible, aligned, and balanced shift equivalence as intermediary relations between SE and SSE. **Notably, algorithms implementing aligned shift equivalence for a fixed lag perform better than naive SSE search** — this is a potential avenue for the explorer.
+- **Brix, Dor-On, Hazrat & Ruiz (2025)** — ["Unital aligned shift equivalence and the graded classification conjecture."](references/brix-doron-hazrat-ruiz-2025-2409.03950.pdf) Accepted in Mathematische Zeitschrift. Connects shift equivalence to Leavitt path algebras.
+- **Brix & Ruiz (2025)** — "Unital shift equivalence" ([arXiv:2504.09889](references/brix-ruiz-2025-2504.09889.pdf)). Shows unital SE does not imply (balanced) SSE.
+- **Brix, Mundey & Rennie (2024)** — ["Splittings for C*-correspondences and strong shift equivalence."](references/brix-mundey-rennie-2024-2305.01917.pdf) Extends in-splits to C*-correspondences.
 
 ### Algebraic K-theory connection
 
-- **Boyle & Schmieding (2019)** — "Strong shift equivalence and algebraic K-theory." Shows the refinement of SE by SSE is captured by NK₁(R)/E(A,R), connecting this concrete matrix problem to deep algebra. The group E(A,R) depends on the SE class of A.
+- **Boyle & Schmieding (2019)** — ["Strong shift equivalence and algebraic K-theory."](references/boyle-schmieding-2019-1501.04695.pdf) Shows the refinement of SE by SSE is captured by NK₁(R)/E(A,R), connecting this concrete matrix problem to deep algebra. The group E(A,R) depends on the SE class of A.
 
 ---
 
@@ -206,11 +206,11 @@ Verify against known results:
 
 - Lind, D. & Marcus, B. (2021). *An Introduction to Symbolic Dynamics and Coding* (2nd ed.). Cambridge University Press.
 - Williams, R.F. (1973). Classification of subshifts of finite type. *Annals of Mathematics*.
-- Kim, K.H. & Roush, F.W. (1999). Williams's conjecture is false for irreducible subshifts. *Annals of Mathematics*.
+- Kim, K.H. & Roush, F.W. (1999). Williams's conjecture is false for irreducible subshifts. *Annals of Mathematics*. [(pdf)](references/kim-roush-1999-math9907095.pdf)
 - Wagoner, J. (1999). Strong shift equivalence theory and the shift equivalence problem. *Bulletin of the AMS*.
-- Boyle, M. & Schmieding, S. (2019). Strong shift equivalence and algebraic K-theory. *J. Reine Angew. Math.*
-- Eilers, S. & Kiming, I. (2008). On some new invariants for strong shift equivalence for shifts of finite type. arXiv:0809.2713.
-- Carlsen, T.M., Dor-On, A. & Eilers, S. (2024). Shift equivalences through the lens of Cuntz-Krieger algebras. *Analysis & PDE*.
-- Brix, K.A. (2022). Balanced strong shift equivalence, balanced in-splits, and eventual conjugacy. *Ergodic Theory and Dynamical Systems*.
-- Brix, K.A., Dor-On, A., Hazrat, R. & Ruiz, E. (2025). Unital aligned shift equivalence and the graded classification conjecture. *Mathematische Zeitschrift*.
-- Boyle, M., Kim, K.H. & Roush, F.W. (2013). Path methods for strong shift equivalence of positive matrices. *Acta Applicandae Mathematicae*.
+- Boyle, M. & Schmieding, S. (2019). Strong shift equivalence and algebraic K-theory. *J. Reine Angew. Math.* [(pdf)](references/boyle-schmieding-2019-1501.04695.pdf)
+- Eilers, S. & Kiming, I. (2008). On some new invariants for strong shift equivalence for shifts of finite type. arXiv:0809.2713. [(pdf)](references/eilers-kiming-2008-0809.2713.pdf)
+- Carlsen, T.M., Dor-On, A. & Eilers, S. (2024). Shift equivalences through the lens of Cuntz-Krieger algebras. *Analysis & PDE*. [(pdf)](references/carlsen-doron-eilers-2024-2011.10320.pdf)
+- Brix, K.A. (2022). Balanced strong shift equivalence, balanced in-splits, and eventual conjugacy. *Ergodic Theory and Dynamical Systems*. [(pdf)](references/brix-2022-1912.05212.pdf)
+- Brix, K.A., Dor-On, A., Hazrat, R. & Ruiz, E. (2025). Unital aligned shift equivalence and the graded classification conjecture. *Mathematische Zeitschrift*. [(pdf)](references/brix-doron-hazrat-ruiz-2025-2409.03950.pdf)
+- Boyle, M., Kim, K.H. & Roush, F.W. (2013). Path methods for strong shift equivalence of positive matrices. *Acta Applicandae Mathematicae*. [(pdf)](references/boyle-kim-roush-2013-1209.5096.pdf)
