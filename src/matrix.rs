@@ -243,6 +243,93 @@ impl DynMatrix {
         }
         Some(SqMatrix::new(data))
     }
+
+    pub fn is_square(&self) -> bool {
+        self.rows == self.cols
+    }
+
+    pub fn max_entry(&self) -> u32 {
+        self.data.iter().copied().max().unwrap_or(0)
+    }
+
+    pub fn trace(&self) -> u64 {
+        assert!(self.is_square());
+        let mut sum = 0u64;
+        for i in 0..self.rows {
+            sum += self.get(i, i) as u64;
+        }
+        sum
+    }
+
+    /// Canonical form under permutation similarity for square matrices.
+    /// Returns the lexicographic minimum over all P^T * M * P for permutation matrices P.
+    pub fn canonical_perm(&self) -> Self {
+        assert!(self.is_square());
+        let n = self.rows;
+        let mut perm: Vec<usize> = (0..n).collect();
+        let mut best = self.clone();
+
+        // Generate all permutations and take the lex-min conjugate.
+        loop {
+            let conjugated = self.conjugate_by_perm(&perm);
+            if conjugated < best {
+                best = conjugated;
+            }
+            if !next_permutation(&mut perm) {
+                break;
+            }
+        }
+        best
+    }
+
+    /// Conjugate by a permutation: result[i][j] = self[perm[i]][perm[j]].
+    pub fn conjugate_by_perm(&self, perm: &[usize]) -> Self {
+        let n = self.rows;
+        let mut data = vec![0u32; n * n];
+        for i in 0..n {
+            for j in 0..n {
+                data[i * n + j] = self.get(perm[i], perm[j]);
+            }
+        }
+        Self::new(n, n, data)
+    }
+}
+
+impl Ord for DynMatrix {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.rows
+            .cmp(&other.rows)
+            .then(self.cols.cmp(&other.cols))
+            .then(self.data.cmp(&other.data))
+    }
+}
+
+impl PartialOrd for DynMatrix {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Generate next lexicographic permutation in-place. Returns false if wrapped around.
+fn next_permutation(perm: &mut [usize]) -> bool {
+    let n = perm.len();
+    if n <= 1 {
+        return false;
+    }
+    let mut i = n - 1;
+    while i > 0 && perm[i - 1] >= perm[i] {
+        i -= 1;
+    }
+    if i == 0 {
+        return false;
+    }
+    let mut j = n - 1;
+    while perm[j] <= perm[i - 1] {
+        j -= 1;
+    }
+    perm.swap(i - 1, j);
+    perm[i..].reverse();
+    true
 }
 
 #[cfg(test)]
@@ -344,5 +431,35 @@ mod tests {
         let a = SqMatrix::new([[5, 3], [2, 7]]);
         assert_eq!(a.entry_sum(), 17);
         assert_eq!(a.max_entry(), 7);
+    }
+
+    #[test]
+    fn test_dyn_canonical_matches_sq() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let dyn_a = DynMatrix::from_sq(&a);
+        let dyn_canon = dyn_a.canonical_perm();
+        let sq_canon = a.canonical();
+        assert_eq!(dyn_canon, DynMatrix::from_sq(&sq_canon));
+    }
+
+    #[test]
+    fn test_dyn_canonical_3x3() {
+        // Verify canonical form groups permutation-similar matrices.
+        let m = DynMatrix::new(3, 3, vec![0, 1, 0, 0, 0, 1, 1, 0, 0]);
+        // Conjugate by (0 1 2) -> (1 2 0)
+        let m2 = m.conjugate_by_perm(&[1, 2, 0]);
+        assert_eq!(m.canonical_perm(), m2.canonical_perm());
+    }
+
+    #[test]
+    fn test_dyn_max_entry() {
+        let m = DynMatrix::new(2, 3, vec![1, 5, 3, 2, 0, 4]);
+        assert_eq!(m.max_entry(), 5);
+    }
+
+    #[test]
+    fn test_dyn_trace() {
+        let m = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 2, 0, 0, 0, 3]);
+        assert_eq!(m.trace(), 6);
     }
 }

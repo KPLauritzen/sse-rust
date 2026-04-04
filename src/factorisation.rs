@@ -87,6 +87,393 @@ pub fn vu_product_2x2(v: &DynMatrix, u: &DynMatrix) -> SqMatrix<2> {
     vu.to_sq::<2>().expect("VU product should be 2x2")
 }
 
+// --- Nonneg integer linear system solvers ---
+
+/// Solve U·x = b where U is 2×3 (given as rows), b is 2-vector.
+/// Returns all nonneg integer 3-vectors x with entries ≤ max_entry.
+///
+/// Algorithm: find a 2×2 pivot submatrix with nonzero determinant,
+/// compute the 1D null space, find a particular solution, then enumerate
+/// the free parameter t such that x0 + t*n has all entries in [0, max_entry].
+pub fn solve_nonneg_2x3(
+    u: &[[i64; 3]; 2],
+    b: &[i64; 2],
+    max_entry: u32,
+) -> Vec<[u32; 3]> {
+    let me = max_entry as i64;
+
+    // Compute 2×2 minors: d_ij = u[0][i]*u[1][j] - u[0][j]*u[1][i]
+    let d01 = u[0][0] * u[1][1] - u[0][1] * u[1][0];
+    let d02 = u[0][0] * u[1][2] - u[0][2] * u[1][0];
+    let d12 = u[0][1] * u[1][2] - u[0][2] * u[1][1];
+
+    // Pick pivot (first nonzero minor) and determine free variable index.
+    // pivot_cols = the two columns forming the pivot submatrix
+    // free_col = the remaining column
+    let (det, pivot_cols, free_col) = if d01 != 0 {
+        (d01, [0, 1], 2)
+    } else if d02 != 0 {
+        (d02, [0, 2], 1)
+    } else if d12 != 0 {
+        (d12, [1, 2], 0)
+    } else {
+        // Rank < 2, no solutions in general (unless b is in the column space,
+        // but we skip this degenerate case).
+        return vec![];
+    };
+
+    // Null vector: for pivot columns (i, j) and free column k,
+    // the null vector is n[i] = cofactor_i, n[j] = cofactor_j, n[k] = det.
+    // Specifically, if pivot is columns (p0, p1) with det d:
+    //   n[free] = d (or -d, we'll choose sign for convenience)
+    //   n[p0] = -(u[0][free]*u[1][p1] - u[0][p1]*u[1][free])
+    //   n[p1] = u[0][free]*u[1][p0] - u[0][p0]*u[1][free]
+    // But more directly, the null vector of [[a,b,c],[d,e,f]] is:
+    //   (bf-ce, cd-af, ae-bd) = (d12, -d02, d01) (up to sign).
+    // This is always valid regardless of pivot choice.
+    let null = [d12, -d02, d01];
+
+    // Particular solution: solve the 2×2 pivot system with free variable = 0.
+    // pivot system: u[r][pivot_cols[0]]*x[p0] + u[r][pivot_cols[1]]*x[p1] = b[r]
+    let p0 = pivot_cols[0];
+    let p1 = pivot_cols[1];
+
+    // x[p0] = (b[0]*u[1][p1] - b[1]*u[0][p1]) / det
+    // x[p1] = (b[1]*u[0][p0] - b[0]*u[1][p0]) / det
+    let xp0_num = b[0] * u[1][p1] - b[1] * u[0][p1];
+    let xp1_num = b[1] * u[0][p0] - b[0] * u[1][p0];
+
+    if xp0_num % det != 0 || xp1_num % det != 0 {
+        return vec![];
+    }
+
+    let mut x0 = [0i64; 3];
+    x0[p0] = xp0_num / det;
+    x0[p1] = xp1_num / det;
+    x0[free_col] = 0;
+
+    // General solution: x = x0 + t * null (for integer t).
+    // But null might not be primitive — divide by gcd for finer enumeration.
+    let g = gcd3(null[0].unsigned_abs(), null[1].unsigned_abs(), null[2].unsigned_abs());
+    if g == 0 {
+        // Null vector is zero — unique solution, just check bounds.
+        if x0.iter().all(|&v| v >= 0 && v <= me) {
+            return vec![[x0[0] as u32, x0[1] as u32, x0[2] as u32]];
+        }
+        return vec![];
+    }
+    let n = [null[0] / g as i64, null[1] / g as i64, null[2] / g as i64];
+
+    // Find the range of t such that 0 <= x0[i] + t*n[i] <= max_entry for all i.
+    let mut t_min = i64::MIN;
+    let mut t_max = i64::MAX;
+
+    for i in 0..3 {
+        if n[i] == 0 {
+            // x0[i] must be in [0, me] on its own.
+            if x0[i] < 0 || x0[i] > me {
+                return vec![];
+            }
+        } else if n[i] > 0 {
+            // t >= ceil(-x0[i] / n[i]) and t <= floor((me - x0[i]) / n[i])
+            let lo = div_ceil(-x0[i], n[i]);
+            let hi = div_floor(me - x0[i], n[i]);
+            t_min = t_min.max(lo);
+            t_max = t_max.min(hi);
+        } else {
+            // n[i] < 0
+            let lo = div_ceil(me - x0[i], n[i]); // dividing by negative flips
+            let hi = div_floor(-x0[i], n[i]);
+            t_min = t_min.max(lo);
+            t_max = t_max.min(hi);
+        }
+    }
+
+    let mut results = Vec::new();
+    if t_min > t_max {
+        return results;
+    }
+
+    for t in t_min..=t_max {
+        let x = [
+            (x0[0] + t * n[0]) as u32,
+            (x0[1] + t * n[1]) as u32,
+            (x0[2] + t * n[2]) as u32,
+        ];
+        results.push(x);
+    }
+    results
+}
+
+/// Solve U·x = b where U is 3×2 (given as rows), b is 3-vector.
+/// Returns the unique nonneg integer 2-vector x with entries ≤ max_entry, if it exists.
+///
+/// Overdetermined system: pick a 2×2 submatrix, solve, verify the third equation.
+pub fn solve_overdetermined_3x2(
+    u: &[[i64; 2]; 3],
+    b: &[i64; 3],
+    max_entry: u32,
+) -> Option<[u32; 2]> {
+    let me = max_entry as i64;
+
+    // Try each pair of rows as pivot.
+    let row_pairs = [(0, 1, 2), (0, 2, 1), (1, 2, 0)];
+    for &(r0, r1, r_check) in &row_pairs {
+        let det = u[r0][0] * u[r1][1] - u[r0][1] * u[r1][0];
+        if det == 0 {
+            continue;
+        }
+
+        let x0_num = b[r0] * u[r1][1] - b[r1] * u[r0][1];
+        let x1_num = b[r1] * u[r0][0] - b[r0] * u[r1][0];
+
+        if x0_num % det != 0 || x1_num % det != 0 {
+            return None;
+        }
+
+        let x0 = x0_num / det;
+        let x1 = x1_num / det;
+
+        // Verify third equation.
+        if u[r_check][0] * x0 + u[r_check][1] * x1 != b[r_check] {
+            return None;
+        }
+
+        if x0 >= 0 && x0 <= me && x1 >= 0 && x1 <= me {
+            return Some([x0 as u32, x1 as u32]);
+        }
+        return None;
+    }
+
+    // All 2×2 submatrices are singular. Check if b is in the column space
+    // and there's a nonneg solution. This is rare; skip for now.
+    None
+}
+
+// --- Rectangular factorisation enumerators ---
+
+/// Enumerate all factorisations A = UV where U is 2×3, V is 3×2,
+/// with all entries in 0..=max_entry.
+pub fn enumerate_rect_factorisations_2x3(
+    a: &SqMatrix<2>,
+    max_entry: u32,
+) -> Vec<(DynMatrix, DynMatrix)> {
+    let mut results = Vec::new();
+    let me = max_entry;
+    let a_cols: [[i64; 2]; 2] = [
+        [a.data[0][0] as i64, a.data[1][0] as i64],
+        [a.data[0][1] as i64, a.data[1][1] as i64],
+    ];
+
+    for u00 in 0..=me {
+        for u01 in 0..=me {
+            for u02 in 0..=me {
+                for u10 in 0..=me {
+                    for u11 in 0..=me {
+                        for u12 in 0..=me {
+                            let u_rows: [[i64; 3]; 2] = [
+                                [u00 as i64, u01 as i64, u02 as i64],
+                                [u10 as i64, u11 as i64, u12 as i64],
+                            ];
+
+                            // Quick rank check: all 2x2 minors zero → rank < 2.
+                            let d01 = u_rows[0][0] * u_rows[1][1]
+                                - u_rows[0][1] * u_rows[1][0];
+                            let d02 = u_rows[0][0] * u_rows[1][2]
+                                - u_rows[0][2] * u_rows[1][0];
+                            let d12 = u_rows[0][1] * u_rows[1][2]
+                                - u_rows[0][2] * u_rows[1][1];
+                            if d01 == 0 && d02 == 0 && d12 == 0 {
+                                continue;
+                            }
+
+                            // Solve for each column of V.
+                            let col0_solutions =
+                                solve_nonneg_2x3(&u_rows, &a_cols[0], max_entry);
+                            if col0_solutions.is_empty() {
+                                continue;
+                            }
+                            let col1_solutions =
+                                solve_nonneg_2x3(&u_rows, &a_cols[1], max_entry);
+                            if col1_solutions.is_empty() {
+                                continue;
+                            }
+
+                            // Cartesian product of column solutions.
+                            let u_mat = DynMatrix::new(
+                                2,
+                                3,
+                                vec![u00, u01, u02, u10, u11, u12],
+                            );
+                            for vc0 in &col0_solutions {
+                                for vc1 in &col1_solutions {
+                                    let v_mat = DynMatrix::new(
+                                        3,
+                                        2,
+                                        vec![
+                                            vc0[0], vc1[0], vc0[1], vc1[1], vc0[2],
+                                            vc1[2],
+                                        ],
+                                    );
+                                    results.push((u_mat.clone(), v_mat));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
+/// Enumerate all factorisations C = UV where C is 3×3, U is 3×2, V is 2×3,
+/// with all entries in 0..=max_entry.
+pub fn enumerate_factorisations_3x3_to_2(
+    c: &DynMatrix,
+    max_entry: u32,
+) -> Vec<(DynMatrix, DynMatrix)> {
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+    let mut results = Vec::new();
+    let me = max_entry;
+
+    // Extract columns of C as 3-vectors.
+    let c_cols: [[i64; 3]; 3] = [
+        [c.get(0, 0) as i64, c.get(1, 0) as i64, c.get(2, 0) as i64],
+        [c.get(0, 1) as i64, c.get(1, 1) as i64, c.get(2, 1) as i64],
+        [c.get(0, 2) as i64, c.get(1, 2) as i64, c.get(2, 2) as i64],
+    ];
+
+    for u00 in 0..=me {
+        for u01 in 0..=me {
+            for u10 in 0..=me {
+                for u11 in 0..=me {
+                    for u20 in 0..=me {
+                        for u21 in 0..=me {
+                            let u_rows: [[i64; 2]; 3] = [
+                                [u00 as i64, u01 as i64],
+                                [u10 as i64, u11 as i64],
+                                [u20 as i64, u21 as i64],
+                            ];
+
+                            // Quick rank check: at least one 2×2 minor nonzero.
+                            let d01 = u_rows[0][0] * u_rows[1][1]
+                                - u_rows[0][1] * u_rows[1][0];
+                            let d02 = u_rows[0][0] * u_rows[2][1]
+                                - u_rows[0][1] * u_rows[2][0];
+                            let d12 = u_rows[1][0] * u_rows[2][1]
+                                - u_rows[1][1] * u_rows[2][0];
+                            if d01 == 0 && d02 == 0 && d12 == 0 {
+                                continue;
+                            }
+
+                            // Solve for each column of V (overdetermined: 3 eqns, 2 unknowns).
+                            let v0 =
+                                match solve_overdetermined_3x2(&u_rows, &c_cols[0], max_entry) {
+                                    Some(v) => v,
+                                    None => continue,
+                                };
+                            let v1 =
+                                match solve_overdetermined_3x2(&u_rows, &c_cols[1], max_entry) {
+                                    Some(v) => v,
+                                    None => continue,
+                                };
+                            let v2 =
+                                match solve_overdetermined_3x2(&u_rows, &c_cols[2], max_entry) {
+                                    Some(v) => v,
+                                    None => continue,
+                                };
+
+                            let u_mat = DynMatrix::new(
+                                3,
+                                2,
+                                vec![u00, u01, u10, u11, u20, u21],
+                            );
+                            let v_mat = DynMatrix::new(
+                                2,
+                                3,
+                                vec![v0[0], v1[0], v2[0], v0[1], v1[1], v2[1]],
+                            );
+                            results.push((u_mat, v_mat));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
+/// Unified factorisation dispatcher for any square matrix (given as DynMatrix).
+/// Enumerates factorisations A = UV for intermediate dimensions m = 2, ..., max_intermediate_dim.
+/// For k×k input:
+///   - k=2, m=2: square factorisations
+///   - k=2, m=3: rectangular 2×3 × 3×2
+///   - k=3, m=2: rectangular 3×2 × 2×3 (the return trip)
+///   - k=3, m=3: skipped (too expensive)
+pub fn enumerate_all_factorisations(
+    a: &DynMatrix,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+) -> Vec<(DynMatrix, DynMatrix)> {
+    assert!(a.is_square());
+    let k = a.rows;
+    let mut results = Vec::new();
+
+    if k == 2 {
+        // Square factorisations (m=2).
+        let sq: SqMatrix<2> = a.to_sq().unwrap();
+        results.extend(enumerate_square_factorisations_2x2(&sq, max_entry));
+
+        // Rectangular factorisations for m=3..=max_intermediate_dim.
+        if max_intermediate_dim >= 3 {
+            results.extend(enumerate_rect_factorisations_2x3(&sq, max_entry));
+        }
+    } else if k == 3 {
+        // Only rectangular to dimension 2 (the return trip). Skip square 3×3.
+        results.extend(enumerate_factorisations_3x3_to_2(a, max_entry));
+    }
+
+    results
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let (mut a, mut b) = (a, b);
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+fn gcd3(a: u64, b: u64, c: u64) -> u64 {
+    gcd(gcd(a, b), c)
+}
+
+/// Integer division rounding towards negative infinity.
+fn div_floor(a: i64, b: i64) -> i64 {
+    let d = a / b;
+    let r = a % b;
+    if (r != 0) && ((r ^ b) < 0) {
+        d - 1
+    } else {
+        d
+    }
+}
+
+/// Integer division rounding towards positive infinity.
+fn div_ceil(a: i64, b: i64) -> i64 {
+    let d = a / b;
+    let r = a % b;
+    if (r != 0) && ((r ^ b) > 0) {
+        d + 1
+    } else {
+        d
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +524,145 @@ mod tests {
         let v = DynMatrix::new(2, 2, vec![1, 0, 1, 1]);
         let vu = vu_product_2x2(&v, &u);
         assert_eq!(vu, SqMatrix::new([[1, 1], [1, 2]]));
+    }
+
+    // --- Solver tests ---
+
+    #[test]
+    fn test_solve_nonneg_2x3_basic() {
+        // U = [[1,0,1],[0,1,1]], b = [3,2]
+        // Solutions: x0 + t*n where Ux=b
+        // Null vector of U: (1,1,-1) (up to sign)
+        let u = [[1, 0, 1], [0, 1, 1]];
+        let b = [3, 2];
+        let solutions = solve_nonneg_2x3(&u, &b, 10);
+        assert!(!solutions.is_empty());
+        for x in &solutions {
+            let check0 = u[0][0] * x[0] as i64 + u[0][1] * x[1] as i64 + u[0][2] * x[2] as i64;
+            let check1 = u[1][0] * x[0] as i64 + u[1][1] * x[1] as i64 + u[1][2] * x[2] as i64;
+            assert_eq!(check0, b[0], "Failed for x={:?}", x);
+            assert_eq!(check1, b[1], "Failed for x={:?}", x);
+        }
+    }
+
+    #[test]
+    fn test_solve_nonneg_2x3_no_solution() {
+        // U = [[1,0,0],[0,1,0]], b = [1,1]
+        // Null vector: (0,0,1). Particular solution: (1,1,0).
+        // But solutions are (1,1,t) for t>=0. This should have solutions.
+        let u = [[1, 0, 0], [0, 1, 0]];
+        let b = [1, 1];
+        let solutions = solve_nonneg_2x3(&u, &b, 5);
+        assert_eq!(solutions.len(), 6); // t = 0,1,2,3,4,5
+        assert_eq!(solutions[0], [1, 1, 0]);
+        assert_eq!(solutions[5], [1, 1, 5]);
+    }
+
+    #[test]
+    fn test_solve_nonneg_2x3_rank_deficient() {
+        // Both rows identical → rank 1 → no solutions returned.
+        let u = [[1, 2, 3], [1, 2, 3]];
+        let b = [6, 7]; // inconsistent
+        let solutions = solve_nonneg_2x3(&u, &b, 10);
+        assert!(solutions.is_empty());
+    }
+
+    #[test]
+    fn test_solve_overdetermined_3x2_basic() {
+        // U = [[1,0],[0,1],[1,1]], b = [2,3,5]
+        // x = [2,3], check: 1*2+0*3=2, 0*2+1*3=3, 1*2+1*3=5. ✓
+        let u = [[1, 0], [0, 1], [1, 1]];
+        let b = [2, 3, 5];
+        let result = solve_overdetermined_3x2(&u, &b, 10);
+        assert_eq!(result, Some([2, 3]));
+    }
+
+    #[test]
+    fn test_solve_overdetermined_3x2_inconsistent() {
+        // U = [[1,0],[0,1],[1,1]], b = [2,3,6]
+        // x = [2,3] but 2+3=5≠6 → inconsistent.
+        let u = [[1, 0], [0, 1], [1, 1]];
+        let b = [2, 3, 6];
+        let result = solve_overdetermined_3x2(&u, &b, 10);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_solve_overdetermined_3x2_negative() {
+        // Solution would be negative.
+        let u = [[1, 0], [0, 1], [1, 1]];
+        let b = [-1, 3, 2];
+        let result = solve_overdetermined_3x2(&u, &b, 10);
+        assert_eq!(result, None);
+    }
+
+    // --- Rectangular factorisation tests ---
+
+    #[test]
+    fn test_rect_factorisations_verify_product() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let facts = enumerate_rect_factorisations_2x3(&a, 3);
+        assert!(!facts.is_empty(), "Should find at least one rectangular factorisation");
+        for (u, v) in &facts {
+            assert_eq!(u.rows, 2);
+            assert_eq!(u.cols, 3);
+            assert_eq!(v.rows, 3);
+            assert_eq!(v.cols, 2);
+            let uv = u.mul(v);
+            assert_eq!(uv, DynMatrix::from_sq(&a), "UV != A for U={:?}, V={:?}", u, v);
+        }
+    }
+
+    #[test]
+    fn test_rect_factorisations_known() {
+        // [[2,1],[1,1]] = [[1,1,0],[0,0,1]] * [[1,0],[1,0],[1,1]]
+        // Check: [[1*1+1*1+0*1, 1*0+1*0+0*1],[0*1+0*1+1*1, 0*0+0*0+1*1]] = [[2,0],[1,1]]
+        // Hmm that doesn't work. Let me construct a valid one:
+        // U = [[1,0,1],[0,1,0]], V = [[1,0],[1,1],[1,1]]
+        // UV = [[1+0+1, 0+0+1],[0+1+0, 0+1+0]] = [[2,1],[1,1]] ✓
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let facts = enumerate_rect_factorisations_2x3(&a, 3);
+        let u_expected = DynMatrix::new(2, 3, vec![1, 0, 1, 0, 1, 0]);
+        let v_expected = DynMatrix::new(3, 2, vec![1, 0, 1, 1, 1, 1]);
+        assert!(
+            facts.contains(&(u_expected, v_expected)),
+            "Expected rectangular factorisation not found"
+        );
+    }
+
+    #[test]
+    fn test_3x3_to_2_verify_product() {
+        // Create a 3×3 matrix that factors as (3×2)(2×3).
+        let u = DynMatrix::new(3, 2, vec![1, 0, 0, 1, 1, 1]);
+        let v = DynMatrix::new(2, 3, vec![1, 0, 1, 0, 1, 1]);
+        let c = u.mul(&v);
+        // c = [[1,0,1],[0,1,1],[1,1,2]]
+
+        let facts = enumerate_factorisations_3x3_to_2(&c, 5);
+        assert!(!facts.is_empty(), "Should find at least one factorisation");
+        for (u_found, v_found) in &facts {
+            assert_eq!(u_found.rows, 3);
+            assert_eq!(u_found.cols, 2);
+            assert_eq!(v_found.rows, 2);
+            assert_eq!(v_found.cols, 3);
+            let product = u_found.mul(v_found);
+            assert_eq!(product, c, "UV != C for U={:?}, V={:?}", u_found, v_found);
+        }
+    }
+
+    #[test]
+    fn test_enumerate_all_2x2() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let facts = enumerate_all_factorisations(&a_dyn, 3, 3);
+        // Should include both square and rectangular factorisations.
+        let has_square = facts.iter().any(|(u, _)| u.cols == 2);
+        let has_rect = facts.iter().any(|(u, _)| u.cols == 3);
+        assert!(has_square, "Should include square factorisations");
+        assert!(has_rect, "Should include rectangular factorisations");
+        for (u, v) in &facts {
+            let uv = u.mul(v);
+            assert_eq!(uv, a_dyn, "UV != A");
+        }
     }
 }
