@@ -1,5 +1,8 @@
 use crate::matrix::{DynMatrix, SqMatrix};
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 /// Enumerate all 2x2 nonneg integer factorisations A = UV where U and V are 2x2
 /// with entries in 0..=max_entry and det(U) > 0.
 ///
@@ -261,7 +264,6 @@ pub fn enumerate_rect_factorisations_2x3(
     a: &SqMatrix<2>,
     max_entry: u32,
 ) -> Vec<(DynMatrix, DynMatrix)> {
-    let mut results = Vec::new();
     let me = max_entry;
     let a_cols: [[i64; 2]; 2] = [
         [a.data[0][0] as i64, a.data[1][0] as i64],
@@ -275,6 +277,7 @@ pub fn enumerate_rect_factorisations_2x3(
     let min_row_sum_0 = ((max_a_row0 + me as u64 - 1) / me as u64) as u32;
     let min_row_sum_1 = ((max_a_row1 + me as u64 - 1) / me as u64) as u32;
 
+    let mut valid_row0s = Vec::new();
     for u00 in 0..=me {
         for u01 in 0..=me {
             for u02 in 0..=me {
@@ -295,66 +298,114 @@ pub fn enumerate_rect_factorisations_2x3(
                     continue;
                 }
 
-                for u10 in 0..=me {
-                    for u11 in 0..=me {
-                        for u12 in 0..=me {
-                            let row1_sum = u10 + u11 + u12;
-                            if row1_sum < min_row_sum_1 {
-                                continue;
-                            }
-                            if row1_sum == 0 && (a.data[1][0] > 0 || a.data[1][1] > 0) {
-                                continue;
-                            }
+                valid_row0s.push([u00, u01, u02]);
+            }
+        }
+    }
 
-                            // Constraint propagation: gcd(row1) must divide every A[1,j].
-                            let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
-                            if g1 > 1
-                                && (a.data[1][0] as u64 % g1 != 0 || a.data[1][1] as u64 % g1 != 0)
-                            {
-                                continue;
-                            }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
+            .par_iter()
+            .map(|&row0| {
+                enumerate_rect_factorisations_2x3_from_row0(
+                    row0,
+                    &a_cols,
+                    a,
+                    max_entry,
+                    min_row_sum_1,
+                )
+            })
+            .collect();
+        let total = per_row0.iter().map(Vec::len).sum();
+        let mut results = Vec::with_capacity(total);
+        for row_results in per_row0 {
+            results.extend(row_results);
+        }
+        results
+    }
 
-                            let u_rows: [[i64; 3]; 2] = [
-                                [u00 as i64, u01 as i64, u02 as i64],
-                                [u10 as i64, u11 as i64, u12 as i64],
-                            ];
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut results = Vec::new();
+        for row0 in valid_row0s {
+            results.extend(enumerate_rect_factorisations_2x3_from_row0(
+                row0,
+                &a_cols,
+                a,
+                max_entry,
+                min_row_sum_1,
+            ));
+        }
+        results
+    }
+}
 
-                            // Quick rank check: all 2x2 minors zero → rank < 2.
-                            let d01 = u_rows[0][0] * u_rows[1][1] - u_rows[0][1] * u_rows[1][0];
-                            let d02 = u_rows[0][0] * u_rows[1][2] - u_rows[0][2] * u_rows[1][0];
-                            let d12 = u_rows[0][1] * u_rows[1][2] - u_rows[0][2] * u_rows[1][1];
-                            if d01 == 0 && d02 == 0 && d12 == 0 {
-                                continue;
-                            }
+fn enumerate_rect_factorisations_2x3_from_row0(
+    row0: [u32; 3],
+    a_cols: &[[i64; 2]; 2],
+    a: &SqMatrix<2>,
+    max_entry: u32,
+    min_row_sum_1: u32,
+) -> Vec<(DynMatrix, DynMatrix)> {
+    let [u00, u01, u02] = row0;
+    let me = max_entry;
+    let mut results = Vec::new();
 
-                            // Solve for each column of V.
-                            let col0_solutions = solve_nonneg_2x3(&u_rows, &a_cols[0], max_entry);
-                            if col0_solutions.is_empty() {
-                                continue;
-                            }
-                            let col1_solutions = solve_nonneg_2x3(&u_rows, &a_cols[1], max_entry);
-                            if col1_solutions.is_empty() {
-                                continue;
-                            }
+    for u10 in 0..=me {
+        for u11 in 0..=me {
+            for u12 in 0..=me {
+                let row1_sum = u10 + u11 + u12;
+                if row1_sum < min_row_sum_1 {
+                    continue;
+                }
+                if row1_sum == 0 && (a.data[1][0] > 0 || a.data[1][1] > 0) {
+                    continue;
+                }
 
-                            // Cartesian product of column solutions.
-                            let u_mat = DynMatrix::new(2, 3, vec![u00, u01, u02, u10, u11, u12]);
-                            for vc0 in &col0_solutions {
-                                for vc1 in &col1_solutions {
-                                    let v_mat = DynMatrix::new(
-                                        3,
-                                        2,
-                                        vec![vc0[0], vc1[0], vc0[1], vc1[1], vc0[2], vc1[2]],
-                                    );
-                                    results.push((u_mat.clone(), v_mat));
-                                }
-                            }
-                        }
+                // Constraint propagation: gcd(row1) must divide every A[1,j].
+                let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
+                if g1 > 1 && (a.data[1][0] as u64 % g1 != 0 || a.data[1][1] as u64 % g1 != 0) {
+                    continue;
+                }
+
+                let u_rows: [[i64; 3]; 2] = [
+                    [u00 as i64, u01 as i64, u02 as i64],
+                    [u10 as i64, u11 as i64, u12 as i64],
+                ];
+
+                // Quick rank check: all 2x2 minors zero -> rank < 2.
+                let d01 = u_rows[0][0] * u_rows[1][1] - u_rows[0][1] * u_rows[1][0];
+                let d02 = u_rows[0][0] * u_rows[1][2] - u_rows[0][2] * u_rows[1][0];
+                let d12 = u_rows[0][1] * u_rows[1][2] - u_rows[0][2] * u_rows[1][1];
+                if d01 == 0 && d02 == 0 && d12 == 0 {
+                    continue;
+                }
+
+                let col0_solutions = solve_nonneg_2x3(&u_rows, &a_cols[0], max_entry);
+                if col0_solutions.is_empty() {
+                    continue;
+                }
+                let col1_solutions = solve_nonneg_2x3(&u_rows, &a_cols[1], max_entry);
+                if col1_solutions.is_empty() {
+                    continue;
+                }
+
+                let u_mat = DynMatrix::new(2, 3, vec![u00, u01, u02, u10, u11, u12]);
+                for vc0 in &col0_solutions {
+                    for vc1 in &col1_solutions {
+                        let v_mat = DynMatrix::new(
+                            3,
+                            2,
+                            vec![vc0[0], vc1[0], vc0[1], vc1[1], vc0[2], vc1[2]],
+                        );
+                        results.push((u_mat.clone(), v_mat));
                     }
                 }
             }
         }
     }
+
     results
 }
 
