@@ -97,6 +97,22 @@ pub fn enumerate_same_future_insplits_2x2_to_3x3(
     enumerate_same_future_insplits(&DynMatrix::from_sq(a))
 }
 
+/// Enumerate one-step out-splits whose output has two vertices with the same past,
+/// i.e. two equal columns in the refined adjacency matrix.
+pub fn enumerate_same_past_outsplits(a: &DynMatrix) -> Vec<OutsplitWitness> {
+    enumerate_one_step_outsplits(a)
+        .into_iter()
+        .filter(|witness| has_duplicate_columns(&witness.outsplit))
+        .collect()
+}
+
+/// Enumerate all one-step 2x2 -> 3x3 same-past out-splits.
+pub fn enumerate_same_past_outsplits_2x2_to_3x3(
+    a: &SqMatrix<2>,
+) -> Vec<OutsplitWitness2x2To3x3> {
+    enumerate_same_past_outsplits(&DynMatrix::from_sq(a))
+}
+
 /// Enumerate all canonical one-step split refinements, allowing either split direction.
 pub fn enumerate_one_step_split_refinements(a: &DynMatrix) -> Vec<DynMatrix> {
     let mut seen = HashSet::new();
@@ -209,6 +225,18 @@ fn has_duplicate_rows(a: &DynMatrix) -> bool {
     for i in 0..a.rows {
         for j in i + 1..a.rows {
             let equal = (0..a.cols).all(|col| a.get(i, col) == a.get(j, col));
+            if equal {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn has_duplicate_columns(a: &DynMatrix) -> bool {
+    for i in 0..a.cols {
+        for j in i + 1..a.cols {
+            let equal = (0..a.rows).all(|row| a.get(row, i) == a.get(row, j));
             if equal {
                 return true;
             }
@@ -427,6 +455,17 @@ mod tests {
         for witness in &witnesses {
             assert_eq!(witness.edge.mul(&witness.division), DynMatrix::from_sq(&a));
             assert!(has_duplicate_rows(&witness.outsplit));
+        }
+    }
+
+    #[test]
+    fn test_enumerate_same_past_outsplits_2x2_to_3x3_nonempty() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let witnesses = enumerate_same_past_outsplits_2x2_to_3x3(&a);
+        assert!(!witnesses.is_empty());
+        for witness in &witnesses {
+            assert_eq!(witness.division.mul(&witness.edge), DynMatrix::from_sq(&a));
+            assert!(has_duplicate_columns(&witness.outsplit));
         }
     }
 
