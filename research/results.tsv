@@ -8,3 +8,5 @@ commit	required_passes	required_total	target_hits	total_points	total_ms	status	d
 6d60073	6	6	5	825	80	kept	Deduplicated canonical successors across each full frontier layer; same score with much lower duplicate work on Brix-Ruiz telemetry
 e16edbf	6	6	5	825	129	rejected	Added bounded 3x3 same-size moves via cached identity splits; huge factorisation blow-up with no new Brix-Ruiz nodes
 e16edbf	6	6	5	825	111	rejected	Deduplicated factorisation outputs by VU inside the dispatcher; fewer factors but slower overall due extra multiplication cost
+1672ada	6	6	5	825	65	kept	Specialized 2x2 and 3x3 permutation canonicalization in the search hot loop; same score with faster warm harness runtime
+1672ada	6	6	5	825	64	kept	Optimized small-matrix multiplication to use row slices and zero-skips; same score with a slightly faster warm harness run

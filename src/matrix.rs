@@ -216,10 +216,17 @@ impl DynMatrix {
         assert_eq!(self.cols, other.rows);
         let mut result = vec![0u32; self.rows * other.cols];
         for i in 0..self.rows {
+            let self_row = &self.data[i * self.cols..(i + 1) * self.cols];
+            let result_row = &mut result[i * other.cols..(i + 1) * other.cols];
             for k in 0..self.cols {
-                let a = self.get(i, k) as u64;
+                let a = self_row[k];
+                if a == 0 {
+                    continue;
+                }
+                let other_row = &other.data[k * other.cols..(k + 1) * other.cols];
+                let a = a as u64;
                 for j in 0..other.cols {
-                    result[i * other.cols + j] += (a * other.get(k, j) as u64) as u32;
+                    result_row[j] += (a * other_row[j] as u64) as u32;
                 }
             }
         }
@@ -301,21 +308,74 @@ impl DynMatrix {
     /// Returns the lexicographic minimum over all P^T * M * P for permutation matrices P.
     pub fn canonical_perm(&self) -> Self {
         assert!(self.is_square());
-        let n = self.rows;
-        let mut perm: Vec<usize> = (0..n).collect();
-        let mut best = self.clone();
+        match self.rows {
+            2 => self.canonical_perm_2x2(),
+            3 => self.canonical_perm_3x3(),
+            n => {
+                let mut perm: Vec<usize> = (0..n).collect();
+                let mut best = self.clone();
 
-        // Generate all permutations and take the lex-min conjugate.
-        loop {
-            let conjugated = self.conjugate_by_perm(&perm);
-            if conjugated < best {
-                best = conjugated;
-            }
-            if !next_permutation(&mut perm) {
-                break;
+                // Generate all permutations and take the lex-min conjugate.
+                loop {
+                    let conjugated = self.conjugate_by_perm(&perm);
+                    if conjugated < best {
+                        best = conjugated;
+                    }
+                    if !next_permutation(&mut perm) {
+                        break;
+                    }
+                }
+                best
             }
         }
-        best
+    }
+
+    fn canonical_perm_2x2(&self) -> Self {
+        debug_assert_eq!(self.rows, 2);
+        debug_assert_eq!(self.cols, 2);
+        let swapped = DynMatrix::new(
+            2,
+            2,
+            vec![self.get(1, 1), self.get(1, 0), self.get(0, 1), self.get(0, 0)],
+        );
+        if swapped < *self {
+            swapped
+        } else {
+            self.clone()
+        }
+    }
+
+    fn canonical_perm_3x3(&self) -> Self {
+        debug_assert_eq!(self.rows, 3);
+        debug_assert_eq!(self.cols, 3);
+
+        const PERMS: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+
+        let mut best_data = self.data.clone();
+        for perm in PERMS.iter().skip(1) {
+            let candidate = vec![
+                self.get(perm[0], perm[0]),
+                self.get(perm[0], perm[1]),
+                self.get(perm[0], perm[2]),
+                self.get(perm[1], perm[0]),
+                self.get(perm[1], perm[1]),
+                self.get(perm[1], perm[2]),
+                self.get(perm[2], perm[0]),
+                self.get(perm[2], perm[1]),
+                self.get(perm[2], perm[2]),
+            ];
+            if candidate < best_data {
+                best_data = candidate;
+            }
+        }
+        DynMatrix::new(3, 3, best_data)
     }
 
     /// Conjugate by a permutation: result[i][j] = self[perm[i]][perm[j]].

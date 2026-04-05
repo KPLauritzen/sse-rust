@@ -66,6 +66,8 @@ just research-json
 
 ## Experiment Loop
 
+LOOP FOREVER
+
 1. Inspect git state.
 2. Make one focused search improvement.
 3. Run `cargo test -q`.
@@ -79,6 +81,12 @@ Use it to identify whether the current bottleneck is frontier growth, factorisat
 Do not treat raw runtime alone as the optimisation target.
 `unknown` is only acceptable for `brix_ruiz_k3`; treat it as a regression for the other cases.
 Zero telemetry on some easy cases is expected when they exit through a shortcut or invariant check before BFS.
+
+Make sure to commit on changes that you want to keep. 
+
+The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
+
+NEVER STOP: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working indefinitely until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
 
 ## Known Constraints
 
