@@ -116,6 +116,20 @@ pub fn search_sse_2x2(
     SseResult::Unknown
 }
 
+/// Create a permutation similarity step: given matrices M and M' = PMP
+/// where P is the swap permutation, return an EsseStep with U = MP, V = P
+/// so that UV = M and VU = M'.
+fn permutation_step(m: &DynMatrix) -> EsseStep {
+    let n = m.rows;
+    let mut p_data = vec![0u32; n * n];
+    for i in 0..n {
+        p_data[i * n + (n - 1 - i)] = 1;
+    }
+    let p = DynMatrix::new(n, n, p_data);
+    let mp = m.mul(&p);
+    EsseStep { u: mp, v: p }
+}
+
 fn reconstruct_path(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
@@ -127,7 +141,7 @@ fn reconstruct_path(
     let mut dyn_matrices_rev = Vec::new();
 
     let mut current = target_canon.clone();
-    dyn_matrices_rev.push(DynMatrix::from_sq(b));
+    dyn_matrices_rev.push(canonical_to_original[&current].clone());
 
     while let Some(Some((prev, step))) = parent.get(&current) {
         steps_rev.push(step.clone());
@@ -138,11 +152,25 @@ fn reconstruct_path(
     steps_rev.reverse();
     dyn_matrices_rev.reverse();
 
-    // Fix the first and last to be exactly a and b.
-    *dyn_matrices_rev.first_mut().unwrap() = DynMatrix::from_sq(a);
-    *dyn_matrices_rev.last_mut().unwrap() = DynMatrix::from_sq(b);
+    let a_dyn = DynMatrix::from_sq(a);
+    let b_dyn = DynMatrix::from_sq(b);
 
-    // Convert the 2×2 endpoints to SqMatrix<2> for the path.
+    // If the BFS start node differs from `a` (due to canonicalisation),
+    // prepend a permutation step: a -> canonical(a).
+    if *dyn_matrices_rev.first().unwrap() != a_dyn {
+        steps_rev.insert(0, permutation_step(&a_dyn));
+        dyn_matrices_rev.insert(0, a_dyn);
+    }
+
+    // If the BFS end node differs from `b` (due to canonicalisation),
+    // append a permutation step: canonical(b) -> b.
+    if *dyn_matrices_rev.last().unwrap() != b_dyn {
+        let last = dyn_matrices_rev.last().unwrap().clone();
+        steps_rev.push(permutation_step(&last));
+        dyn_matrices_rev.push(b_dyn);
+    }
+
+    // Convert the 2×2 nodes to SqMatrix<2> for the path.
     // Intermediate nodes may be larger (3×3, etc.) but SsePath only stores
     // the 2×2 start and end in its matrices field.
     let mut sq_matrices = Vec::new();

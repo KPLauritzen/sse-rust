@@ -3,3 +3,4 @@ pub mod invariants;
 pub mod matrix;
 pub mod search;
 pub mod types;
+pub mod wasm;
