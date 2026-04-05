@@ -288,6 +288,15 @@ pub fn enumerate_rect_factorisations_2x3(
                     continue;
                 }
 
+                // Constraint propagation: for U·x = A[:,j] to have a nonneg integer
+                // solution, gcd(row0) must divide every A[0,j].
+                let g0 = gcd3(u00 as u64, u01 as u64, u02 as u64);
+                if g0 > 1
+                    && (a.data[0][0] as u64 % g0 != 0 || a.data[0][1] as u64 % g0 != 0)
+                {
+                    continue;
+                }
+
                 for u10 in 0..=me {
                     for u11 in 0..=me {
                         for u12 in 0..=me {
@@ -298,6 +307,16 @@ pub fn enumerate_rect_factorisations_2x3(
                             if row1_sum == 0 && (a.data[1][0] > 0 || a.data[1][1] > 0) {
                                 continue;
                             }
+
+                            // Constraint propagation: gcd(row1) must divide every A[1,j].
+                            let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
+                            if g1 > 1
+                                && (a.data[1][0] as u64 % g1 != 0
+                                    || a.data[1][1] as u64 % g1 != 0)
+                            {
+                                continue;
+                            }
+
                             let u_rows: [[i64; 3]; 2] = [
                                 [u00 as i64, u01 as i64, u02 as i64],
                                 [u10 as i64, u11 as i64, u12 as i64],
@@ -352,8 +371,9 @@ pub fn enumerate_factorisations_3x3_to_2(
     assert_eq!(c.cols, 3);
     let mut results = Vec::new();
     let me = max_entry;
+    let me_i64 = max_entry as i64;
 
-    // Extract columns of C as 3-vectors.
+    // c_cols[j][i] = C[i, j]  (column-major view for the solvers).
     let c_cols: [[i64; 3]; 3] = [
         [c.get(0, 0) as i64, c.get(1, 0) as i64, c.get(2, 0) as i64],
         [c.get(0, 1) as i64, c.get(1, 1) as i64, c.get(2, 1) as i64],
@@ -376,59 +396,239 @@ pub fn enumerate_factorisations_3x3_to_2(
         },
     ];
 
+    // Row 2 of C as a flat array, used in the fast path to derive U's row 2.
+    // c_row2[j] = C[2, j] = c_cols[j][2].
+    let c_row2: [i64; 3] = [c_cols[0][2], c_cols[1][2], c_cols[2][2]];
+
     for u00 in 0..=me {
         for u01 in 0..=me {
             if u00 + u01 < min_row_sum[0] {
                 continue;
             }
+
+            // Constraint propagation: gcd(row0) must divide every C[0, j].
+            let g0 = gcd(u00 as u64, u01 as u64);
+            if g0 > 1 {
+                let mut skip = false;
+                for j in 0..3 {
+                    if c_cols[j][0] as u64 % g0 != 0 {
+                        skip = true;
+                        break;
+                    }
+                }
+                if skip {
+                    continue;
+                }
+            }
+
             for u10 in 0..=me {
                 for u11 in 0..=me {
                     if u10 + u11 < min_row_sum[1] {
                         continue;
                     }
-                    for u20 in 0..=me {
-                        for u21 in 0..=me {
-                            if u20 + u21 < min_row_sum[2] {
-                                continue;
+
+                    // Constraint propagation: gcd(row1) must divide every C[1, j].
+                    let g1 = gcd(u10 as u64, u11 as u64);
+                    if g1 > 1 {
+                        let mut skip = false;
+                        for j in 0..3 {
+                            if c_cols[j][1] as u64 % g1 != 0 {
+                                skip = true;
+                                break;
                             }
-                            let u_rows: [[i64; 2]; 3] = [
-                                [u00 as i64, u01 as i64],
-                                [u10 as i64, u11 as i64],
-                                [u20 as i64, u21 as i64],
-                            ];
+                        }
+                        if skip {
+                            continue;
+                        }
+                    }
 
-                            // Quick rank check: at least one 2×2 minor nonzero.
-                            let d01 = u_rows[0][0] * u_rows[1][1] - u_rows[0][1] * u_rows[1][0];
-                            let d02 = u_rows[0][0] * u_rows[2][1] - u_rows[0][1] * u_rows[2][0];
-                            let d12 = u_rows[1][0] * u_rows[2][1] - u_rows[1][1] * u_rows[2][0];
-                            if d01 == 0 && d02 == 0 && d12 == 0 {
-                                continue;
+                    let det01 = u00 as i64 * u11 as i64 - u01 as i64 * u10 as i64;
+
+                    if det01 != 0 {
+                        // FAST PATH: rows 0 and 1 of U are linearly independent.
+                        //
+                        // V is uniquely determined by the 2×2 sub-system
+                        //   [u00, u01; u10, u11] · V[:, j] = C[0..2, j]   (Cramer's rule).
+                        // Once V is known, row 2 of U is determined (O(1)) by solving the
+                        // overdetermined system  V^T · [u20; u21] = C[2, :].
+                        // This eliminates the inner (u20, u21) enumeration loop entirely.
+                        let mut v_cols = [[0i64; 2]; 3];
+                        let mut v_valid = true;
+                        for j in 0..3 {
+                            let b0 = c_cols[j][0]; // C[0, j]
+                            let b1 = c_cols[j][1]; // C[1, j]
+                            // Cramer: v0 = (u11·b0 − u01·b1) / det01
+                            //         v1 = (u00·b1 − u10·b0) / det01
+                            let v0_num = (u11 as i64) * b0 - (u01 as i64) * b1;
+                            let v1_num = (u00 as i64) * b1 - (u10 as i64) * b0;
+                            if v0_num % det01 != 0 || v1_num % det01 != 0 {
+                                v_valid = false;
+                                break;
                             }
+                            let v0 = v0_num / det01;
+                            let v1 = v1_num / det01;
+                            if v0 < 0 || v0 > me_i64 || v1 < 0 || v1 > me_i64 {
+                                v_valid = false;
+                                break;
+                            }
+                            v_cols[j] = [v0, v1];
+                        }
+                        if !v_valid {
+                            continue;
+                        }
 
-                            // Solve for each column of V (overdetermined: 3 eqns, 2 unknowns).
-                            let v0 = match solve_overdetermined_3x2(&u_rows, &c_cols[0], max_entry)
-                            {
-                                Some(v) => v,
-                                None => continue,
-                            };
-                            let v1 = match solve_overdetermined_3x2(&u_rows, &c_cols[1], max_entry)
-                            {
-                                Some(v) => v,
-                                None => continue,
-                            };
-                            let v2 = match solve_overdetermined_3x2(&u_rows, &c_cols[2], max_entry)
-                            {
-                                Some(v) => v,
-                                None => continue,
-                            };
+                        // Derive row 2 of U: solve V^T · [u20; u21] = C[2, :],
+                        // i.e. for each j: V[0,j]·u20 + V[1,j]·u21 = C[2, j].
+                        // v_rows[j] = [V[0, j], V[1, j]] = v_cols[j].
+                        let v_rows: [[i64; 2]; 3] = [
+                            [v_cols[0][0], v_cols[0][1]],
+                            [v_cols[1][0], v_cols[1][1]],
+                            [v_cols[2][0], v_cols[2][1]],
+                        ];
+                        if let Some([u20, u21]) =
+                            solve_overdetermined_3x2(&v_rows, &c_row2, max_entry)
+                        {
+                            if u20 + u21 >= min_row_sum[2] {
+                                let u_mat =
+                                    DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
+                                let v_mat = DynMatrix::new(
+                                    2,
+                                    3,
+                                    vec![
+                                        v_cols[0][0] as u32,
+                                        v_cols[1][0] as u32,
+                                        v_cols[2][0] as u32,
+                                        v_cols[0][1] as u32,
+                                        v_cols[1][1] as u32,
+                                        v_cols[2][1] as u32,
+                                    ],
+                                );
+                                results.push((u_mat, v_mat));
+                            }
+                        } else {
+                            // solve_overdetermined_3x2 returned None.  This happens when
+                            // V is rank-deficient (all 2×2 minors of v_rows are zero),
+                            // giving infinitely many candidate row-2 values.  Fall back to
+                            // explicit enumeration in that rare case.
+                            let m01 = v_rows[0][0] * v_rows[1][1] - v_rows[0][1] * v_rows[1][0];
+                            let m02 = v_rows[0][0] * v_rows[2][1] - v_rows[0][1] * v_rows[2][0];
+                            let m12 = v_rows[1][0] * v_rows[2][1] - v_rows[1][1] * v_rows[2][0];
+                            if m01 == 0 && m02 == 0 && m12 == 0 {
+                                for u20 in 0..=me {
+                                    for u21 in 0..=me {
+                                        if u20 + u21 < min_row_sum[2] {
+                                            continue;
+                                        }
+                                        let mut ok = true;
+                                        for j in 0..3 {
+                                            if (u20 as i64) * v_cols[j][0]
+                                                + (u21 as i64) * v_cols[j][1]
+                                                != c_cols[j][2]
+                                            {
+                                                ok = false;
+                                                break;
+                                            }
+                                        }
+                                        if ok {
+                                            let u_mat = DynMatrix::new(
+                                                3,
+                                                2,
+                                                vec![u00, u01, u10, u11, u20, u21],
+                                            );
+                                            let v_mat = DynMatrix::new(
+                                                2,
+                                                3,
+                                                vec![
+                                                    v_cols[0][0] as u32,
+                                                    v_cols[1][0] as u32,
+                                                    v_cols[2][0] as u32,
+                                                    v_cols[0][1] as u32,
+                                                    v_cols[1][1] as u32,
+                                                    v_cols[2][1] as u32,
+                                                ],
+                                            );
+                                            results.push((u_mat, v_mat));
+                                        }
+                                    }
+                                }
+                            }
+                            // If v_rows has rank 2 but None was returned the system is
+                            // inconsistent; no valid row 2 exists for this (row0, row1).
+                        }
+                    } else {
+                        // FALLBACK: rows 0 and 1 of U are linearly dependent (det01 = 0).
+                        // Enumerate row 2 and use the full overdetermined solver for V.
+                        for u20 in 0..=me {
+                            for u21 in 0..=me {
+                                if u20 + u21 < min_row_sum[2] {
+                                    continue;
+                                }
 
-                            let u_mat = DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
-                            let v_mat = DynMatrix::new(
-                                2,
-                                3,
-                                vec![v0[0], v1[0], v2[0], v0[1], v1[1], v2[1]],
-                            );
-                            results.push((u_mat, v_mat));
+                                // Constraint propagation: gcd(row2) must divide every C[2,j].
+                                let g2 = gcd(u20 as u64, u21 as u64);
+                                if g2 > 1 {
+                                    let mut skip = false;
+                                    for j in 0..3 {
+                                        if c_cols[j][2] as u64 % g2 != 0 {
+                                            skip = true;
+                                            break;
+                                        }
+                                    }
+                                    if skip {
+                                        continue;
+                                    }
+                                }
+
+                                let u_rows: [[i64; 2]; 3] = [
+                                    [u00 as i64, u01 as i64],
+                                    [u10 as i64, u11 as i64],
+                                    [u20 as i64, u21 as i64],
+                                ];
+
+                                // det01 = 0 already; rank requires d02 or d12 nonzero.
+                                let d02 = u_rows[0][0] * u_rows[2][1]
+                                    - u_rows[0][1] * u_rows[2][0];
+                                let d12 = u_rows[1][0] * u_rows[2][1]
+                                    - u_rows[1][1] * u_rows[2][0];
+                                if d02 == 0 && d12 == 0 {
+                                    continue;
+                                }
+
+                                // Solve for each column of V (overdetermined: 3 eqns, 2 unknowns).
+                                let v0 = match solve_overdetermined_3x2(
+                                    &u_rows,
+                                    &c_cols[0],
+                                    max_entry,
+                                ) {
+                                    Some(v) => v,
+                                    None => continue,
+                                };
+                                let v1 = match solve_overdetermined_3x2(
+                                    &u_rows,
+                                    &c_cols[1],
+                                    max_entry,
+                                ) {
+                                    Some(v) => v,
+                                    None => continue,
+                                };
+                                let v2 = match solve_overdetermined_3x2(
+                                    &u_rows,
+                                    &c_cols[2],
+                                    max_entry,
+                                ) {
+                                    Some(v) => v,
+                                    None => continue,
+                                };
+
+                                let u_mat =
+                                    DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
+                                let v_mat = DynMatrix::new(
+                                    2,
+                                    3,
+                                    vec![v0[0], v1[0], v2[0], v0[1], v1[1], v2[1]],
+                                );
+                                results.push((u_mat, v_mat));
+                            }
                         }
                     }
                 }
