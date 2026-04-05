@@ -119,6 +119,24 @@ Next coding step after that:
   or add a second kind of `3x3` graph move beyond out-splits so the sidecar graph is not trapped in these tiny closed components
 - in parallel, reconsider whether some of this structure can become a pruning or ordering heuristic inside the main BFS rather than a direct witness search
 
+Status update on mixed split directions:
+
+- the direct `3x3` zig-zag closure remains rigid when the bridge bound is raised from `8` to `10` and `12`; the same small `A`-side components persist for both `k = 3` and `k = 4`
+- a new dual sidecar move now enumerates one-step in-splits by out-splitting the transpose and transposing back
+- for both Brix-Ruiz pairs, the one-step in-split counts match the one-step out-split counts:
+  `42/42` on the `A/B` sides for `k = 3`, and `54/90` for `k = 4`
+- after canonicalisation, the in-split state sets are genuinely different from the out-split state sets on each side, so this is a real enlargement of the move family rather than a tautological reparameterisation
+- nevertheless, there is still no common one-step `3x3` refinement in any of the four combinations:
+  out/out, in/in, out/in, or in/out
+
+This rules out another obvious escape hatch: the obstruction is not simply that we were only splitting on the outgoing side.
+
+Next coding step after that:
+
+- push the sidecar one level higher with mixed split directions:
+  test whether two-step `3x3` refinements built from either out-splits or in-splits admit a common `4x4` state
+- if that also stays disjoint, stop growing the sidecar graph blindly and switch back to the main solver with a structural heuristic mined from these tiny split components
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.

@@ -233,6 +233,16 @@ impl DynMatrix {
         Self::new(self.rows, other.cols, result)
     }
 
+    pub fn transpose(&self) -> Self {
+        let mut data = vec![0u32; self.rows * self.cols];
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                data[j * self.rows + i] = self.get(i, j);
+            }
+        }
+        Self::new(self.cols, self.rows, data)
+    }
+
     /// Convert a SqMatrix<N> to a DynMatrix.
     pub fn from_sq<const N: usize>(m: &SqMatrix<N>) -> Self {
         let mut data = Vec::with_capacity(N * N);
@@ -517,6 +527,14 @@ mod tests {
         let uv = u.mul(&v);
         // [[1,1],[0,1]] * [[1,0],[1,1]] = [[2,1],[1,1]]
         assert_eq!(uv, DynMatrix::new(2, 2, vec![2, 1, 1, 1]));
+    }
+
+    #[test]
+    fn test_dyn_matrix_transpose() {
+        let m = DynMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        let mt = m.transpose();
+        assert_eq!(mt, DynMatrix::new(3, 2, vec![1, 4, 2, 5, 3, 6]));
+        assert_eq!(mt.transpose(), m);
     }
 
     #[test]

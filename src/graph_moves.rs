@@ -62,6 +62,25 @@ pub fn enumerate_outsplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2
     enumerate_one_step_outsplits(&DynMatrix::from_sq(a))
 }
 
+/// Enumerate all one-step in-splits of a square nonnegative matrix.
+///
+/// This is implemented as out-splitting the transpose and transposing back.
+pub fn enumerate_one_step_insplits(a: &DynMatrix) -> Vec<OutsplitWitness> {
+    enumerate_one_step_outsplits(&a.transpose())
+        .into_iter()
+        .map(|witness| OutsplitWitness {
+            division: witness.division.transpose(),
+            edge: witness.edge.transpose(),
+            outsplit: witness.outsplit.transpose(),
+        })
+        .collect()
+}
+
+/// Enumerate all one-step 2x2 -> 3x3 in-splits of a 2x2 nonnegative matrix.
+pub fn enumerate_insplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2To3x3> {
+    enumerate_one_step_insplits(&DynMatrix::from_sq(a))
+}
+
 /// Search for a common one-step 3x3 out-split refinement up to permutation.
 pub fn find_common_outsplit_refinement_2x2(
     a: &SqMatrix<2>,
@@ -341,6 +360,22 @@ mod tests {
             assert_eq!(witness.outsplit.rows, 4);
             assert_eq!(witness.outsplit.cols, 4);
             assert_eq!(witness.division.mul(&witness.edge), a);
+        }
+    }
+
+    #[test]
+    fn test_enumerate_one_step_insplits_3x3_nonempty() {
+        let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 3, 2, 0, 1]);
+        let witnesses = enumerate_one_step_insplits(&a);
+        assert!(!witnesses.is_empty());
+        for witness in &witnesses {
+            assert_eq!(witness.edge.rows, 3);
+            assert_eq!(witness.edge.cols, 4);
+            assert_eq!(witness.division.rows, 4);
+            assert_eq!(witness.division.cols, 3);
+            assert_eq!(witness.outsplit.rows, 4);
+            assert_eq!(witness.outsplit.cols, 4);
+            assert_eq!(witness.edge.mul(&witness.division), a);
         }
     }
 
