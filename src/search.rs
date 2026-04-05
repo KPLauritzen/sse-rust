@@ -1,4 +1,5 @@
-use std::collections::{HashMap, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
 use crate::factorisation::enumerate_all_factorisations;
 use crate::invariants::check_invariants_2x2;
@@ -7,10 +8,14 @@ use crate::types::{EsseStep, SearchConfig, SsePath, SseResult};
 
 /// Search for a strong shift equivalence path between two 2x2 matrices.
 ///
-/// Uses bidirectional BFS over the graph where nodes are square matrices of
-/// varying sizes (2x2, 3x3, ...) in canonical form, and edges are elementary
-/// SSE steps (A = UV, B = VU). Searching from both ends reduces complexity
-/// from O(branching^L) to O(2 * branching^(L/2)).
+/// Uses bidirectional best-first search over the graph where nodes are square
+/// matrices of varying sizes (2x2, 3x3, ...) in canonical form, and edges are
+/// elementary SSE steps (A = UV, B = VU). Searching from both ends reduces
+/// complexity from O(branching^L) to O(2 * branching^(L/2)).
+///
+/// Each frontier is a priority queue ordered by squared Frobenius distance to the
+/// opposite starting matrix. Nodes "closer" to the target are expanded first,
+/// turning blind BFS into directed search without changing correctness.
 pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -> SseResult<2> {
     // Quick check: are they already equal?
     if a == b {
@@ -38,27 +43,34 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
         });
     }
 
-    // Bidirectional BFS: expand from both A and B, meet in the middle.
+    // Bidirectional best-first search: expand from both A and B, meet in the middle.
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
     let a_canon = a_dyn.canonical_perm();
     let b_canon = b_dyn.canonical_perm();
 
-    // Forward direction (from A).
+    // Forward direction (from A): prioritise nodes closest to B.
     let mut fwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
     let mut fwd_orig: HashMap<DynMatrix, DynMatrix> = HashMap::new();
-    let mut fwd_frontier: VecDeque<DynMatrix> = VecDeque::new();
+    let mut fwd_depth: HashMap<DynMatrix, usize> = HashMap::new();
+    // BinaryHeap is a max-heap; Reverse<u64> makes it min-heap on heuristic distance.
+    let mut fwd_frontier: BinaryHeap<(Reverse<u64>, DynMatrix)> = BinaryHeap::new();
+
     fwd_parent.insert(a_canon.clone(), None);
     fwd_orig.insert(a_canon.clone(), a_dyn);
-    fwd_frontier.push_back(a_canon.clone());
+    fwd_depth.insert(a_canon.clone(), 0);
+    fwd_frontier.push((Reverse(a_canon.frobenius_dist_sq(&b_canon)), a_canon.clone()));
 
-    // Backward direction (from B).
+    // Backward direction (from B): prioritise nodes closest to A.
     let mut bwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
     let mut bwd_orig: HashMap<DynMatrix, DynMatrix> = HashMap::new();
-    let mut bwd_frontier: VecDeque<DynMatrix> = VecDeque::new();
+    let mut bwd_depth: HashMap<DynMatrix, usize> = HashMap::new();
+    let mut bwd_frontier: BinaryHeap<(Reverse<u64>, DynMatrix)> = BinaryHeap::new();
+
     bwd_parent.insert(b_canon.clone(), None);
     bwd_orig.insert(b_canon.clone(), DynMatrix::from_sq(b));
-    bwd_frontier.push_back(b_canon.clone());
+    bwd_depth.insert(b_canon.clone(), 0);
+    bwd_frontier.push((Reverse(b_canon.frobenius_dist_sq(&a_canon)), b_canon.clone()));
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -78,30 +90,29 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
     let source_trace = a.trace();
     let source_det = a.det();
 
-    for _lag in 0..config.max_lag {
-        // Expand the smaller frontier to keep work balanced.
-        let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
-
-        let (frontier, parent, orig, other_parent) = if expand_forward {
-            (
-                &mut fwd_frontier,
-                &mut fwd_parent,
-                &mut fwd_orig,
-                &bwd_parent as &HashMap<_, _>,
-            )
-        } else {
-            (
-                &mut bwd_frontier,
-                &mut bwd_parent,
-                &mut bwd_orig,
-                &fwd_parent as &HashMap<_, _>,
-            )
+    // Expand one node at a time from whichever frontier has the more promising
+    // top element (lower heuristic = closer to the other side's start).
+    // Stop when both frontiers are exhausted.
+    loop {
+        let expand_forward = match (fwd_frontier.peek(), bwd_frontier.peek()) {
+            (None, None) => break,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (Some((Reverse(fh), _)), Some((Reverse(bh), _))) => fh <= bh,
         };
 
-        let mut next_frontier: VecDeque<DynMatrix> = VecDeque::new();
+        if expand_forward {
+            let Some((_, current_canon)) = fwd_frontier.pop() else {
+                break;
+            };
+            let depth = fwd_depth[&current_canon];
+            // Skip if we have already reached this node via a shorter path, or
+            // if expanding would exceed the lag bound.
+            if depth >= config.max_lag {
+                continue;
+            }
 
-        while let Some(current_canon) = frontier.pop_front() {
-            let current = orig[&current_canon].clone();
+            let current = fwd_orig[&current_canon].clone();
             let factorisations = enumerate_all_factorisations(
                 &current,
                 config.max_intermediate_dim,
@@ -111,32 +122,24 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
             for (u, v) in factorisations {
                 let vu = v.mul(&u);
 
-                // Size bound: don't explore matrices larger than max_intermediate_dim.
                 if vu.rows > config.max_intermediate_dim {
                     continue;
                 }
-
-                // Spectral pruning: nonzero eigenvalues are preserved by SSE,
-                // so every intermediate must have the same nonzero spectrum.
                 if !is_spectrally_consistent(&vu, source_trace, source_det) {
                     continue;
                 }
 
                 let vu_canon = vu.canonical_perm();
-
-                if parent.contains_key(&vu_canon) {
+                if fwd_parent.contains_key(&vu_canon) {
                     continue;
                 }
 
-                let step = EsseStep {
-                    u: u.clone(),
-                    v: v.clone(),
-                };
-                parent.insert(vu_canon.clone(), Some((current_canon.clone(), step)));
-                orig.insert(vu_canon.clone(), vu.clone());
+                let step = EsseStep { u: u.clone(), v: v.clone() };
+                fwd_parent.insert(vu_canon.clone(), Some((current_canon.clone(), step)));
+                fwd_orig.insert(vu_canon.clone(), vu.clone());
+                fwd_depth.insert(vu_canon.clone(), depth + 1);
 
-                // Check if the other side has already visited this node.
-                if other_parent.contains_key(&vu_canon) {
+                if bwd_parent.contains_key(&vu_canon) {
                     return SseResult::Equivalent(reconstruct_bidirectional_path(
                         a,
                         b,
@@ -148,19 +151,65 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
                     ));
                 }
 
-                // For 2x2 nodes, bound entries to prevent unbounded growth.
-                // For intermediate (3x3+) nodes, always add -- the factorisation
-                // back to 2x2 already bounds factor entries via max_entry.
                 if vu.rows > 2 || vu.max_entry() <= config.max_entry {
-                    next_frontier.push_back(vu_canon);
+                    let priority = vu_canon.frobenius_dist_sq(&b_canon);
+                    fwd_frontier.push((Reverse(priority), vu_canon));
+                }
+            }
+        } else {
+            let Some((_, current_canon)) = bwd_frontier.pop() else {
+                break;
+            };
+            let depth = bwd_depth[&current_canon];
+            if depth >= config.max_lag {
+                continue;
+            }
+
+            let current = bwd_orig[&current_canon].clone();
+            let factorisations = enumerate_all_factorisations(
+                &current,
+                config.max_intermediate_dim,
+                config.max_entry,
+            );
+
+            for (u, v) in factorisations {
+                let vu = v.mul(&u);
+
+                if vu.rows > config.max_intermediate_dim {
+                    continue;
+                }
+                if !is_spectrally_consistent(&vu, source_trace, source_det) {
+                    continue;
+                }
+
+                let vu_canon = vu.canonical_perm();
+                if bwd_parent.contains_key(&vu_canon) {
+                    continue;
+                }
+
+                let step = EsseStep { u: u.clone(), v: v.clone() };
+                bwd_parent.insert(vu_canon.clone(), Some((current_canon.clone(), step)));
+                bwd_orig.insert(vu_canon.clone(), vu.clone());
+                bwd_depth.insert(vu_canon.clone(), depth + 1);
+
+                if fwd_parent.contains_key(&vu_canon) {
+                    return SseResult::Equivalent(reconstruct_bidirectional_path(
+                        a,
+                        b,
+                        &vu_canon,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    ));
+                }
+
+                if vu.rows > 2 || vu.max_entry() <= config.max_entry {
+                    let priority = vu_canon.frobenius_dist_sq(&a_canon);
+                    bwd_frontier.push((Reverse(priority), vu_canon));
                 }
             }
         }
-
-        if next_frontier.is_empty() {
-            break;
-        }
-        *frontier = next_frontier;
     }
 
     SseResult::Unknown

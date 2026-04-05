@@ -257,6 +257,22 @@ impl DynMatrix {
         self.data.iter().copied().max().unwrap_or(0)
     }
 
+    /// Squared Frobenius distance between two same-size matrices: Σ (self[i,j] - other[i,j])².
+    /// Returns u64::MAX if the dimensions differ (so differently-sized nodes are deprioritised).
+    pub fn frobenius_dist_sq(&self, other: &Self) -> u64 {
+        if self.rows != other.rows || self.cols != other.cols {
+            return u64::MAX;
+        }
+        self.data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(&a, &b)| {
+                let diff = a as i64 - b as i64;
+                (diff * diff) as u64
+            })
+            .sum()
+    }
+
     pub fn trace(&self) -> u64 {
         assert!(self.is_square());
         let mut sum = 0u64;
