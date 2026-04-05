@@ -101,6 +101,12 @@ fn main() {
                     );
                     return;
                 }
+                SseResult::EquivalentByConcreteShift(_witness) => {
+                    println!("Found bridge zig-zag via aligned concrete-shift witness");
+                    println!("A bridge = {:?}", left);
+                    println!("B bridge = {:?}", right);
+                    return;
+                }
                 SseResult::NotEquivalent(reason) => {
                     println!(
                         "Bridge pair ruled out by invariants: {:?} vs {:?}: {}",

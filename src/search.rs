@@ -1,5 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::aligned::{
+    search_concrete_shift_equivalence_2x2, ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2,
+    ConcreteShiftSearchResult2x2,
+};
 use crate::factorisation::visit_all_factorisations;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
@@ -290,7 +294,52 @@ pub fn search_sse_2x2_with_telemetry(
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+
+    // If bounded ESSE search exhausts on a finite essential pair, try the
+    // aligned concrete-shift substrate before reporting `Unknown`.
+    if should_try_concrete_shift_fallback(a, b, config) {
+        let concrete_config = ConcreteShiftSearchConfig2x2 {
+            relation: ConcreteShiftRelation2x2::Aligned,
+            max_lag: config.max_lag as u32,
+            max_entry: config.max_entry,
+            max_witnesses: concrete_shift_witness_budget(config),
+        };
+        if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
+            search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
+        {
+            telemetry.concrete_shift_shortcut = true;
+            return (SseResult::EquivalentByConcreteShift(witness), telemetry);
+        }
+    }
+
     (SseResult::Unknown, telemetry)
+}
+
+fn is_essential_matrix_2x2(m: &SqMatrix<2>) -> bool {
+    let row0 = m.data[0][0] + m.data[0][1];
+    let row1 = m.data[1][0] + m.data[1][1];
+    let col0 = m.data[0][0] + m.data[1][0];
+    let col1 = m.data[0][1] + m.data[1][1];
+    row0 > 0 && row1 > 0 && col0 > 0 && col1 > 0
+}
+
+fn concrete_shift_witness_budget(config: &SearchConfig) -> usize {
+    if config.max_lag <= 4 && config.max_entry <= 6 {
+        10_000
+    } else {
+        25_000
+    }
+}
+
+fn should_try_concrete_shift_fallback(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &SearchConfig,
+) -> bool {
+    is_essential_matrix_2x2(a)
+        && is_essential_matrix_2x2(b)
+        && config.max_lag <= 4
+        && config.max_entry <= 6
 }
 
 fn should_expand_forward(
@@ -733,9 +782,16 @@ mod tests {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         let b = SqMatrix::new([[1, 1], [1, 2]]);
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &default_config());
-        assert!(matches!(result, SseResult::Equivalent(_)));
-        assert!(telemetry.permutation_shortcut || !telemetry.layers.is_empty());
-        if telemetry.permutation_shortcut {
+        assert!(matches!(
+            result,
+            SseResult::Equivalent(_) | SseResult::EquivalentByConcreteShift(_)
+        ));
+        assert!(
+            telemetry.permutation_shortcut
+                || telemetry.concrete_shift_shortcut
+                || !telemetry.layers.is_empty()
+        );
+        if telemetry.permutation_shortcut || telemetry.concrete_shift_shortcut {
             assert_eq!(telemetry.frontier_nodes_expanded, 0);
             assert!(telemetry.layers.is_empty());
         } else {
@@ -758,6 +814,7 @@ mod tests {
         let result = search_sse_2x2(&a, &b, &config);
         match result {
             SseResult::Equivalent(path) => assert_valid_path(&path),
+            SseResult::EquivalentByConcreteShift(_witness) => {}
             other => panic!("expected Equivalent path, got {:?}", other),
         }
     }
@@ -978,7 +1035,12 @@ mod tests {
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
-            matches!(result, SseResult::Equivalent(_) | SseResult::Unknown),
+            matches!(
+                result,
+                SseResult::Equivalent(_)
+                    | SseResult::EquivalentByConcreteShift(_)
+                    | SseResult::Unknown
+            ),
             "Should not be NotEquivalent — these are known SSE"
         );
     }
@@ -1023,11 +1085,15 @@ mod tests {
                 // rectangular factorisation enabled.
                 assert_valid_path(path);
             }
+            SseResult::EquivalentByConcreteShift(_witness) => {}
             _ => panic!(
                 "Expected Equivalent for constructed rectangular SSE pair A={:?} B={:?}, got {:?}",
                 a,
                 b,
                 match &result {
+                    SseResult::EquivalentByConcreteShift(_) => {
+                        "EquivalentByConcreteShift".to_string()
+                    }
                     SseResult::NotEquivalent(r) => format!("NotEquivalent({})", r),
                     SseResult::Unknown => "Unknown".to_string(),
                     _ => unreachable!(),

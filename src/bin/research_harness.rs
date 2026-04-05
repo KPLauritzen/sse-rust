@@ -259,6 +259,14 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                 telemetry,
             },
         },
+        SseResult::EquivalentByConcreteShift(_witness) => WorkerCaseResult {
+            id: case.id.clone(),
+            actual_outcome: "equivalent".to_string(),
+            elapsed_ms,
+            steps: None,
+            reason: Some("aligned concrete-shift witness".to_string()),
+            telemetry,
+        },
         SseResult::NotEquivalent(reason) => WorkerCaseResult {
             id: case.id.clone(),
             actual_outcome: "not_equivalent".to_string(),
@@ -433,7 +441,10 @@ fn derive_telemetry_summary(
         };
     }
 
-    if telemetry.permutation_shortcut || telemetry.canonical_shortcut {
+    if telemetry.permutation_shortcut
+        || telemetry.canonical_shortcut
+        || telemetry.concrete_shift_shortcut
+    {
         return DerivedTelemetrySummary {
             productive_layers: 0,
             deepest_productive_layer: None,

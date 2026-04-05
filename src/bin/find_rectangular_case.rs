@@ -152,6 +152,7 @@ fn enumerate_candidate_matrices(max_entry: u32) -> Vec<SqMatrix<2>> {
 fn describe_result(result: &SseResult<2>) -> &'static str {
     match result {
         SseResult::Equivalent(_) => "Equivalent",
+        SseResult::EquivalentByConcreteShift(_) => "Equivalent",
         SseResult::NotEquivalent(_) => "NotEquivalent",
         SseResult::Unknown => "Unknown",
     }

@@ -28,17 +28,20 @@ impl FiberwiseBijection2x2 {
     }
 }
 
-/// A graph/module shift-equivalence witness in the sense of Definition 5.1 of
-/// Brix, Dor-On, Hazrat & Ruiz (2025).
+/// A concrete matrix shift witness in the sense of Definition 3.3 of
+/// Bilich, Dor-On & Ruiz (2024).
 ///
 /// The rectangular matrices `R` and `S` are stored in the underlying
-/// shift-equivalence witness. The additional data here records the fiberwise
-/// bijections corresponding to the bimodule isomorphisms
+/// shift-equivalence witness. The additional data here records the path
+/// isomorphisms
 ///
-/// - `sigma_g : E^1 ⊗ G^1 -> G^1 ⊗ F^1`
-/// - `sigma_h : F^1 ⊗ H^1 -> H^1 ⊗ E^1`
-/// - `omega_e : G^1 ⊗ H^1 -> (E^1)^⊗m`
-/// - `omega_f : H^1 ⊗ G^1 -> (F^1)^⊗m`
+/// - `varphi_R : E_A × E_R -> E_R × E_B`
+/// - `varphi_S : E_B × E_S -> E_S × E_A`
+/// - `psi_A : E_R × E_S -> E_A^m`
+/// - `psi_B : E_S × E_R -> E_B^m`
+///
+/// For compatibility with the older local naming, the four maps still use the
+/// `sigma_g`, `sigma_h`, `omega_e`, and `omega_f` field names.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModuleShiftWitness2x2 {
     pub shift: ShiftEquivalenceWitness2x2,
@@ -71,6 +74,46 @@ impl Default for AlignedModuleSearchConfig2x2 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AlignedModuleSearchResult2x2 {
     Equivalent(ModuleShiftWitness2x2),
+    Exhausted,
+    SearchLimitReached,
+}
+
+/// Public alias using the current matrix-level terminology from the papers.
+pub type ConcreteShiftWitness2x2 = ModuleShiftWitness2x2;
+
+/// Which concrete shift relation to check on a bounded witness space.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConcreteShiftRelation2x2 {
+    Aligned,
+    Balanced,
+    Compatible,
+}
+
+/// Configuration for bounded concrete-shift search on 2x2 matrices.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConcreteShiftSearchConfig2x2 {
+    pub relation: ConcreteShiftRelation2x2,
+    pub max_lag: u32,
+    pub max_entry: u32,
+    /// Maximum number of concrete witnesses to test before aborting the search.
+    pub max_witnesses: usize,
+}
+
+impl Default for ConcreteShiftSearchConfig2x2 {
+    fn default() -> Self {
+        Self {
+            relation: ConcreteShiftRelation2x2::Aligned,
+            max_lag: 3,
+            max_entry: 6,
+            max_witnesses: 10_000,
+        }
+    }
+}
+
+/// Result of bounded concrete-shift search.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConcreteShiftSearchResult2x2 {
+    Equivalent(ConcreteShiftWitness2x2),
     Exhausted,
     SearchLimitReached,
 }
@@ -197,8 +240,8 @@ pub fn canonical_module_shift_witness_2x2(
     })
 }
 
-/// Verify the graph/module shift-equivalence witness from Definition 5.1.
-pub fn verify_module_shift_equivalence_2x2(
+/// Verify that the stored path isomorphisms form a concrete shift witness.
+pub fn verify_concrete_shift_witness_2x2(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
     witness: &ModuleShiftWitness2x2,
@@ -233,14 +276,23 @@ pub fn verify_module_shift_equivalence_2x2(
     Ok(())
 }
 
-/// Verify the aligned module shift-equivalence conditions from Definition 5.2.
-pub fn verify_aligned_module_shift_equivalence_2x2(
+/// Backwards-compatible wrapper for the older local name.
+pub fn verify_module_shift_equivalence_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    witness: &ModuleShiftWitness2x2,
+) -> Result<(), String> {
+    verify_concrete_shift_witness_2x2(a, b, witness)
+}
+
+/// Verify the aligned concrete-shift equations from Definition 3.3.
+pub fn verify_aligned_concrete_shift_2x2(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
     witness: &ModuleShiftWitness2x2,
 ) -> Result<(), String> {
     let ctx = ModuleContext::new(a, b, &witness.shift)?;
-    verify_module_shift_equivalence_2x2(a, b, witness)?;
+    verify_concrete_shift_witness_2x2(a, b, witness)?;
 
     for fiber in 0..4 {
         for &(e_idx, g_idx, h_idx) in &ctx.egh_domain.fibers[fiber] {
@@ -263,6 +315,157 @@ pub fn verify_aligned_module_shift_equivalence_2x2(
                 return Err(format!(
                     "aligned relation (5.4) failed on triple (f={}, h={}, g={}): {:?} != {:?}",
                     f_idx, h_idx, g_idx, top, bottom
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Backwards-compatible wrapper for the older local name.
+pub fn verify_aligned_module_shift_equivalence_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    witness: &ModuleShiftWitness2x2,
+) -> Result<(), String> {
+    verify_aligned_concrete_shift_2x2(a, b, witness)
+}
+
+/// Verify the balanced concrete-shift equations from Definition 3.3.
+pub fn verify_balanced_concrete_shift_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    witness: &ModuleShiftWitness2x2,
+) -> Result<(), String> {
+    let ctx = ModuleContext::new(a, b, &witness.shift)?;
+    verify_concrete_shift_witness_2x2(a, b, witness)?;
+
+    for (path_idx, path) in ctx.e_paths.iter().enumerate() {
+        for (r_idx, r_edge) in ctx.g_edges.iter().enumerate() {
+            if path.target != r_edge.source {
+                continue;
+            }
+            for (s_idx, s_edge) in ctx.h_edges.iter().enumerate() {
+                if r_edge.target != s_edge.source {
+                    continue;
+                }
+
+                let lhs = (
+                    invert_path_bijection(
+                        &witness.omega_e,
+                        &ctx.omega_e_domain,
+                        &ctx.omega_e_codomain,
+                        path_idx,
+                        path.source,
+                        path.target,
+                        "omega_e",
+                    )?,
+                    apply_path_bijection(
+                        &witness.omega_e,
+                        &ctx.omega_e_domain,
+                        &ctx.omega_e_codomain,
+                        (r_idx, s_idx),
+                        r_edge.source,
+                        s_edge.target,
+                        "omega_e",
+                    )?,
+                );
+                let rhs = balanced_rhs_a(&ctx, witness, path_idx, r_idx, s_idx)?;
+
+                if lhs != rhs {
+                    return Err(format!(
+                        "balanced A relation failed on (path={}, r={}, s={}): {:?} != {:?}",
+                        path_idx, r_idx, s_idx, lhs, rhs
+                    ));
+                }
+            }
+        }
+    }
+
+    for (path_idx, path) in ctx.f_paths.iter().enumerate() {
+        for (s_idx, s_edge) in ctx.h_edges.iter().enumerate() {
+            if path.target != s_edge.source {
+                continue;
+            }
+            for (r_idx, r_edge) in ctx.g_edges.iter().enumerate() {
+                if s_edge.target != r_edge.source {
+                    continue;
+                }
+
+                let lhs = (
+                    invert_path_bijection(
+                        &witness.omega_f,
+                        &ctx.omega_f_domain,
+                        &ctx.omega_f_codomain,
+                        path_idx,
+                        path.source,
+                        path.target,
+                        "omega_f",
+                    )?,
+                    apply_path_bijection(
+                        &witness.omega_f,
+                        &ctx.omega_f_domain,
+                        &ctx.omega_f_codomain,
+                        (s_idx, r_idx),
+                        s_edge.source,
+                        r_edge.target,
+                        "omega_f",
+                    )?,
+                );
+                let rhs = balanced_rhs_b(&ctx, witness, path_idx, s_idx, r_idx)?;
+
+                if lhs != rhs {
+                    return Err(format!(
+                        "balanced B relation failed on (path={}, s={}, r={}): {:?} != {:?}",
+                        path_idx, s_idx, r_idx, lhs, rhs
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify the compatible concrete-shift equations from Definition 3.3.
+pub fn verify_compatible_concrete_shift_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    witness: &ModuleShiftWitness2x2,
+) -> Result<(), String> {
+    let ctx = ModuleContext::new(a, b, &witness.shift)?;
+    verify_concrete_shift_witness_2x2(a, b, witness)?;
+
+    for (path_idx, path) in ctx.e_paths.iter().enumerate() {
+        for (r_idx, r_edge) in ctx.g_edges.iter().enumerate() {
+            if path.target != r_edge.source {
+                continue;
+            }
+
+            let lhs = iterate_phi_r(&ctx, witness, path_idx, r_idx)?;
+            let rhs = compatible_rhs_r(&ctx, witness, path_idx, r_idx)?;
+            if lhs != rhs {
+                return Err(format!(
+                    "compatible R relation failed on (path={}, r={}): {:?} != {:?}",
+                    path_idx, r_idx, lhs, rhs
+                ));
+            }
+        }
+    }
+
+    for (path_idx, path) in ctx.f_paths.iter().enumerate() {
+        for (s_idx, s_edge) in ctx.h_edges.iter().enumerate() {
+            if path.target != s_edge.source {
+                continue;
+            }
+
+            let lhs = iterate_phi_s(&ctx, witness, path_idx, s_idx)?;
+            let rhs = compatible_rhs_s(&ctx, witness, path_idx, s_idx)?;
+            if lhs != rhs {
+                return Err(format!(
+                    "compatible S relation failed on (path={}, s={}): {:?} != {:?}",
+                    path_idx, s_idx, lhs, rhs
                 ));
             }
         }
@@ -321,22 +524,22 @@ pub fn search_aligned_module_shift_equivalence_with_lag_2x2(
     max_entry: u32,
     max_module_witnesses: usize,
 ) -> AlignedModuleSearchResult2x2 {
-    let shift_witnesses = enumerate_shift_equivalence_with_lag_2x2(a, b, lag, max_entry);
-    let mut checked = 0usize;
-
-    for shift in shift_witnesses {
-        match search_module_witnesses_for_shift(a, b, shift, max_module_witnesses, &mut checked) {
-            ModuleWitnessSearchOutcome::Found(witness) => {
-                return AlignedModuleSearchResult2x2::Equivalent(witness);
-            }
-            ModuleWitnessSearchOutcome::Exhausted => {}
-            ModuleWitnessSearchOutcome::LimitReached => {
-                return AlignedModuleSearchResult2x2::SearchLimitReached;
-            }
+    match search_concrete_shift_equivalence_with_lag_2x2(
+        a,
+        b,
+        lag,
+        max_entry,
+        max_module_witnesses,
+        ConcreteShiftRelation2x2::Aligned,
+    ) {
+        ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+            AlignedModuleSearchResult2x2::Equivalent(witness)
+        }
+        ConcreteShiftSearchResult2x2::Exhausted => AlignedModuleSearchResult2x2::Exhausted,
+        ConcreteShiftSearchResult2x2::SearchLimitReached => {
+            AlignedModuleSearchResult2x2::SearchLimitReached
         }
     }
-
-    AlignedModuleSearchResult2x2::Exhausted
 }
 
 /// Search for an aligned module shift-equivalence witness up to a lag bound.
@@ -366,6 +569,71 @@ pub fn search_aligned_module_shift_equivalence_2x2(
         AlignedModuleSearchResult2x2::SearchLimitReached
     } else {
         AlignedModuleSearchResult2x2::Exhausted
+    }
+}
+
+/// Search for a concrete matrix shift witness with a fixed lag and relation.
+pub fn search_concrete_shift_equivalence_with_lag_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    lag: u32,
+    max_entry: u32,
+    max_witnesses: usize,
+    relation: ConcreteShiftRelation2x2,
+) -> ConcreteShiftSearchResult2x2 {
+    let shift_witnesses = enumerate_shift_equivalence_with_lag_2x2(a, b, lag, max_entry);
+    let mut checked = 0usize;
+
+    for shift in shift_witnesses {
+        match search_concrete_witnesses_for_shift(
+            a,
+            b,
+            shift,
+            relation,
+            max_witnesses,
+            &mut checked,
+        ) {
+            ModuleWitnessSearchOutcome::Found(witness) => {
+                return ConcreteShiftSearchResult2x2::Equivalent(witness);
+            }
+            ModuleWitnessSearchOutcome::Exhausted => {}
+            ModuleWitnessSearchOutcome::LimitReached => {
+                return ConcreteShiftSearchResult2x2::SearchLimitReached;
+            }
+        }
+    }
+
+    ConcreteShiftSearchResult2x2::Exhausted
+}
+
+/// Search for a concrete matrix shift witness up to a lag bound.
+pub fn search_concrete_shift_equivalence_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &ConcreteShiftSearchConfig2x2,
+) -> ConcreteShiftSearchResult2x2 {
+    let mut any_limit = false;
+    for lag in 1..=config.max_lag {
+        match search_concrete_shift_equivalence_with_lag_2x2(
+            a,
+            b,
+            lag,
+            config.max_entry,
+            config.max_witnesses,
+            config.relation,
+        ) {
+            ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                return ConcreteShiftSearchResult2x2::Equivalent(witness);
+            }
+            ConcreteShiftSearchResult2x2::Exhausted => {}
+            ConcreteShiftSearchResult2x2::SearchLimitReached => any_limit = true,
+        }
+    }
+
+    if any_limit {
+        ConcreteShiftSearchResult2x2::SearchLimitReached
+    } else {
+        ConcreteShiftSearchResult2x2::Exhausted
     }
 }
 
@@ -773,6 +1041,34 @@ fn apply_path_bijection(
     Ok(codomain.fibers[fiber][mapped_local])
 }
 
+fn invert_path_bijection(
+    bijection: &FiberwiseBijection2x2,
+    domain: &FiberData<(usize, usize)>,
+    codomain: &FiberData<usize>,
+    item: usize,
+    source: usize,
+    target: usize,
+    name: &str,
+) -> Result<(usize, usize), String> {
+    let fiber = fiber_index(source, target);
+    let codomain_local = codomain.positions[fiber].get(&item).copied().ok_or_else(|| {
+        format!(
+            "{} codomain item {:?} missing from fiber {}",
+            name, item, fiber
+        )
+    })?;
+    let domain_local = bijection.mapping[fiber]
+        .iter()
+        .position(|&mapped_local| mapped_local == codomain_local)
+        .ok_or_else(|| {
+            format!(
+                "{} inverse image for item {:?} missing from fiber {}",
+                name, item, fiber
+            )
+        })?;
+    Ok(domain.fibers[fiber][domain_local])
+}
+
 fn ensure_pair_in_codomain(
     codomain: &FiberData<(usize, usize)>,
     item: (usize, usize),
@@ -979,11 +1275,12 @@ enum ModuleWitnessSearchOutcome {
     LimitReached,
 }
 
-fn search_module_witnesses_for_shift(
+fn search_concrete_witnesses_for_shift(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
     shift: ShiftEquivalenceWitness2x2,
-    max_module_witnesses: usize,
+    relation: ConcreteShiftRelation2x2,
+    max_witnesses: usize,
     checked: &mut usize,
 ) -> ModuleWitnessSearchOutcome {
     let ctx = match ModuleContext::new(a, b, &shift) {
@@ -1000,7 +1297,7 @@ fn search_module_witnesses_for_shift(
         for_each_fiberwise_bijection(sigma_h_lengths, &mut |sigma_h| {
             for_each_fiberwise_bijection(omega_e_lengths, &mut |omega_e| {
                 for_each_fiberwise_bijection(omega_f_lengths, &mut |omega_f| {
-                    if *checked >= max_module_witnesses {
+                    if *checked >= max_witnesses {
                         return ControlFlow::Break(ModuleWitnessSearchOutcome::LimitReached);
                     }
                     *checked += 1;
@@ -1013,7 +1310,7 @@ fn search_module_witnesses_for_shift(
                         omega_f: omega_f.clone(),
                     };
 
-                    if verify_aligned_module_shift_equivalence_2x2(a, b, &witness).is_ok() {
+                    if verify_concrete_shift_relation_2x2(a, b, &witness, relation).is_ok() {
                         ControlFlow::Break(ModuleWitnessSearchOutcome::Found(witness))
                     } else {
                         ControlFlow::Continue(())
@@ -1027,6 +1324,163 @@ fn search_module_witnesses_for_shift(
         ControlFlow::Break(outcome) => outcome,
         ControlFlow::Continue(()) => ModuleWitnessSearchOutcome::Exhausted,
     }
+}
+
+fn verify_concrete_shift_relation_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    witness: &ModuleShiftWitness2x2,
+    relation: ConcreteShiftRelation2x2,
+) -> Result<(), String> {
+    match relation {
+        ConcreteShiftRelation2x2::Aligned => verify_aligned_concrete_shift_2x2(a, b, witness),
+        ConcreteShiftRelation2x2::Balanced => verify_balanced_concrete_shift_2x2(a, b, witness),
+        ConcreteShiftRelation2x2::Compatible => verify_compatible_concrete_shift_2x2(a, b, witness),
+    }
+}
+
+fn iterate_phi_r(
+    ctx: &ModuleContext,
+    witness: &ModuleShiftWitness2x2,
+    a_path_idx: usize,
+    r_idx: usize,
+) -> Result<(usize, usize), String> {
+    let path = &ctx.e_paths[a_path_idx];
+    let mut current_r = r_idx;
+    let mut b_edges = Vec::with_capacity(path.edges.len());
+
+    for &e_idx in &path.edges {
+        let (next_r, b_idx) = apply_pair_bijection(
+            &witness.sigma_g,
+            &ctx.sigma_g_domain,
+            &ctx.sigma_g_codomain,
+            (e_idx, current_r),
+            ctx.e_edges[e_idx].source,
+            ctx.g_edges[current_r].target,
+            "sigma_g",
+        )?;
+        current_r = next_r;
+        b_edges.push(b_idx);
+    }
+
+    let b_path_idx = ctx
+        .f_path_lookup
+        .get(&b_edges)
+        .copied()
+        .ok_or_else(|| format!("sigma_g produced B-path {:?} not found", b_edges))?;
+    Ok((current_r, b_path_idx))
+}
+
+fn iterate_phi_s(
+    ctx: &ModuleContext,
+    witness: &ModuleShiftWitness2x2,
+    b_path_idx: usize,
+    s_idx: usize,
+) -> Result<(usize, usize), String> {
+    let path = &ctx.f_paths[b_path_idx];
+    let mut current_s = s_idx;
+    let mut a_edges = Vec::with_capacity(path.edges.len());
+
+    for &b_idx in &path.edges {
+        let (next_s, a_idx) = apply_pair_bijection(
+            &witness.sigma_h,
+            &ctx.sigma_h_domain,
+            &ctx.sigma_h_codomain,
+            (b_idx, current_s),
+            ctx.f_edges[b_idx].source,
+            ctx.h_edges[current_s].target,
+            "sigma_h",
+        )?;
+        current_s = next_s;
+        a_edges.push(a_idx);
+    }
+
+    let a_path_idx = ctx
+        .e_path_lookup
+        .get(&a_edges)
+        .copied()
+        .ok_or_else(|| format!("sigma_h produced A-path {:?} not found", a_edges))?;
+    Ok((current_s, a_path_idx))
+}
+
+fn balanced_rhs_a(
+    ctx: &ModuleContext,
+    witness: &ModuleShiftWitness2x2,
+    a_path_idx: usize,
+    r_idx: usize,
+    s_idx: usize,
+) -> Result<((usize, usize), usize), String> {
+    let (r_prime, b_path_idx) = iterate_phi_r(ctx, witness, a_path_idx, r_idx)?;
+    let (s_prime, a_prime_path_idx) = iterate_phi_s(ctx, witness, b_path_idx, s_idx)?;
+    Ok(((r_prime, s_prime), a_prime_path_idx))
+}
+
+fn balanced_rhs_b(
+    ctx: &ModuleContext,
+    witness: &ModuleShiftWitness2x2,
+    b_path_idx: usize,
+    s_idx: usize,
+    r_idx: usize,
+) -> Result<((usize, usize), usize), String> {
+    let (s_prime, a_path_idx) = iterate_phi_s(ctx, witness, b_path_idx, s_idx)?;
+    let (r_prime, b_prime_path_idx) = iterate_phi_r(ctx, witness, a_path_idx, r_idx)?;
+    Ok(((s_prime, r_prime), b_prime_path_idx))
+}
+
+fn compatible_rhs_r(
+    ctx: &ModuleContext,
+    witness: &ModuleShiftWitness2x2,
+    a_path_idx: usize,
+    r_idx: usize,
+) -> Result<(usize, usize), String> {
+    let path = &ctx.e_paths[a_path_idx];
+    let (r_from_path, s_from_path) = invert_path_bijection(
+        &witness.omega_e,
+        &ctx.omega_e_domain,
+        &ctx.omega_e_codomain,
+        a_path_idx,
+        path.source,
+        path.target,
+        "omega_e",
+    )?;
+    let b_path_idx = apply_path_bijection(
+        &witness.omega_f,
+        &ctx.omega_f_domain,
+        &ctx.omega_f_codomain,
+        (s_from_path, r_idx),
+        ctx.h_edges[s_from_path].source,
+        ctx.g_edges[r_idx].target,
+        "omega_f",
+    )?;
+    Ok((r_from_path, b_path_idx))
+}
+
+fn compatible_rhs_s(
+    ctx: &ModuleContext,
+    witness: &ModuleShiftWitness2x2,
+    b_path_idx: usize,
+    s_idx: usize,
+) -> Result<(usize, usize), String> {
+    let path = &ctx.f_paths[b_path_idx];
+    let (s_from_path, r_from_path) = invert_path_bijection(
+        &witness.omega_f,
+        &ctx.omega_f_domain,
+        &ctx.omega_f_codomain,
+        b_path_idx,
+        path.source,
+        path.target,
+        "omega_f",
+    )?;
+    let a_path_idx = apply_path_bijection(
+        &witness.omega_e,
+        &ctx.omega_e_domain,
+        &ctx.omega_e_codomain,
+        (r_from_path, s_idx),
+        ctx.g_edges[r_from_path].source,
+        ctx.h_edges[s_idx].target,
+        "omega_e",
+    )?;
+    Ok((s_from_path, a_path_idx))
 }
 
 fn for_each_fiberwise_bijection<R>(
@@ -1210,6 +1664,8 @@ mod tests {
         let witness = canonical_module_shift_witness_2x2(&a, &a, shift).expect("expected witness");
         assert!(verify_module_shift_equivalence_2x2(&a, &a, &witness).is_ok());
         assert!(verify_aligned_module_shift_equivalence_2x2(&a, &a, &witness).is_ok());
+        assert!(verify_balanced_concrete_shift_2x2(&a, &a, &witness).is_ok());
+        assert!(verify_compatible_concrete_shift_2x2(&a, &a, &witness).is_ok());
     }
 
     #[test]
@@ -1278,5 +1734,43 @@ mod tests {
         let a = SqMatrix::identity();
         let result = search_aligned_module_shift_equivalence_with_lag_2x2(&a, &a, 1, 1, 0);
         assert_eq!(result, AlignedModuleSearchResult2x2::SearchLimitReached);
+    }
+
+    #[test]
+    fn test_search_concrete_shift_equivalence_identity_balanced_case() {
+        let a = SqMatrix::identity();
+        let result = search_concrete_shift_equivalence_with_lag_2x2(
+            &a,
+            &a,
+            1,
+            1,
+            10,
+            ConcreteShiftRelation2x2::Balanced,
+        );
+        match result {
+            ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                assert!(verify_balanced_concrete_shift_2x2(&a, &a, &witness).is_ok());
+            }
+            other => panic!("expected Equivalent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_search_concrete_shift_equivalence_identity_compatible_case() {
+        let a = SqMatrix::identity();
+        let result = search_concrete_shift_equivalence_with_lag_2x2(
+            &a,
+            &a,
+            1,
+            1,
+            10,
+            ConcreteShiftRelation2x2::Compatible,
+        );
+        match result {
+            ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                assert!(verify_compatible_concrete_shift_2x2(&a, &a, &witness).is_ok());
+            }
+            other => panic!("expected Equivalent, got {:?}", other),
+        }
     }
 }
