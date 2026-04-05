@@ -22,3 +22,4 @@ c86b908	6	6	5	825	59	kept	Removed heap allocation from specialized 2x2 and 3x3 c
 763c18e	6	6	5	825	42	kept	Added bounded balanced-elementary witness search as a sidecar experiment; rules out direct 2x2 balanced witnesses for Brix-Ruiz k=3 and k=4 within the natural common-dimension bound
 1c83ead	6	6	5	825	38	kept	Added explicit out-split sidecar probes; rules out common one-step 3x3 refinements and simple one-outsplit-plus-one-factor-down 2x2 bridges for Brix-Ruiz k=3 and k=4
 0e933f2	6	6	5	825	44	kept	Generalized the out-split sidecar to probe two-step `2x2 -> 3x3 -> 4x4` refinements and bridge-state zig-zags; both stay negative for Brix-Ruiz k=3 and k=4
+563101a	6	6	5	825	43	kept	Added direct bounded `3x3 -> 2x2 -> 3x3` zig-zag probes; the canonical A-side 3x3 out-split states are already closed components for Brix-Ruiz k=3 and k=4 at bridge bound 8

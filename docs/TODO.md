@@ -99,6 +99,26 @@ Next coding step after that:
 - the cleanest next experiment is a bounded search on the `3x3` out-split states themselves, prioritising short zig-zags that alternate `3x3 -> 2x2` amalgamations and `2x2 -> 3x3` out-splits
 - if that still diffuses too much, switch from refinement probes to a best-first search on `3x3` out-split states guided by canonical overlap or small-entry bridge counts
 
+Status update on direct `3x3` zig-zag search:
+
+- there is now a reusable sidecar move generator for one `3x3 -> 2x2 -> 3x3` zig-zag step, built from the existing bounded `3x3 -> 2x2` factorisations followed by explicit `2x2 -> 3x3` out-splits
+- after canonicalising the one-step out-splits, the initial `3x3` state sets are already small:
+  `7` states on the `A` side and `9` on the `B` side for `k = 3`,
+  `9` and `15` for `k = 4`
+- at `bridge_max_entry = 8`, each canonical `A`-side `3x3` state has exactly `7` zig-zag neighbors for `k = 3`, and those neighbors stay inside the same `7`-state set
+- similarly, each canonical `A`-side `3x3` state has exactly `9` zig-zag neighbors for `k = 4`, again staying inside the same `9`-state set
+- so the `A`-side start sets are already closed under this bounded `3x3 -> 2x2 -> 3x3` move, and since they are disjoint from the `B`-side start sets there is no bounded zig-zag meeting at this level
+
+This is more informative than the earlier negative probes: the current bounded `3x3` graph move is not merely failing to connect the two sides, it appears to preserve small isolated components around each family.
+
+Next coding step after that:
+
+- vary the move family rather than just the search depth
+- the strongest next experiment is to enlarge the bounded `3x3` move generator itself:
+  either allow a richer `3x3 -> 2x2` amalgamation family than the current bounded factorisations capture,
+  or add a second kind of `3x3` graph move beyond out-splits so the sidecar graph is not trapped in these tiny closed components
+- in parallel, reconsider whether some of this structure can become a pruning or ordering heuristic inside the main BFS rather than a direct witness search
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.

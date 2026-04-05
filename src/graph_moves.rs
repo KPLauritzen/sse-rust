@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::factorisation::enumerate_factorisations_3x3_to_2;
 use crate::matrix::{DynMatrix, SqMatrix};
 
 /// One explicit one-step out-split witness.
@@ -114,6 +115,34 @@ pub fn find_common_two_step_outsplit_refinement_2x2(
     }
 
     None
+}
+
+/// Enumerate canonical 3x3 neighbors reached by one `3x3 -> 2x2 -> 3x3` zig-zag.
+pub fn enumerate_3x3_outsplit_zigzag_neighbors(
+    c: &DynMatrix,
+    max_bridge_entry: u32,
+) -> Vec<DynMatrix> {
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let mut seen = HashSet::new();
+    let mut neighbors = Vec::new();
+
+    for (u, v) in enumerate_factorisations_3x3_to_2(c, max_bridge_entry) {
+        let bridge = v
+            .mul(&u)
+            .to_sq::<2>()
+            .expect("3x3-to-2 factorisation should produce a 2x2 bridge")
+            .canonical();
+        for witness in enumerate_outsplits_2x2_to_3x3(&bridge) {
+            let canon = witness.outsplit.canonical_perm();
+            if seen.insert(canon.clone()) {
+                neighbors.push(canon);
+            }
+        }
+    }
+
+    neighbors
 }
 
 fn child_parent_assignments(child_count: usize, parent_count: usize) -> Vec<Vec<usize>> {
@@ -327,5 +356,14 @@ mod tests {
         let a = SqMatrix::new([[1, 4], [3, 1]]);
         let b = SqMatrix::new([[1, 12], [1, 1]]);
         assert!(find_common_outsplit_refinement_2x2(&a, &b).is_none());
+    }
+
+    #[test]
+    fn test_enumerate_3x3_outsplit_zigzag_neighbors_nonempty() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let first = enumerate_outsplits_2x2_to_3x3(&a);
+        let neighbors = enumerate_3x3_outsplit_zigzag_neighbors(&first[0].outsplit, 8);
+        assert!(!neighbors.is_empty());
+        assert!(neighbors.iter().all(|m| m.rows == 3 && m.cols == 3));
     }
 }
