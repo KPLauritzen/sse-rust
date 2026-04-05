@@ -16,6 +16,23 @@ So for now:
 - treat item 2 below as blocked on obtaining the primary matrix-level definition
 - prefer improvements to the existing BFS/search stack for immediate solver gains
 
+## Next iteration: Positive conjugacy paths for similar matrices
+
+The Brix-Ruiz family in [references/brix-ruiz-2025-2504.09889.pdf](../references/brix-ruiz-2025-2504.09889.pdf) is not just shift equivalent: Example 3.8 states that
+
+- `A_k = [[1, k], [k-1, 1]]` and `B_k = [[1, k(k-1)], [1, 1]]` are similar over `Z`
+- the explicit conjugating matrix is `P_k = [[k-1, k], [1, 1]]`
+- only `k = 2, 3` are currently confirmed SSE
+
+That makes `brix_ruiz_k3` a good candidate for a different attack than bounded ESSE BFS. The relevant local theory is Boyle-Kim-Roush's path-method paper [references/boyle-kim-roush-2013-1209.5096.pdf](../references/boyle-kim-roush-2013-1209.5096.pdf), which treats positive paths inside a conjugacy class as an SSE substrate.
+
+Concrete next experiment:
+
+- build an experimental search for short positive conjugacy paths `G_t^-1 A G_t` between similar `2x2` matrices, seeded by the explicit `P_k`
+- parameterize candidate conjugacies by short products of elementary shears / diagonal scalings instead of ESSE factorizations
+- test first on `k = 3`, where SSE is known, before spending effort on `k = 4`
+- if a stable positive path is found, then decide whether to lift it to an explicit SSE chain directly or to mine it for a new bounded move family in `src/search.rs`
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.
