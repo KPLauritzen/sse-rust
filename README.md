@@ -124,6 +124,23 @@ Rust library crate (`sse-core`) with WASM bindings. No external dependencies bey
 - [`src/matrix.rs`](src/matrix.rs) — Fixed-size `SqMatrix<N>` and dynamic `DynMatrix` types.
 - [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse` as a JSON-returning function.
 
+**Building WASM:**
+
+```sh
+wasm-pack build --target web
+```
+
+This produces a `pkg/` directory with `sse_core.js` and `sse_core_bg.wasm`.
+
+**Deployment:**
+
+The WASM output is used by the [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend, hosted on [kplauritzen.github.io](https://github.com/KPLauritzen/kplauritzen.github.io). The built WASM files (`sse_core.js` and `sse_core_bg.wasm`) are committed directly into that repo under `docs/wasm/`. After rebuilding, copy the files manually:
+
+```sh
+wasm-pack build --target web
+cp pkg/sse_core.js pkg/sse_core_bg.wasm ../kplauritzen.github.io/docs/wasm/
+```
+
 ---
 
 ## References
