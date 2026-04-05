@@ -5,6 +5,17 @@ use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{EsseStep, SearchConfig, SsePath, SseResult};
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+#[derive(Clone)]
+struct FrontierExpansion {
+    parent_canon: DynMatrix,
+    next_canon: DynMatrix,
+    next_orig: DynMatrix,
+    step: EsseStep,
+}
+
 /// Search for a strong shift equivalence path between two 2x2 matrices.
 ///
 /// Uses bidirectional BFS over the graph where nodes are square matrices of
@@ -98,62 +109,46 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
             )
         };
 
+        let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
+        let expansions = expand_frontier_layer(
+            &current_frontier,
+            orig,
+            config.max_intermediate_dim,
+            config.max_entry,
+            source_trace,
+            source_det,
+        );
         let mut next_frontier: VecDeque<DynMatrix> = VecDeque::new();
 
-        while let Some(current_canon) = frontier.pop_front() {
-            let current = orig[&current_canon].clone();
-            let factorisations = enumerate_all_factorisations(
-                &current,
-                config.max_intermediate_dim,
-                config.max_entry,
+        for expansion in expansions {
+            if parent.contains_key(&expansion.next_canon) {
+                continue;
+            }
+
+            parent.insert(
+                expansion.next_canon.clone(),
+                Some((expansion.parent_canon, expansion.step)),
             );
+            orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
 
-            for (u, v) in factorisations {
-                let vu = v.mul(&u);
+            // Check if the other side has already visited this node.
+            if other_parent.contains_key(&expansion.next_canon) {
+                return SseResult::Equivalent(reconstruct_bidirectional_path(
+                    a,
+                    b,
+                    &expansion.next_canon,
+                    &fwd_parent,
+                    &fwd_orig,
+                    &bwd_parent,
+                    &bwd_orig,
+                ));
+            }
 
-                // Size bound: don't explore matrices larger than max_intermediate_dim.
-                if vu.rows > config.max_intermediate_dim {
-                    continue;
-                }
-
-                // Spectral pruning: nonzero eigenvalues are preserved by SSE,
-                // so every intermediate must have the same nonzero spectrum.
-                if !is_spectrally_consistent(&vu, source_trace, source_det) {
-                    continue;
-                }
-
-                let vu_canon = vu.canonical_perm();
-
-                if parent.contains_key(&vu_canon) {
-                    continue;
-                }
-
-                let step = EsseStep {
-                    u: u.clone(),
-                    v: v.clone(),
-                };
-                parent.insert(vu_canon.clone(), Some((current_canon.clone(), step)));
-                orig.insert(vu_canon.clone(), vu.clone());
-
-                // Check if the other side has already visited this node.
-                if other_parent.contains_key(&vu_canon) {
-                    return SseResult::Equivalent(reconstruct_bidirectional_path(
-                        a,
-                        b,
-                        &vu_canon,
-                        &fwd_parent,
-                        &fwd_orig,
-                        &bwd_parent,
-                        &bwd_orig,
-                    ));
-                }
-
-                // For 2x2 nodes, bound entries to prevent unbounded growth.
-                // For intermediate (3x3+) nodes, always add -- the factorisation
-                // back to 2x2 already bounds factor entries via max_entry.
-                if vu.rows > 2 || vu.max_entry() <= config.max_entry {
-                    next_frontier.push_back(vu_canon);
-                }
+            // For 2x2 nodes, bound entries to prevent unbounded growth.
+            // For intermediate (3x3+) nodes, always add -- the factorisation
+            // back to 2x2 already bounds factor entries via max_entry.
+            if expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry {
+                next_frontier.push_back(expansion.next_canon);
             }
         }
 
@@ -164,6 +159,63 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
     }
 
     SseResult::Unknown
+}
+
+fn expand_frontier_layer(
+    current_frontier: &[DynMatrix],
+    orig: &HashMap<DynMatrix, DynMatrix>,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    source_trace: u64,
+    source_det: i64,
+) -> Vec<FrontierExpansion> {
+    let expand_node = |current_canon: &DynMatrix| {
+        let current = orig
+            .get(current_canon)
+            .expect("frontier node should have an original matrix")
+            .clone();
+        let factorisations =
+            enumerate_all_factorisations(&current, max_intermediate_dim, max_entry);
+        let mut expansions = Vec::new();
+
+        for (u, v) in factorisations {
+            let next = v.mul(&u);
+
+            // Size bound: don't explore matrices larger than max_intermediate_dim.
+            if next.rows > max_intermediate_dim {
+                continue;
+            }
+
+            // Spectral pruning: nonzero eigenvalues are preserved by SSE,
+            // so every intermediate must have the same nonzero spectrum.
+            if !is_spectrally_consistent(&next, source_trace, source_det) {
+                continue;
+            }
+
+            let next_canon = next.canonical_perm();
+            let step = EsseStep { u, v };
+            expansions.push(FrontierExpansion {
+                parent_canon: current_canon.clone(),
+                next_canon,
+                next_orig: next,
+                step,
+            });
+        }
+
+        expansions
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let per_node: Vec<Vec<FrontierExpansion>> =
+            current_frontier.par_iter().map(expand_node).collect();
+        per_node.into_iter().flatten().collect()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        current_frontier.iter().flat_map(expand_node).collect()
+    }
 }
 
 /// Check whether a candidate intermediate matrix has a nonzero spectrum

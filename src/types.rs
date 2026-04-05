@@ -6,7 +6,7 @@ pub struct SearchConfig {
     /// Maximum number of elementary SSE steps to search.
     pub max_lag: usize,
     /// Maximum intermediate dimension for factorisations (m in n×m × m×n).
-    /// For now, only m = n (square factorisations) is implemented.
+    /// Current search supports 2x2 square steps and 2x2 <-> 3x3 rectangular steps.
     pub max_intermediate_dim: usize,
     /// Maximum entry value in intermediate matrices U, V.
     pub max_entry: u32,

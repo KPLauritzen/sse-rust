@@ -105,13 +105,13 @@ See [docs/TODO.md](docs/TODO.md) for concrete approaches: bidirectional BFS, ite
 
 ### Parallelism
 
-The BFS frontier expansion is embarrassingly parallel. Adding `rayon` to the factorisation enumeration loop would give near-linear speedup.
+Native builds now expand each BFS frontier layer in parallel with `rayon`, using a collect-then-merge pass so collision detection and parent-map updates stay deterministic. The `wasm32` build keeps the same serial expansion path.
 
 ---
 
 ## Implementation
 
-Rust library crate (`sse-core`) with WASM bindings. No external dependencies beyond `wasm-bindgen` for the browser target.
+Rust library crate (`sse-core`) with WASM bindings. Native builds use `rayon` for frontier-level BFS parallelism; browser-targeted `wasm32` builds fall back to the serial search path.
 
 **What it can do:**
 

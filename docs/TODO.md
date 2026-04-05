@@ -16,9 +16,9 @@ So for now:
 - treat item 2 below as blocked on obtaining the primary matrix-level definition
 - prefer improvements to the existing BFS/search stack for immediate solver gains
 
-## 1. Rayon parallelism on frontier expansion
+## 1. Implemented: Rayon parallelism on frontier expansion
 
-Factorisation enumeration for each frontier node is independent. Wrapping the frontier iteration in `rayon::par_iter()` gives near-linear speedup on multi-core machines. The merge step (collision detection) needs a concurrent map or a collect-then-merge pattern. Easy to implement, multiplicative speedup on all benchmarks.
+Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.
 
 ## 2. Aligned shift equivalence
 
