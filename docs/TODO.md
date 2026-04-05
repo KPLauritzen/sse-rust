@@ -47,6 +47,19 @@ Immediate follow-up after the current experiment:
 - implement a bounded search for balanced elementary equivalence witnesses `(R_A, S, R_B)` from Brix (2022), Definition 5.4
 - test whether `brix_ruiz_k3` is reachable by a short balanced chain, and whether the same bounded witness family sees useful structure on `k = 4`
 
+Status update on the balanced search:
+
+- a bounded `2x2` balanced-elementary search now exists locally and is validated on a nontrivial toy example
+- it exhausts on both `brix_ruiz_k3` and `brix_ruiz_k4` for `max_common_dim = 2`, `max_entry = 8`
+- this is consistent with the matrix-size bound in Brix (2022): for `2x2` matrices, a direct balanced elementary witness can only factor through a common graph of size at most `2`
+- since the Brix-Ruiz matrices are invertible and distinct, a direct same-size balanced elementary witness is structurally unlikely to be the right attack
+
+Next coding step after that negative result:
+
+- implement explicit small graph moves, starting with `2x2 -> 3x3` out-splits via division matrices and edge-matrix factorizations
+- search whether out-splits of the Brix-Ruiz `2x2` pair admit a short balanced chain or another highly structured common refinement in size `3`
+- only after that decide whether to fold any discovered move family into the main `search_sse` engine
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.

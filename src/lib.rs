@@ -1,4 +1,5 @@
 pub mod aligned;
+pub mod balanced;
 pub mod conjugacy;
 pub mod factorisation;
 pub mod invariants;
