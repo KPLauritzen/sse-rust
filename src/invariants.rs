@@ -5,11 +5,7 @@ use crate::matrix::SqMatrix;
 pub fn check_invariants_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
     // 1. Trace
     if a.trace() != b.trace() {
-        return Some(format!(
-            "trace mismatch: {} vs {}",
-            a.trace(),
-            b.trace()
-        ));
+        return Some(format!("trace mismatch: {} vs {}", a.trace(), b.trace()));
     }
 
     // 2. Determinant
@@ -66,8 +62,10 @@ fn bowen_franks_2x2(m: &SqMatrix<2>) -> (i64, i64) {
     let det = e00 * e11 - e01 * e10;
 
     // gcd of all four entries
-    let g = gcd(gcd(e00.unsigned_abs(), e01.unsigned_abs()),
-                gcd(e10.unsigned_abs(), e11.unsigned_abs()));
+    let g = gcd(
+        gcd(e00.unsigned_abs(), e01.unsigned_abs()),
+        gcd(e10.unsigned_abs(), e11.unsigned_abs()),
+    );
 
     if g == 0 {
         // All entries zero means I - A = 0, so A = I
@@ -114,8 +112,14 @@ fn eval_poly_at_matrix_2x2(coeffs: &[i64], a: &SqMatrix<2>) -> [[i64; 2]; 2] {
         }
         // pow = pow * A
         let new_pow = [
-            [pow[0][0] * a00 + pow[0][1] * a10, pow[0][0] * a01 + pow[0][1] * a11],
-            [pow[1][0] * a00 + pow[1][1] * a10, pow[1][0] * a01 + pow[1][1] * a11],
+            [
+                pow[0][0] * a00 + pow[0][1] * a10,
+                pow[0][0] * a01 + pow[0][1] * a11,
+            ],
+            [
+                pow[1][0] * a00 + pow[1][1] * a10,
+                pow[1][0] * a01 + pow[1][1] * a11,
+            ],
         ];
         pow = new_pow;
     }
@@ -236,7 +240,7 @@ mod tests {
     fn test_different_det_fails() {
         let a = SqMatrix::new([[3, 1], [1, 1]]); // det = 2
         let b = SqMatrix::new([[2, 1], [1, 2]]); // det = 3, but trace = 4 for both
-        // Actually trace(a) = 4, trace(b) = 4, det(a) = 2, det(b) = 3
+                                                 // Actually trace(a) = 4, trace(b) = 4, det(a) = 2, det(b) = 3
         let result = check_invariants_2x2(&a, &b);
         assert!(result.is_some());
         assert!(result.unwrap().contains("determinant"));

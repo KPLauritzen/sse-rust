@@ -83,7 +83,12 @@ fn fundamental_discriminant(delta: i64) -> (i64, i64) {
     } else {
         // D_K = 4 * d_signed, g = f / 2
         // f must be even (see above)
-        debug_assert!(f % 2 == 0, "f={} should be even when d_signed={} mod 4 != 1", f, d_mod4);
+        debug_assert!(
+            f % 2 == 0,
+            "f={} should be even when d_signed={} mod 4 != 1",
+            f,
+            d_mod4
+        );
         (4 * d_signed, (f / 2) as i64)
     }
 }
@@ -188,14 +193,17 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> ReducedForm {
 
         // Check: is it reduced? 0 < b_prime and sqrt_d - b_prime < 2|c|
         // If b_prime <= 0, try m+1
-        let b_prime = if b_prime <= 0 { b_prime + two_c } else { b_prime };
+        let b_prime = if b_prime <= 0 {
+            b_prime + two_c
+        } else {
+            b_prime
+        };
 
         let new_a = cur_c.abs();
         let new_c = (b_prime * b_prime - disc) / (4 * new_a);
         // Check reduced condition
-        let is_reduced = b_prime > 0
-            && sqrt_d - b_prime < 2 * new_a
-            && 2 * new_a < sqrt_d + b_prime;
+        let is_reduced =
+            b_prime > 0 && sqrt_d - b_prime < 2 * new_a && 2 * new_a < sqrt_d + b_prime;
 
         cur_a = new_a;
         cur_b = b_prime;
@@ -489,7 +497,7 @@ fn eigenvector_ideal_class_via_hnf(
     //   Coordinates (v_lambda_coeff/2, 1) if v_lambda_coeff is even.
 
     let b0 = ((delta % 4) + 4) % 4; // 0 or 1
-    // b0 should be 0 or 1 since delta ≡ 0 or 1 mod 4
+                                    // b0 should be 0 or 1 since delta ≡ 0 or 1 mod 4
 
     if b0 == 1 {
         // Δ ≡ 1 mod 4, ω = (1 + √Δ)/2
@@ -636,8 +644,8 @@ mod tests {
         // (2, 1, 3) is another form. disc = 1 - 24 = -23. Reduced since |1| ≤ 2 ≤ 3.
         let f1 = reduce_form_negative(2, 1, 3);
         let f2 = reduce_form_negative(2, -1, 3); // Same class (inverse)
-        // For disc -23, class number is 3. (2,1,3) and (2,-1,3) are inverses.
-        // They should reduce to different forms since they're in different classes.
+                                                 // For disc -23, class number is 3. (2,1,3) and (2,-1,3) are inverses.
+                                                 // They should reduce to different forms since they're in different classes.
         assert_ne!(f1, f2);
     }
 
@@ -685,7 +693,10 @@ mod tests {
 
         assert!(ca.is_some(), "Should compute class for A");
         assert!(cb.is_some(), "Should compute class for B");
-        assert_ne!(ca, cb, "A and B should have different ideal classes (non-SSE)");
+        assert_ne!(
+            ca, cb,
+            "A and B should have different ideal classes (non-SSE)"
+        );
     }
 
     #[test]
@@ -706,7 +717,10 @@ mod tests {
 
         // At least some pairs should differ (the paper says all three are non-SSE)
         let all_same = c1 == c2 && c2 == c3;
-        assert!(!all_same, "At least some pairs should have different ideal classes");
+        assert!(
+            !all_same,
+            "At least some pairs should have different ideal classes"
+        );
     }
 
     #[test]

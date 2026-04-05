@@ -11,11 +11,7 @@ use crate::types::{EsseStep, SearchConfig, SsePath, SseResult};
 /// varying sizes (2x2, 3x3, ...) in canonical form, and edges are elementary
 /// SSE steps (A = UV, B = VU). Searching from both ends reduces complexity
 /// from O(branching^L) to O(2 * branching^(L/2)).
-pub fn search_sse_2x2(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    config: &SearchConfig,
-) -> SseResult<2> {
+pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -> SseResult<2> {
     // Quick check: are they already equal?
     if a == b {
         return SseResult::Equivalent(SsePath {
@@ -404,7 +400,11 @@ mod tests {
         // Verify first step starts from first matrix and last step ends at last matrix.
         let first_step = &path.steps[0];
         let uv = first_step.u.mul(&first_step.v);
-        assert_eq!(uv, DynMatrix::from_sq(&path.matrices[0]), "First step: UV != A");
+        assert_eq!(
+            uv,
+            DynMatrix::from_sq(&path.matrices[0]),
+            "First step: UV != A"
+        );
 
         let last_step = &path.steps[path.steps.len() - 1];
         let vu = last_step.v.mul(&last_step.u);
@@ -418,11 +418,7 @@ mod tests {
         for i in 0..path.steps.len() - 1 {
             let vu_i = path.steps[i].v.mul(&path.steps[i].u);
             let uv_next = path.steps[i + 1].u.mul(&path.steps[i + 1].v);
-            assert_eq!(
-                vu_i, uv_next,
-                "Step {}: VU != UV of step {}",
-                i, i + 1
-            );
+            assert_eq!(vu_i, uv_next, "Step {}: VU != UV of step {}", i, i + 1);
         }
     }
 
@@ -581,7 +577,8 @@ mod tests {
             }
             _ => panic!(
                 "Expected Equivalent for constructed rectangular SSE pair A={:?} B={:?}, got {:?}",
-                a, b,
+                a,
+                b,
                 match &result {
                     SseResult::NotEquivalent(r) => format!("NotEquivalent({})", r),
                     SseResult::Unknown => "Unknown".to_string(),

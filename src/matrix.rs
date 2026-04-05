@@ -117,7 +117,12 @@ impl<const N: usize> SqMatrix<N> {
 
     /// Maximum entry value.
     pub fn max_entry(&self) -> u32 {
-        self.data.iter().flat_map(|row| row.iter()).copied().max().unwrap_or(0)
+        self.data
+            .iter()
+            .flat_map(|row| row.iter())
+            .copied()
+            .max()
+            .unwrap_or(0)
     }
 }
 

@@ -29,8 +29,14 @@ fn dynmatrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 /// Returns a JSON string with the result.
 #[wasm_bindgen]
 pub fn search_sse(
-    a00: u32, a01: u32, a10: u32, a11: u32,
-    b00: u32, b01: u32, b10: u32, b11: u32,
+    a00: u32,
+    a01: u32,
+    a10: u32,
+    a11: u32,
+    b00: u32,
+    b01: u32,
+    b10: u32,
+    b11: u32,
     max_lag: usize,
     max_intermediate_dim: usize,
     max_entry: u32,
