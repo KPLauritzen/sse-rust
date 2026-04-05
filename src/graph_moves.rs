@@ -1,63 +1,64 @@
+use std::collections::HashMap;
+
 use crate::matrix::{DynMatrix, SqMatrix};
 
-/// One explicit 2x2 -> 3x3 out-split witness.
+/// One explicit one-step out-split witness.
 ///
 /// The matrices satisfy `A = D E` and `C = E D`, where `D` is a division matrix.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OutsplitWitness2x2To3x3 {
+pub struct OutsplitWitness {
     pub division: DynMatrix,
     pub edge: DynMatrix,
     pub outsplit: DynMatrix,
 }
 
-/// Enumerate all one-step 2x2 -> 3x3 out-splits of a 2x2 nonnegative matrix.
-pub fn enumerate_outsplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2To3x3> {
+pub type OutsplitWitness2x2To3x3 = OutsplitWitness;
+
+/// Two successive out-splits starting from a 2x2 matrix.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TwoStepOutsplitChain2x2 {
+    pub first: OutsplitWitness,
+    pub second: OutsplitWitness,
+}
+
+/// Enumerate all one-step out-splits of a square nonnegative matrix.
+pub fn enumerate_one_step_outsplits(a: &DynMatrix) -> Vec<OutsplitWitness> {
+    assert!(a.is_square());
+
+    let parent_count = a.rows;
+    let child_count = parent_count + 1;
+    let assignments = child_parent_assignments(child_count, parent_count);
+    let parent_rows: Vec<Vec<u32>> = (0..parent_count)
+        .map(|row| (0..parent_count).map(|col| a.get(row, col)).collect())
+        .collect();
+
     let mut witnesses = Vec::new();
-
-    for assignment in child_parent_assignments_3_over_2() {
-        let division = division_matrix_from_assignment(&assignment);
-        let row0_children: Vec<usize> = assignment
+    for assignment in assignments {
+        let division = division_matrix_from_assignment(&assignment, parent_count);
+        let child_rows_by_parent = children_by_parent(&assignment, parent_count);
+        let split_options_by_parent: Vec<Vec<Vec<Vec<u32>>>> = parent_rows
             .iter()
-            .enumerate()
-            .filter_map(|(idx, &parent)| (parent == 0).then_some(idx))
+            .zip(&child_rows_by_parent)
+            .map(|(row, children)| split_row_into_children(row, children.len()))
             .collect();
-        let row1_children: Vec<usize> = assignment
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, &parent)| (parent == 1).then_some(idx))
-            .collect();
-
-        let row0_splits = split_row_2_into_children(a.data[0], row0_children.len());
-        let row1_splits = split_row_2_into_children(a.data[1], row1_children.len());
-
-        for split0 in &row0_splits {
-            for split1 in &row1_splits {
-                let mut rows = [[0u32; 2]; 3];
-                for (child_idx, row) in row0_children.iter().copied().zip(split0.iter().copied()) {
-                    rows[child_idx] = row;
-                }
-                for (child_idx, row) in row1_children.iter().copied().zip(split1.iter().copied()) {
-                    rows[child_idx] = row;
-                }
-
-                let edge = DynMatrix::new(
-                    3,
-                    2,
-                    rows.iter().flat_map(|row| row.iter()).copied().collect(),
-                );
-                let outsplit = edge.mul(&division);
-                debug_assert_eq!(division.mul(&edge), DynMatrix::from_sq(a));
-
-                witnesses.push(OutsplitWitness2x2To3x3 {
-                    division: division.clone(),
-                    edge,
-                    outsplit,
-                });
-            }
-        }
+        let mut child_rows = vec![vec![0u32; parent_count]; child_count];
+        recurse_outsplit_rows(
+            0,
+            &child_rows_by_parent,
+            &split_options_by_parent,
+            &mut child_rows,
+            &division,
+            a,
+            &mut witnesses,
+        );
     }
 
     witnesses
+}
+
+/// Enumerate all one-step 2x2 -> 3x3 out-splits of a 2x2 nonnegative matrix.
+pub fn enumerate_outsplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2To3x3> {
+    enumerate_one_step_outsplits(&DynMatrix::from_sq(a))
 }
 
 /// Search for a common one-step 3x3 out-split refinement up to permutation.
@@ -80,44 +81,142 @@ pub fn find_common_outsplit_refinement_2x2(
     None
 }
 
-fn child_parent_assignments_3_over_2() -> Vec<[usize; 3]> {
-    let mut assignments = Vec::new();
-    for a0 in 0..=1 {
-        for a1 in 0..=1 {
-            for a2 in 0..=1 {
-                let assignment = [a0, a1, a2];
-                if assignment.contains(&0) && assignment.contains(&1) {
-                    assignments.push(assignment);
-                }
+/// Search for a common two-step 4x4 out-split refinement up to permutation.
+pub fn find_common_two_step_outsplit_refinement_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+) -> Option<(TwoStepOutsplitChain2x2, TwoStepOutsplitChain2x2)> {
+    let mut left_refinements = HashMap::new();
+    for first in enumerate_outsplits_2x2_to_3x3(a) {
+        for second in enumerate_one_step_outsplits(&first.outsplit) {
+            left_refinements
+                .entry(second.outsplit.canonical_perm())
+                .or_insert_with(|| TwoStepOutsplitChain2x2 {
+                    first: first.clone(),
+                    second,
+                });
+        }
+    }
+
+    for first in enumerate_outsplits_2x2_to_3x3(b) {
+        for second in enumerate_one_step_outsplits(&first.outsplit) {
+            let canon = second.outsplit.canonical_perm();
+            if let Some(left) = left_refinements.get(&canon) {
+                return Some((
+                    left.clone(),
+                    TwoStepOutsplitChain2x2 {
+                        first: first.clone(),
+                        second,
+                    },
+                ));
             }
         }
     }
+
+    None
+}
+
+fn child_parent_assignments(child_count: usize, parent_count: usize) -> Vec<Vec<usize>> {
+    let mut assignments = Vec::new();
+    let mut current = vec![0usize; child_count];
+    recurse_child_parent_assignments(
+        0,
+        child_count,
+        parent_count,
+        &mut current,
+        &mut assignments,
+    );
     assignments
 }
 
-fn division_matrix_from_assignment(assignment: &[usize; 3]) -> DynMatrix {
-    let mut data = vec![0u32; 6];
-    for (child, &parent) in assignment.iter().enumerate() {
-        data[parent * 3 + child] = 1;
+fn recurse_child_parent_assignments(
+    idx: usize,
+    child_count: usize,
+    parent_count: usize,
+    current: &mut [usize],
+    assignments: &mut Vec<Vec<usize>>,
+) {
+    if idx == child_count {
+        let mut seen = vec![false; parent_count];
+        for &parent in current.iter() {
+            seen[parent] = true;
+        }
+        if seen.iter().all(|used| *used) {
+            assignments.push(current.to_vec());
+        }
+        return;
     }
-    DynMatrix::new(2, 3, data)
+
+    for parent in 0..parent_count {
+        current[idx] = parent;
+        recurse_child_parent_assignments(idx + 1, child_count, parent_count, current, assignments);
+    }
 }
 
-fn split_row_2_into_children(row: [u32; 2], children: usize) -> Vec<Vec<[u32; 2]>> {
+fn division_matrix_from_assignment(assignment: &[usize], parent_count: usize) -> DynMatrix {
+    let child_count = assignment.len();
+    let mut data = vec![0u32; parent_count * child_count];
+    for (child, &parent) in assignment.iter().enumerate() {
+        data[parent * child_count + child] = 1;
+    }
+    DynMatrix::new(parent_count, child_count, data)
+}
+
+fn children_by_parent(assignment: &[usize], parent_count: usize) -> Vec<Vec<usize>> {
+    let mut children = vec![Vec::new(); parent_count];
+    for (child, &parent) in assignment.iter().enumerate() {
+        children[parent].push(child);
+    }
+    children
+}
+
+fn split_row_into_children(row: &[u32], children: usize) -> Vec<Vec<Vec<u32>>> {
     if children == 0 {
         return Vec::new();
     }
+
     let mut results = Vec::new();
-    let mut current = vec![[0u32; 2]; children];
-    recurse_split_row_2_into_children(0, row, &mut current, &mut results);
+    let mut current = vec![vec![0u32; row.len()]; children];
+    recurse_split_row_columns(0, row, &mut current, &mut results);
     results
 }
 
-fn recurse_split_row_2_into_children(
+fn recurse_split_row_columns(
+    col_idx: usize,
+    row: &[u32],
+    current: &mut [Vec<u32>],
+    results: &mut Vec<Vec<Vec<u32>>>,
+) {
+    if col_idx == row.len() {
+        results.push(current.to_vec());
+        return;
+    }
+
+    let compositions = compositions(row[col_idx], current.len());
+    for composition in compositions {
+        for (child_idx, value) in composition.into_iter().enumerate() {
+            current[child_idx][col_idx] = value;
+        }
+        recurse_split_row_columns(col_idx + 1, row, current, results);
+    }
+}
+
+fn compositions(total: u32, parts: usize) -> Vec<Vec<u32>> {
+    if parts == 0 {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+    let mut current = vec![0u32; parts];
+    recurse_compositions(0, total, &mut current, &mut results);
+    results
+}
+
+fn recurse_compositions(
     idx: usize,
-    remaining: [u32; 2],
-    current: &mut [[u32; 2]],
-    results: &mut Vec<Vec<[u32; 2]>>,
+    remaining: u32,
+    current: &mut [u32],
+    results: &mut Vec<Vec<u32>>,
 ) {
     if idx + 1 == current.len() {
         current[idx] = remaining;
@@ -125,16 +224,58 @@ fn recurse_split_row_2_into_children(
         return;
     }
 
-    for left0 in 0..=remaining[0] {
-        for left1 in 0..=remaining[1] {
-            current[idx] = [left0, left1];
-            recurse_split_row_2_into_children(
-                idx + 1,
-                [remaining[0] - left0, remaining[1] - left1],
-                current,
-                results,
-            );
+    for value in 0..=remaining {
+        current[idx] = value;
+        recurse_compositions(idx + 1, remaining - value, current, results);
+    }
+}
+
+fn recurse_outsplit_rows(
+    parent_idx: usize,
+    child_rows_by_parent: &[Vec<usize>],
+    split_options_by_parent: &[Vec<Vec<Vec<u32>>>],
+    child_rows: &mut [Vec<u32>],
+    division: &DynMatrix,
+    a: &DynMatrix,
+    witnesses: &mut Vec<OutsplitWitness>,
+) {
+    if parent_idx == child_rows_by_parent.len() {
+        let edge = DynMatrix::new(
+            child_rows.len(),
+            a.cols,
+            child_rows
+                .iter()
+                .flat_map(|row| row.iter())
+                .copied()
+                .collect(),
+        );
+        let outsplit = edge.mul(division);
+        debug_assert_eq!(division.mul(&edge), *a);
+        witnesses.push(OutsplitWitness {
+            division: division.clone(),
+            edge,
+            outsplit,
+        });
+        return;
+    }
+
+    for split in &split_options_by_parent[parent_idx] {
+        for (child_idx, row) in child_rows_by_parent[parent_idx]
+            .iter()
+            .copied()
+            .zip(split.iter())
+        {
+            child_rows[child_idx].clone_from(row);
         }
+        recurse_outsplit_rows(
+            parent_idx + 1,
+            child_rows_by_parent,
+            split_options_by_parent,
+            child_rows,
+            division,
+            a,
+            witnesses,
+        );
     }
 }
 
@@ -155,6 +296,22 @@ mod tests {
             assert_eq!(witness.outsplit.rows, 3);
             assert_eq!(witness.outsplit.cols, 3);
             assert_eq!(witness.division.mul(&witness.edge), DynMatrix::from_sq(&a));
+        }
+    }
+
+    #[test]
+    fn test_enumerate_one_step_outsplits_3x3_nonempty() {
+        let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 3, 2, 0, 1]);
+        let witnesses = enumerate_one_step_outsplits(&a);
+        assert!(!witnesses.is_empty());
+        for witness in &witnesses {
+            assert_eq!(witness.division.rows, 3);
+            assert_eq!(witness.division.cols, 4);
+            assert_eq!(witness.edge.rows, 4);
+            assert_eq!(witness.edge.cols, 3);
+            assert_eq!(witness.outsplit.rows, 4);
+            assert_eq!(witness.outsplit.cols, 4);
+            assert_eq!(witness.division.mul(&witness.edge), a);
         }
     }
 

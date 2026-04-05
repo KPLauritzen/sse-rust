@@ -77,6 +77,28 @@ Next coding step after that:
   `2x2 -> 3x3 -> 4x4` out-splits on both sides looking for a common canonical refinement, or
   bounded search among `3x3` out-splits for a short `3x3 <-> 2x2 <-> 3x3` zig-zag that the current sidecar probes do not yet capture
 
+Status update on two-step split chains:
+
+- the graph-move sidecar now has a generic one-step out-split enumerator for square matrices, so it can probe both `2x2 -> 3x3` and `3x3 -> 4x4`
+- for `brix_ruiz_k3`, the two-step search explores `17856` second-step out-splits from the `A` side and `29304` from the `B` side, collapsing to `98` and `161` canonical `4x4` refinements respectively
+- for `brix_ruiz_k4`, the corresponding counts are `34920` and `90000`, collapsing to `200` and `509` canonical `4x4` refinements
+- there is still no common two-step out-split refinement up to permutation for either pair
+
+Status update on bridge-zig-zag probes:
+
+- the first-step `3x3` out-splits still factor back down to only a handful of canonical `2x2` bridge states:
+  `1` versus `3` for `k = 3`, and `1` versus `2` for `k = 4`
+- running the main bounded `2x2` solver on every bridge-state pair with `max_lag = 6`, `max_intermediate_dim = 3`, `max_entry = 25` does not produce a connection
+- all of those bridge-pair searches stay `unknown`, with about `2555` frontier expansions per pair for `k = 3` and `2643` per pair for `k = 4`
+
+This makes the current obstruction sharper: the missing witness is not a tiny common refinement and not a tiny bridge pair inside the existing `2x2` BFS universe.
+
+Next coding step after that:
+
+- probe richer `3x3`-level move families directly rather than forcing them through exact common refinements or exact `2x2` bridge states
+- the cleanest next experiment is a bounded search on the `3x3` out-split states themselves, prioritising short zig-zags that alternate `3x3 -> 2x2` amalgamations and `2x2 -> 3x3` out-splits
+- if that still diffuses too much, switch from refinement probes to a best-first search on `3x3` out-split states guided by canonical overlap or small-entry bridge counts
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.
