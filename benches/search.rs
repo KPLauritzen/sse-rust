@@ -53,13 +53,16 @@ fn bench_brix_ruiz_k3(c: &mut Criterion) {
     let a = SqMatrix::new([[1, 3], [2, 1]]);
     let b = SqMatrix::new([[1, 6], [1, 1]]);
     let config = SearchConfig {
-        max_lag: 4,
+        max_lag: 6,
         max_intermediate_dim: 3,
-        max_entry: 4,
+        max_entry: 6,
     };
-    c.bench_function("brix_ruiz_k3", |bencher| {
+    let mut group = c.benchmark_group("brix_ruiz_k3");
+    group.sample_size(20);
+    group.bench_function("search", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
     });
+    group.finish();
 }
 
 /// Larger entry bound search to stress-test BFS frontier expansion.

@@ -261,6 +261,37 @@ impl DynMatrix {
         sum
     }
 
+    /// Determinant for 2x2 DynMatrix: ad - bc.
+    pub fn det_2x2(&self) -> i64 {
+        assert_eq!(self.rows, 2);
+        assert_eq!(self.cols, 2);
+        self.get(0, 0) as i64 * self.get(1, 1) as i64
+            - self.get(0, 1) as i64 * self.get(1, 0) as i64
+    }
+
+    /// Determinant for 3x3 DynMatrix via cofactor expansion along row 0.
+    pub fn det_3x3(&self) -> i64 {
+        assert_eq!(self.rows, 3);
+        assert_eq!(self.cols, 3);
+        let g = |i: usize, j: usize| self.get(i, j) as i64;
+        g(0, 0) * (g(1, 1) * g(2, 2) - g(1, 2) * g(2, 1))
+            - g(0, 1) * (g(1, 0) * g(2, 2) - g(1, 2) * g(2, 0))
+            + g(0, 2) * (g(1, 0) * g(2, 1) - g(1, 1) * g(2, 0))
+    }
+
+    /// Sum of the three 2x2 principal minors of a 3x3 matrix.
+    /// This is the coefficient of -lambda in the characteristic polynomial,
+    /// i.e. the sum of products of eigenvalue pairs.
+    pub fn principal_minor_sum_3x3(&self) -> i64 {
+        assert_eq!(self.rows, 3);
+        assert_eq!(self.cols, 3);
+        let g = |i: usize, j: usize| self.get(i, j) as i64;
+        // Minor from rows/cols {0,1} + {0,2} + {1,2}
+        (g(0, 0) * g(1, 1) - g(0, 1) * g(1, 0))
+            + (g(0, 0) * g(2, 2) - g(0, 2) * g(2, 0))
+            + (g(1, 1) * g(2, 2) - g(1, 2) * g(2, 1))
+    }
+
     /// Canonical form under permutation similarity for square matrices.
     /// Returns the lexicographic minimum over all P^T * M * P for permutation matrices P.
     pub fn canonical_perm(&self) -> Self {
@@ -461,5 +492,33 @@ mod tests {
     fn test_dyn_trace() {
         let m = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 2, 0, 0, 0, 3]);
         assert_eq!(m.trace(), 6);
+    }
+
+    #[test]
+    fn test_dyn_det_2x2() {
+        let m = DynMatrix::new(2, 2, vec![3, 1, 2, 5]);
+        assert_eq!(m.det_2x2(), 13); // 3*5 - 1*2
+        let m2 = DynMatrix::new(2, 2, vec![1, 2, 3, 4]);
+        assert_eq!(m2.det_2x2(), -2); // 1*4 - 2*3
+    }
+
+    #[test]
+    fn test_dyn_det_3x3() {
+        // Identity: det = 1
+        let id = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
+        assert_eq!(id.det_3x3(), 1);
+        // Singular matrix: det = 0
+        let m = DynMatrix::new(3, 3, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(m.det_3x3(), 0);
+    }
+
+    #[test]
+    fn test_principal_minor_sum_3x3() {
+        // Identity: minors are all 1, sum = 3
+        let id = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
+        assert_eq!(id.principal_minor_sum_3x3(), 3);
+        // [[2,1,0],[0,3,0],[0,0,1]]: minors = (6-0) + (2-0) + (3-0) = 11
+        let m = DynMatrix::new(3, 3, vec![2, 1, 0, 0, 3, 0, 0, 0, 1]);
+        assert_eq!(m.principal_minor_sum_3x3(), 11);
     }
 }

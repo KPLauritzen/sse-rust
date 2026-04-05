@@ -78,6 +78,10 @@ pub fn search_sse_2x2(
         ));
     }
 
+    // Precompute spectral invariants for pruning intermediates.
+    let source_trace = a.trace();
+    let source_det = a.det();
+
     for _lag in 0..config.max_lag {
         // Expand the smaller frontier to keep work balanced.
         let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
@@ -113,6 +117,12 @@ pub fn search_sse_2x2(
 
                 // Size bound: don't explore matrices larger than max_intermediate_dim.
                 if vu.rows > config.max_intermediate_dim {
+                    continue;
+                }
+
+                // Spectral pruning: nonzero eigenvalues are preserved by SSE,
+                // so every intermediate must have the same nonzero spectrum.
+                if !is_spectrally_consistent(&vu, source_trace, source_det) {
                     continue;
                 }
 
@@ -158,6 +168,34 @@ pub fn search_sse_2x2(
     }
 
     SseResult::Unknown
+}
+
+/// Check whether a candidate intermediate matrix has a nonzero spectrum
+/// consistent with the source matrix. SSE preserves nonzero eigenvalues,
+/// so any intermediate in a valid chain must pass this check.
+fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) -> bool {
+    if !vu.is_square() {
+        return true; // non-square shouldn't happen, don't filter
+    }
+    // Trace (sum of eigenvalues) must match for all sizes.
+    if vu.trace() != source_trace {
+        return false;
+    }
+    match vu.rows {
+        2 => {
+            // For 2x2: trace and det fully determine the spectrum.
+            vu.det_2x2() == source_det
+        }
+        3 => {
+            // A 3x3 intermediate from a 2x2 source has one zero eigenvalue.
+            // det must be 0, and the sum of eigenvalue pairs must equal source_det.
+            vu.det_3x3() == 0 && vu.principal_minor_sum_3x3() == source_det
+        }
+        _ => {
+            // For larger matrices, trace check only (still useful).
+            true
+        }
+    }
 }
 
 /// Create a permutation similarity step: given matrices M and M' = PMP
@@ -563,5 +601,46 @@ mod tests {
         assert_eq!(a.trace(), b.trace()); // 2
         assert_eq!(a.det(), b.det()); // -11
         assert!(check_invariants_2x2(&a, &b).is_none());
+    }
+
+    // --- Spectral pruning tests ---
+
+    #[test]
+    fn test_spectral_consistent_2x2_matching() {
+        // [[2,1],[1,1]] has trace=3, det=1
+        let m = DynMatrix::new(2, 2, vec![2, 1, 1, 1]);
+        assert!(is_spectrally_consistent(&m, 3, 1));
+    }
+
+    #[test]
+    fn test_spectral_inconsistent_2x2_wrong_trace() {
+        let m = DynMatrix::new(2, 2, vec![3, 1, 1, 1]); // trace=4, det=2
+        assert!(!is_spectrally_consistent(&m, 3, 1));
+    }
+
+    #[test]
+    fn test_spectral_inconsistent_2x2_wrong_det() {
+        let m = DynMatrix::new(2, 2, vec![2, 1, 1, 2]); // trace=4, det=3
+        assert!(!is_spectrally_consistent(&m, 4, 2));
+    }
+
+    #[test]
+    fn test_spectral_consistent_3x3_zero_eigenvalue() {
+        // A 3x3 with eigenvalues {2, 1, 0}: trace=3, det=0, minor_sum=2.
+        // Consistent with a 2x2 source having trace=3, det=2.
+        // [[2,0,0],[0,1,0],[0,0,0]]: trace=3, det=0, minor_sum = 2+0+0 = 2
+        let m = DynMatrix::new(3, 3, vec![2, 0, 0, 0, 1, 0, 0, 0, 0]);
+        assert_eq!(m.trace(), 3);
+        assert_eq!(m.det_3x3(), 0);
+        assert_eq!(m.principal_minor_sum_3x3(), 2);
+        assert!(is_spectrally_consistent(&m, 3, 2));
+        assert!(!is_spectrally_consistent(&m, 3, 1));
+    }
+
+    #[test]
+    fn test_spectral_inconsistent_3x3_nonzero_det() {
+        // [[1,0,0],[0,1,0],[0,0,1]]: trace=3, det=1 (no zero eigenvalue)
+        let m = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
+        assert!(!is_spectrally_consistent(&m, 3, 1));
     }
 }
