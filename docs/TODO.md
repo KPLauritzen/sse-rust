@@ -137,6 +137,29 @@ Next coding step after that:
   test whether two-step `3x3` refinements built from either out-splits or in-splits admit a common `4x4` state
 - if that also stays disjoint, stop growing the sidecar graph blindly and switch back to the main solver with a structural heuristic mined from these tiny split components
 
+Status update on two-step mixed split refinements:
+
+- allowing either split direction doubles the first-step `3x3` refinement universe, but it still stays small:
+  `14` versus `18` canonical first-step states for `k = 3`, and `18` versus `30` for `k = 4`
+- pushing one more mixed split step produces much larger canonical `4x4` refinement sets:
+  `320` versus `518` for `k = 3`, and `613` versus `1681` for `k = 4`
+- even with that enlarged move family, the two sides remain disjoint: there is still no common two-step mixed split refinement
+
+At this point the sidecar evidence is consistent across every small structured move family tried so far:
+
+- direct balanced witnesses fail
+- one-step out-split refinements fail
+- two-step out-split refinements fail
+- bounded `3x3 -> 2x2 -> 3x3` zig-zag components stay isolated
+- one-step mixed out/in refinements fail
+- two-step mixed out/in refinements fail
+
+Next coding step after that:
+
+- stop investing in wider split-sidecar graphs for the moment
+- move back to the main solver and use this sidecar structure as guidance for a search heuristic or pruning signal
+- the best candidate is a best-first or iteratively deepened search that prioritises intermediates whose small split neighborhoods look compatible with the target side, rather than plain FIFO BFS
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.

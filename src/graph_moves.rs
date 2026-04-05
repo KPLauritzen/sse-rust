@@ -81,6 +81,24 @@ pub fn enumerate_insplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2T
     enumerate_one_step_insplits(&DynMatrix::from_sq(a))
 }
 
+/// Enumerate all canonical one-step split refinements, allowing either split direction.
+pub fn enumerate_one_step_split_refinements(a: &DynMatrix) -> Vec<DynMatrix> {
+    let mut seen = HashSet::new();
+    let mut refinements = Vec::new();
+
+    for witness in enumerate_one_step_outsplits(a)
+        .into_iter()
+        .chain(enumerate_one_step_insplits(a).into_iter())
+    {
+        let canon = witness.outsplit.canonical_perm();
+        if seen.insert(canon.clone()) {
+            refinements.push(canon);
+        }
+    }
+
+    refinements
+}
+
 /// Search for a common one-step 3x3 out-split refinement up to permutation.
 pub fn find_common_outsplit_refinement_2x2(
     a: &SqMatrix<2>,

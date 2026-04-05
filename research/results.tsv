@@ -24,3 +24,4 @@ c86b908	6	6	5	825	59	kept	Removed heap allocation from specialized 2x2 and 3x3 c
 0e933f2	6	6	5	825	44	kept	Generalized the out-split sidecar to probe two-step `2x2 -> 3x3 -> 4x4` refinements and bridge-state zig-zags; both stay negative for Brix-Ruiz k=3 and k=4
 563101a	6	6	5	825	43	kept	Added direct bounded `3x3 -> 2x2 -> 3x3` zig-zag probes; the canonical A-side 3x3 out-split states are already closed components for Brix-Ruiz k=3 and k=4 at bridge bound 8
 f1268a3	6	6	5	825	42	kept	Added dual in-split sidecar probes via transposition; the move family is genuinely larger but still yields no one-step common 3x3 refinement in any out/in combination for Brix-Ruiz k=3 and k=4
+e8076c2	6	6	5	825	42	kept	Added two-step mixed split refinement probes; the enlarged out/in sidecar still produces disjoint canonical 4x4 refinement sets for Brix-Ruiz k=3 and k=4
