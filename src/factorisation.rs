@@ -715,6 +715,124 @@ fn enumerate_factorisations_3x3_to_2_from_row0(
     results
 }
 
+// --- Elementary conjugation moves for 3×3 ---
+
+/// Generate 3x3 -> 3x3 elementary SSE steps via conjugation by
+/// P = I + k*e_i*e_j^T (an elementary matrix with det=1).
+///
+/// Row-operation direction: U = P, V = P^{-1}*C (subtract k*row_j from row_i).
+///   UV = C, VU = P^{-1}*C*P (the new node).
+///
+/// Column-operation direction: V = P, U = C*P^{-1} (subtract k*col_i from col_j).
+///   UV = C, VU = P*C*P^{-1} (the new node).
+fn visit_elementary_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let n = 3usize;
+
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..n {
+        for j in 0..n {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+
+            // --- Row-operation direction: U = P = I + k*e_i*e_j^T ---
+            // V = P^{-1}*C = C with row_i -= k*row_j.
+            // Nonneg iff row_i(C) >= k*row_j(C) entrywise.
+            let max_k_row = if cm[j].iter().all(|&v| v == 0) {
+                0 // row_j zero -> V=C, trivial
+            } else {
+                let mut mk = i64::MAX;
+                for col in 0..n {
+                    if cm[j][col] > 0 {
+                        mk = mk.min(cm[i][col] / cm[j][col]);
+                    }
+                }
+                mk.min(me)
+            };
+
+            for k in 1..=max_k_row {
+                if k > me {
+                    break;
+                }
+                let mut v_arr = cm;
+                for col in 0..n {
+                    v_arr[i][col] = cm[i][col] - k * cm[j][col];
+                }
+                // V entries are nonneg by construction; check max_entry.
+                if v_arr[i].iter().any(|&e| e > me) {
+                    continue;
+                }
+                // U = P = I + k*e_i*e_j^T
+                let mut u_arr = [[0i64; 3]; 3];
+                for d in 0..n {
+                    u_arr[d][d] = 1;
+                }
+                u_arr[i][j] = k;
+
+                let u_mat = mat3_i64_to_dyn(&u_arr);
+                let v_mat = mat3_i64_to_dyn(&v_arr);
+                visit(u_mat, v_mat);
+            }
+
+            // --- Column-operation direction: V = P = I + k*e_i*e_j^T ---
+            // U = C*P^{-1} = C with col_j -= k*col_i.
+            // Nonneg iff col_j(C) >= k*col_i(C) entrywise.
+            let max_k_col = {
+                let mut mk = i64::MAX;
+                let mut any_pos = false;
+                for row in 0..n {
+                    if cm[row][i] > 0 {
+                        any_pos = true;
+                        mk = mk.min(cm[row][j] / cm[row][i]);
+                    }
+                }
+                if !any_pos { 0 } else { mk.min(me) }
+            };
+
+            for k in 1..=max_k_col {
+                if k > me {
+                    break;
+                }
+                let mut u_arr = cm;
+                for row in 0..n {
+                    u_arr[row][j] = cm[row][j] - k * cm[row][i];
+                }
+                if u_arr.iter().flat_map(|r| r.iter()).any(|&e| e > me) {
+                    continue;
+                }
+                // V = P = I + k*e_i*e_j^T
+                let mut v_arr = [[0i64; 3]; 3];
+                for d in 0..n {
+                    v_arr[d][d] = 1;
+                }
+                v_arr[i][j] = k;
+
+                let u_mat = mat3_i64_to_dyn(&u_arr);
+                let v_mat = mat3_i64_to_dyn(&v_arr);
+                visit(u_mat, v_mat);
+            }
+        }
+    }
+}
+
+fn mat3_i64_to_dyn(m: &[[i64; 3]; 3]) -> DynMatrix {
+    let data: Vec<u32> = m.iter().flat_map(|r| r.iter()).map(|&e| e as u32).collect();
+    DynMatrix::new(3, 3, data)
+}
+
 // --- Square 3×3 factorisation ---
 
 /// Solve A·x = b where A is 3×3 (given as rows), for nonneg integer x with
@@ -1026,6 +1144,10 @@ pub fn visit_all_factorisations<F>(
         if max_intermediate_dim >= 3 {
             let sq3_cap = max_entry.min(4);
             visit_square_factorisations_3x3(a, sq3_cap, &mut visit);
+            // Elementary conjugation moves C = P·(P⁻¹C), where P = I ± k·eᵢeⱼᵀ.
+            // These are O(1) per move and reach 3×3 nodes that the capped
+            // square enumeration misses (factor entries > cap).
+            visit_elementary_conjugations_3x3(a, max_entry, &mut visit);
         }
     }
 }
