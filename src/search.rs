@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::factorisation::enumerate_all_factorisations;
 use crate::invariants::check_invariants_2x2;
@@ -287,6 +287,7 @@ fn expand_frontier_layer(
         let factorisations =
             enumerate_all_factorisations(&current, max_intermediate_dim, max_entry);
         let mut expansions = Vec::new();
+        let mut seen_successors = HashSet::new();
         let mut stats = FrontierExpansionStats {
             frontier_nodes: 1,
             factorisation_calls: 1,
@@ -312,6 +313,9 @@ fn expand_frontier_layer(
             }
 
             let next_canon = next.canonical_perm();
+            if !seen_successors.insert(next_canon.clone()) {
+                continue;
+            }
             let step = EsseStep { u, v };
             expansions.push(FrontierExpansion {
                 parent_canon: current_canon.clone(),
@@ -639,6 +643,21 @@ mod tests {
         assert!(!telemetry.layers.is_empty());
         assert!(telemetry.frontier_nodes_expanded >= 1);
         assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_deduplicates_canonical_successors() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let a_canon = a_dyn.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(a_canon.clone(), a_dyn);
+
+        let (expansions, stats) =
+            expand_frontier_layer(&[a_canon], &orig, 2, 10, a.trace(), a.det());
+
+        assert!(!expansions.is_empty());
+        assert!(stats.factorisations_enumerated > expansions.len());
     }
 
     // --- Literature examples ---

@@ -1,0 +1,7 @@
+commit	required_passes	required_total	target_hits	total_points	total_ms	status	description
+7dea2f2	6	6	5	825	100	baseline	Initial baseline on autoresearch/2026-04-05-initial
+7dea2f2	6	6	5	825	101	rejected	Allowed det(U)<0 in square 2x2 factorisations; no target gain and slightly slower baseline
+7dea2f2	6	6	5	825	91	kept	Deduplicated canonical successors within each frontier-node expansion in BFS
+7dea2f2	6	6	5	825	104	rejected	Continue exploring when one bidirectional frontier empties; no target gain and slower overall runtime
+7dea2f2	6	6	5	825	119	rejected	Combined deeper frontier exploration with det(U)<0 square factorisations; still no Brix-Ruiz hit and slower
+7dea2f2	6	6	5	825	79	kept	Revalidated canonical-successor dedup on a fresh harness run; same score with lower total runtime
