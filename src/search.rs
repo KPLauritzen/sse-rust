@@ -1,6 +1,6 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::factorisation::enumerate_all_factorisations;
+use crate::factorisation::visit_all_factorisations;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
@@ -282,36 +282,37 @@ fn expand_frontier_layer(
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
-            .expect("frontier node should have an original matrix")
-            .clone();
-        let factorisations =
-            enumerate_all_factorisations(&current, max_intermediate_dim, max_entry);
+            .expect("frontier node should have an original matrix");
         let mut expansions = Vec::new();
+        let mut seen_successors = HashSet::new();
         let mut stats = FrontierExpansionStats {
             frontier_nodes: 1,
             factorisation_calls: 1,
-            factorisations_enumerated: factorisations.len(),
-            candidates_generated: factorisations.len(),
             ..FrontierExpansionStats::default()
         };
 
-        for (u, v) in factorisations {
+        visit_all_factorisations(current, max_intermediate_dim, max_entry, |u, v| {
+            stats.factorisations_enumerated += 1;
+            stats.candidates_generated += 1;
             let next = v.mul(&u);
 
             // Size bound: don't explore matrices larger than max_intermediate_dim.
             if next.rows > max_intermediate_dim {
                 stats.pruned_by_size += 1;
-                continue;
+                return;
             }
 
             // Spectral pruning: nonzero eigenvalues are preserved by SSE,
             // so every intermediate must have the same nonzero spectrum.
             if !is_spectrally_consistent(&next, source_trace, source_det) {
                 stats.pruned_by_spectrum += 1;
-                continue;
+                return;
             }
 
             let next_canon = next.canonical_perm();
+            if !seen_successors.insert(next_canon.clone()) {
+                return;
+            }
             let step = EsseStep { u, v };
             expansions.push(FrontierExpansion {
                 parent_canon: current_canon.clone(),
@@ -319,7 +320,7 @@ fn expand_frontier_layer(
                 next_orig: next,
                 step,
             });
-        }
+        });
 
         (expansions, stats)
     };
@@ -334,7 +335,7 @@ fn expand_frontier_layer(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        (expansions, stats)
+        (deduplicate_expansions(expansions), stats)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -345,8 +346,19 @@ fn expand_frontier_layer(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        (expansions, stats)
+        (deduplicate_expansions(expansions), stats)
     }
+}
+
+fn deduplicate_expansions(expansions: Vec<FrontierExpansion>) -> Vec<FrontierExpansion> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::with_capacity(expansions.len());
+    for expansion in expansions {
+        if seen.insert(expansion.next_canon.clone()) {
+            deduped.push(expansion);
+        }
+    }
+    deduped
 }
 
 fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &FrontierExpansionStats) {
@@ -411,6 +423,56 @@ fn permutation_step(m: &DynMatrix) -> EsseStep {
     EsseStep { u: mp, v: p }
 }
 
+fn permutation_step_between(from: &DynMatrix, to: &DynMatrix) -> Option<EsseStep> {
+    if from.rows != from.cols || to.rows != to.cols || from.rows != to.rows {
+        return None;
+    }
+    let n = from.rows;
+    let mut perm: Vec<usize> = (0..n).collect();
+    let mut result = None;
+    for_each_permutation(&mut perm, 0, &mut |perm| {
+        if result.is_some() {
+            return;
+        }
+        let (p, pinv) = permutation_matrices(perm);
+        let candidate = pinv.mul(from).mul(&p);
+        if candidate == *to {
+            let u = from.mul(&p);
+            result = Some(EsseStep { u, v: pinv });
+        }
+    });
+    result
+}
+
+fn permutation_matrices(perm: &[usize]) -> (DynMatrix, DynMatrix) {
+    let n = perm.len();
+    let mut p_data = vec![0u32; n * n];
+    let mut pinv_data = vec![0u32; n * n];
+    for (row, &col) in perm.iter().enumerate() {
+        p_data[row * n + col] = 1;
+        pinv_data[col * n + row] = 1;
+    }
+    (
+        DynMatrix::new(n, n, p_data),
+        DynMatrix::new(n, n, pinv_data),
+    )
+}
+
+fn for_each_permutation<F>(perm: &mut [usize], start: usize, visit: &mut F)
+where
+    F: FnMut(&[usize]),
+{
+    if start == perm.len() {
+        visit(perm);
+        return;
+    }
+    for idx in start..perm.len() {
+        perm.swap(start, idx);
+        for_each_permutation(perm, start + 1, visit);
+        perm.swap(start, idx);
+    }
+}
+
 /// Walk a parent chain from `node` back to the root, returning
 /// (matrices, steps) in root-to-node order.
 fn walk_parent_chain(
@@ -457,8 +519,23 @@ fn reconstruct_bidirectional_path(
     // Backward: B -> ... -> M, which we reverse to M -> ... -> B.
     let (bwd_matrices, bwd_steps) = walk_parent_chain(meeting_canon, bwd_parent, bwd_orig);
 
+    let fwd_meeting = fwd_matrices
+        .last()
+        .expect("forward chain should end at the meeting node")
+        .clone();
+    let bwd_meeting = bwd_matrices
+        .last()
+        .expect("backward chain should end at the meeting node")
+        .clone();
+
     // Build the combined step list.
     let mut all_steps = fwd_steps;
+
+    if fwd_meeting != bwd_meeting {
+        let step = permutation_step_between(&fwd_meeting, &bwd_meeting)
+            .expect("meeting representatives should be permutation-similar");
+        all_steps.push(step);
+    }
 
     // Reverse backward steps: each backward step had current=UV, neighbor=VU.
     // In the forward direction (M->...->B) we need neighbor=UV, current=VU,
@@ -472,6 +549,9 @@ fn reconstruct_bidirectional_path(
 
     // Build the combined matrix list (all intermediate DynMatrix nodes).
     let mut all_dyn_matrices: Vec<DynMatrix> = fwd_matrices;
+    if fwd_meeting != bwd_meeting {
+        all_dyn_matrices.push(bwd_meeting);
+    }
     // bwd_matrices is [B, ..., M] — reversed and skip M (already in fwd).
     for m in bwd_matrices.into_iter().rev().skip(1) {
         all_dyn_matrices.push(m);
@@ -625,6 +705,22 @@ mod tests {
     }
 
     #[test]
+    fn test_bfs_positive_pair_path_is_valid() {
+        let a = SqMatrix::new([[1, 1], [2, 5]]);
+        let b = SqMatrix::new([[1, 2], [1, 5]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+        };
+        let result = search_sse_2x2(&a, &b, &config);
+        match result {
+            SseResult::Equivalent(path) => assert_valid_path(&path),
+            other => panic!("expected Equivalent path, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_telemetry_for_brix_ruiz_search() {
         let a = SqMatrix::new([[1, 3], [2, 1]]);
         let b = SqMatrix::new([[1, 6], [1, 1]]);
@@ -639,6 +735,49 @@ mod tests {
         assert!(!telemetry.layers.is_empty());
         assert!(telemetry.frontier_nodes_expanded >= 1);
         assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_deduplicates_canonical_successors() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let a_canon = a_dyn.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(a_canon.clone(), a_dyn);
+
+        let (expansions, stats) =
+            expand_frontier_layer(&[a_canon], &orig, 2, 10, a.trace(), a.det());
+
+        assert!(!expansions.is_empty());
+        assert!(stats.factorisations_enumerated > expansions.len());
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_deduplicates_across_frontier_nodes() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let a_canon = a_dyn.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(a_canon.clone(), a_dyn);
+
+        let (single_expansions, _) = expand_frontier_layer(
+            std::slice::from_ref(&a_canon),
+            &orig,
+            2,
+            10,
+            a.trace(),
+            a.det(),
+        );
+        let (duplicate_frontier_expansions, _) = expand_frontier_layer(
+            &[a_canon.clone(), a_canon],
+            &orig,
+            2,
+            10,
+            a.trace(),
+            a.det(),
+        );
+
+        assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
     }
 
     // --- Literature examples ---

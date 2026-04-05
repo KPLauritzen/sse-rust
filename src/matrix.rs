@@ -216,14 +216,31 @@ impl DynMatrix {
         assert_eq!(self.cols, other.rows);
         let mut result = vec![0u32; self.rows * other.cols];
         for i in 0..self.rows {
+            let self_row = &self.data[i * self.cols..(i + 1) * self.cols];
+            let result_row = &mut result[i * other.cols..(i + 1) * other.cols];
             for k in 0..self.cols {
-                let a = self.get(i, k) as u64;
+                let a = self_row[k];
+                if a == 0 {
+                    continue;
+                }
+                let other_row = &other.data[k * other.cols..(k + 1) * other.cols];
+                let a = a as u64;
                 for j in 0..other.cols {
-                    result[i * other.cols + j] += (a * other.get(k, j) as u64) as u32;
+                    result_row[j] += (a * other_row[j] as u64) as u32;
                 }
             }
         }
         Self::new(self.rows, other.cols, result)
+    }
+
+    pub fn transpose(&self) -> Self {
+        let mut data = vec![0u32; self.rows * self.cols];
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                data[j * self.rows + i] = self.get(i, j);
+            }
+        }
+        Self::new(self.cols, self.rows, data)
     }
 
     /// Convert a SqMatrix<N> to a DynMatrix.
@@ -301,21 +318,71 @@ impl DynMatrix {
     /// Returns the lexicographic minimum over all P^T * M * P for permutation matrices P.
     pub fn canonical_perm(&self) -> Self {
         assert!(self.is_square());
-        let n = self.rows;
-        let mut perm: Vec<usize> = (0..n).collect();
-        let mut best = self.clone();
+        match self.rows {
+            2 => self.canonical_perm_2x2(),
+            3 => self.canonical_perm_3x3(),
+            n => {
+                let mut perm: Vec<usize> = (0..n).collect();
+                let mut best = self.clone();
 
-        // Generate all permutations and take the lex-min conjugate.
-        loop {
-            let conjugated = self.conjugate_by_perm(&perm);
-            if conjugated < best {
-                best = conjugated;
-            }
-            if !next_permutation(&mut perm) {
-                break;
+                // Generate all permutations and take the lex-min conjugate.
+                loop {
+                    let conjugated = self.conjugate_by_perm(&perm);
+                    if conjugated < best {
+                        best = conjugated;
+                    }
+                    if !next_permutation(&mut perm) {
+                        break;
+                    }
+                }
+                best
             }
         }
-        best
+    }
+
+    fn canonical_perm_2x2(&self) -> Self {
+        debug_assert_eq!(self.rows, 2);
+        debug_assert_eq!(self.cols, 2);
+        let swapped = [self.data[3], self.data[2], self.data[1], self.data[0]];
+        if swapped.as_slice() < self.data.as_slice() {
+            DynMatrix::new(2, 2, swapped.to_vec())
+        } else {
+            self.clone()
+        }
+    }
+
+    fn canonical_perm_3x3(&self) -> Self {
+        debug_assert_eq!(self.rows, 3);
+        debug_assert_eq!(self.cols, 3);
+
+        const PERMS: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+
+        let mut best_data = [0u32; 9];
+        best_data.copy_from_slice(&self.data);
+        for perm in PERMS.iter().skip(1) {
+            let candidate = [
+                self.data[perm[0] * 3 + perm[0]],
+                self.data[perm[0] * 3 + perm[1]],
+                self.data[perm[0] * 3 + perm[2]],
+                self.data[perm[1] * 3 + perm[0]],
+                self.data[perm[1] * 3 + perm[1]],
+                self.data[perm[1] * 3 + perm[2]],
+                self.data[perm[2] * 3 + perm[0]],
+                self.data[perm[2] * 3 + perm[1]],
+                self.data[perm[2] * 3 + perm[2]],
+            ];
+            if candidate < best_data {
+                best_data = candidate;
+            }
+        }
+        DynMatrix::new(3, 3, best_data.to_vec())
     }
 
     /// Conjugate by a permutation: result[i][j] = self[perm[i]][perm[j]].
@@ -460,6 +527,14 @@ mod tests {
         let uv = u.mul(&v);
         // [[1,1],[0,1]] * [[1,0],[1,1]] = [[2,1],[1,1]]
         assert_eq!(uv, DynMatrix::new(2, 2, vec![2, 1, 1, 1]));
+    }
+
+    #[test]
+    fn test_dyn_matrix_transpose() {
+        let m = DynMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        let mt = m.transpose();
+        assert_eq!(mt, DynMatrix::new(3, 2, vec![1, 4, 2, 5, 3, 6]));
+        assert_eq!(mt.transpose(), m);
     }
 
     #[test]

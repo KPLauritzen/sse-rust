@@ -10,6 +10,10 @@ research:
 research-json:
     cargo run --release --bin research_harness -- --cases research/cases.json --format json
 
+research-json-save stamp:
+    mkdir -p research/runs
+    cargo run --release --bin research_harness -- --cases research/cases.json --format json > research/runs/{{stamp}}.json
+
 build:
     cargo build --release
 

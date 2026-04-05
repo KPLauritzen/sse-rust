@@ -1,5 +1,8 @@
 pub mod aligned;
+pub mod balanced;
+pub mod conjugacy;
 pub mod factorisation;
+pub mod graph_moves;
 pub mod invariants;
 pub mod matrix;
 pub mod quadratic;
