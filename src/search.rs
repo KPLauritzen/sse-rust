@@ -7,10 +7,10 @@ use crate::types::{EsseStep, SearchConfig, SsePath, SseResult};
 
 /// Search for a strong shift equivalence path between two 2x2 matrices.
 ///
-/// Uses BFS over the graph where nodes are square matrices of varying sizes
-/// (2×2, 3×3, ...) in canonical form, and edges are elementary SSE steps
-/// (A = UV, B = VU). Rectangular factorisations allow the search to pass
-/// through higher-dimensional intermediate matrices.
+/// Uses bidirectional BFS over the graph where nodes are square matrices of
+/// varying sizes (2x2, 3x3, ...) in canonical form, and edges are elementary
+/// SSE steps (A = UV, B = VU). Searching from both ends reduces complexity
+/// from O(branching^L) to O(2 * branching^(L/2)).
 pub fn search_sse_2x2(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
@@ -42,25 +42,66 @@ pub fn search_sse_2x2(
         });
     }
 
-    let target_canonical = DynMatrix::from_sq(&b.canonical());
-
-    // BFS state using DynMatrix (canonical form) as keys.
-    // Nodes can be square matrices of any size (2×2, 3��3, ...).
-    let mut parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
-    let mut canonical_to_original: HashMap<DynMatrix, DynMatrix> = HashMap::new();
-    let mut frontier: VecDeque<DynMatrix> = VecDeque::new();
-
+    // Bidirectional BFS: expand from both A and B, meet in the middle.
     let a_dyn = DynMatrix::from_sq(a);
+    let b_dyn = DynMatrix::from_sq(b);
     let a_canon = a_dyn.canonical_perm();
-    parent.insert(a_canon.clone(), None);
-    canonical_to_original.insert(a_canon.clone(), a_dyn);
-    frontier.push_back(a_canon.clone());
+    let b_canon = b_dyn.canonical_perm();
+
+    // Forward direction (from A).
+    let mut fwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
+    let mut fwd_orig: HashMap<DynMatrix, DynMatrix> = HashMap::new();
+    let mut fwd_frontier: VecDeque<DynMatrix> = VecDeque::new();
+    fwd_parent.insert(a_canon.clone(), None);
+    fwd_orig.insert(a_canon.clone(), a_dyn);
+    fwd_frontier.push_back(a_canon.clone());
+
+    // Backward direction (from B).
+    let mut bwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
+    let mut bwd_orig: HashMap<DynMatrix, DynMatrix> = HashMap::new();
+    let mut bwd_frontier: VecDeque<DynMatrix> = VecDeque::new();
+    bwd_parent.insert(b_canon.clone(), None);
+    bwd_orig.insert(b_canon.clone(), DynMatrix::from_sq(b));
+    bwd_frontier.push_back(b_canon.clone());
+
+    // Edge case: A and B canonicalise to the same form (should have been
+    // caught by the permutation check above, but handle for safety).
+    if a_canon == b_canon {
+        return SseResult::Equivalent(reconstruct_bidirectional_path(
+            a,
+            b,
+            &a_canon,
+            &fwd_parent,
+            &fwd_orig,
+            &bwd_parent,
+            &bwd_orig,
+        ));
+    }
 
     for _lag in 0..config.max_lag {
+        // Expand the smaller frontier to keep work balanced.
+        let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
+
+        let (frontier, parent, orig, other_parent) = if expand_forward {
+            (
+                &mut fwd_frontier,
+                &mut fwd_parent,
+                &mut fwd_orig,
+                &bwd_parent as &HashMap<_, _>,
+            )
+        } else {
+            (
+                &mut bwd_frontier,
+                &mut bwd_parent,
+                &mut bwd_orig,
+                &fwd_parent as &HashMap<_, _>,
+            )
+        };
+
         let mut next_frontier: VecDeque<DynMatrix> = VecDeque::new();
 
         while let Some(current_canon) = frontier.pop_front() {
-            let current = canonical_to_original[&current_canon].clone();
+            let current = orig[&current_canon].clone();
             let factorisations = enumerate_all_factorisations(
                 &current,
                 config.max_intermediate_dim,
@@ -86,21 +127,24 @@ pub fn search_sse_2x2(
                     v: v.clone(),
                 };
                 parent.insert(vu_canon.clone(), Some((current_canon.clone(), step)));
-                canonical_to_original.insert(vu_canon.clone(), vu.clone());
+                orig.insert(vu_canon.clone(), vu.clone());
 
-                if vu_canon == target_canonical {
-                    return SseResult::Equivalent(reconstruct_path(
+                // Check if the other side has already visited this node.
+                if other_parent.contains_key(&vu_canon) {
+                    return SseResult::Equivalent(reconstruct_bidirectional_path(
                         a,
                         b,
                         &vu_canon,
-                        &parent,
-                        &canonical_to_original,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
                     ));
                 }
 
-                // For 2×2 nodes, bound entries to prevent unbounded growth.
-                // For intermediate (3×3+) nodes, always add — the factorisation
-                // back to 2×2 already bounds factor entries via max_entry.
+                // For 2x2 nodes, bound entries to prevent unbounded growth.
+                // For intermediate (3x3+) nodes, always add -- the factorisation
+                // back to 2x2 already bounds factor entries via max_entry.
                 if vu.rows > 2 || vu.max_entry() <= config.max_entry {
                     next_frontier.push_back(vu_canon);
                 }
@@ -110,7 +154,7 @@ pub fn search_sse_2x2(
         if next_frontier.is_empty() {
             break;
         }
-        frontier = next_frontier;
+        *frontier = next_frontier;
     }
 
     SseResult::Unknown
@@ -130,61 +174,99 @@ fn permutation_step(m: &DynMatrix) -> EsseStep {
     EsseStep { u: mp, v: p }
 }
 
-fn reconstruct_path(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    target_canon: &DynMatrix,
+/// Walk a parent chain from `node` back to the root, returning
+/// (matrices, steps) in root-to-node order.
+fn walk_parent_chain(
+    node: &DynMatrix,
     parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
-    canonical_to_original: &HashMap<DynMatrix, DynMatrix>,
-) -> SsePath<2> {
-    let mut steps_rev = Vec::new();
-    let mut dyn_matrices_rev = Vec::new();
+    orig: &HashMap<DynMatrix, DynMatrix>,
+) -> (Vec<DynMatrix>, Vec<EsseStep>) {
+    let mut matrices = Vec::new();
+    let mut steps = Vec::new();
+    let mut current = node.clone();
 
-    let mut current = target_canon.clone();
-    dyn_matrices_rev.push(canonical_to_original[&current].clone());
+    matrices.push(orig[&current].clone());
 
     while let Some(Some((prev, step))) = parent.get(&current) {
-        steps_rev.push(step.clone());
-        dyn_matrices_rev.push(canonical_to_original[prev].clone());
+        steps.push(step.clone());
+        matrices.push(orig[prev].clone());
         current = prev.clone();
     }
 
-    steps_rev.reverse();
-    dyn_matrices_rev.reverse();
+    matrices.reverse();
+    steps.reverse();
+    (matrices, steps)
+}
+
+/// Reconstruct a path from the forward and backward BFS trees that meet
+/// at `meeting_canon`.
+///
+/// Forward chain: A -> ... -> M (steps recorded as current=UV, neighbor=VU).
+/// Backward chain: B -> ... -> M (same convention).
+/// We reverse the backward chain to get M -> ... -> B, flipping each step's
+/// (U,V) to (V,U) since the direction of the elementary SSE is reversed.
+fn reconstruct_bidirectional_path(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    meeting_canon: &DynMatrix,
+    fwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
+    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    bwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
+    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+) -> SsePath<2> {
+    // Forward: A -> ... -> M
+    let (fwd_matrices, fwd_steps) = walk_parent_chain(meeting_canon, fwd_parent, fwd_orig);
+
+    // Backward: B -> ... -> M, which we reverse to M -> ... -> B.
+    let (bwd_matrices, bwd_steps) = walk_parent_chain(meeting_canon, bwd_parent, bwd_orig);
+
+    // Build the combined step list.
+    let mut all_steps = fwd_steps;
+
+    // Reverse backward steps: each backward step had current=UV, neighbor=VU.
+    // In the forward direction (M->...->B) we need neighbor=UV, current=VU,
+    // i.e. the elementary SSE step with U and V swapped.
+    for step in bwd_steps.into_iter().rev() {
+        all_steps.push(EsseStep {
+            u: step.v,
+            v: step.u,
+        });
+    }
+
+    // Build the combined matrix list (all intermediate DynMatrix nodes).
+    let mut all_dyn_matrices: Vec<DynMatrix> = fwd_matrices;
+    // bwd_matrices is [B, ..., M] — reversed and skip M (already in fwd).
+    for m in bwd_matrices.into_iter().rev().skip(1) {
+        all_dyn_matrices.push(m);
+    }
 
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
 
     // If the BFS start node differs from `a` (due to canonicalisation),
     // prepend a permutation step: a -> canonical(a).
-    if *dyn_matrices_rev.first().unwrap() != a_dyn {
-        steps_rev.insert(0, permutation_step(&a_dyn));
-        dyn_matrices_rev.insert(0, a_dyn);
+    if *all_dyn_matrices.first().unwrap() != a_dyn {
+        all_steps.insert(0, permutation_step(&a_dyn));
+        all_dyn_matrices.insert(0, a_dyn);
     }
 
     // If the BFS end node differs from `b` (due to canonicalisation),
     // append a permutation step: canonical(b) -> b.
-    if *dyn_matrices_rev.last().unwrap() != b_dyn {
-        let last = dyn_matrices_rev.last().unwrap().clone();
-        steps_rev.push(permutation_step(&last));
-        dyn_matrices_rev.push(b_dyn);
+    if *all_dyn_matrices.last().unwrap() != b_dyn {
+        let last = all_dyn_matrices.last().unwrap().clone();
+        all_steps.push(permutation_step(&last));
+        all_dyn_matrices.push(b_dyn);
     }
 
-    // Convert the 2×2 nodes to SqMatrix<2> for the path.
-    // Intermediate nodes may be larger (3×3, etc.) but SsePath only stores
-    // the 2×2 start and end in its matrices field.
-    let mut sq_matrices = Vec::new();
-    for dm in &dyn_matrices_rev {
-        if let Some(sq) = dm.to_sq::<2>() {
-            sq_matrices.push(sq);
-        }
-        // Skip non-2×2 intermediate matrices in the SqMatrix path.
-        // The full path with all dimensions is captured in the steps.
-    }
+    // Collect the 2x2 nodes for the SsePath matrices field.
+    let sq_matrices: Vec<SqMatrix<2>> = all_dyn_matrices
+        .iter()
+        .filter_map(|dm| dm.to_sq::<2>())
+        .collect();
 
     SsePath {
         matrices: sq_matrices,
-        steps: steps_rev,
+        steps: all_steps,
     }
 }
 
@@ -421,24 +503,24 @@ mod tests {
 
     #[test]
     fn test_rectangular_sse_constructed() {
-        // Construct a pair connected through a 3×3 intermediate.
-        // Step 1: A = U1*V1, C = V1*U1 (3×3)
+        // Construct a pair connected through a 3x3 intermediate.
+        // Step 1: A = U1*V1, C = V1*U1 (3x3)
         let u1 = DynMatrix::new(2, 3, vec![1, 0, 1, 0, 1, 0]);
         let v1 = DynMatrix::new(3, 2, vec![1, 0, 1, 1, 1, 1]);
         let a_dyn = u1.mul(&v1); // A = [[2,1],[1,1]]
-        let c = v1.mul(&u1); // C (3×3)
+        let c = v1.mul(&u1); // C (3x3)
 
-        // Step 2: factor C = U2*V2, B = V2*U2 (2×2)
-        // We need to find U2 (3×2), V2 (2×3) such that U2*V2 = C.
+        // Step 2: factor C = U2*V2, B = V2*U2 (2x2)
+        // We need to find U2 (3x2), V2 (2x3) such that U2*V2 = C.
         // C = [[1,0,1],[1,1,1],[1,1,1]]
         // Try U2 = [[1,0],[0,1],[0,1]], V2 = [[1,0,1],[1,1,1]]
-        // U2*V2 = [[1,0,1],[1,1,1],[1,1,1]] = C ✓
+        // U2*V2 = [[1,0,1],[1,1,1],[1,1,1]] = C
         let u2 = DynMatrix::new(3, 2, vec![1, 0, 0, 1, 0, 1]);
         let v2 = DynMatrix::new(2, 3, vec![1, 0, 1, 1, 1, 1]);
         let c_check = u2.mul(&v2);
         assert_eq!(c, c_check, "C from step 1 != C from step 2");
 
-        let b_dyn = v2.mul(&u2); // B = [[1,0],[1,2]] (2×2)
+        let b_dyn = v2.mul(&u2); // B = [[1,0],[1,2]] (2x2)
         let a: SqMatrix<2> = a_dyn.to_sq().unwrap();
         let b: SqMatrix<2> = b_dyn.to_sq().unwrap();
 

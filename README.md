@@ -99,6 +99,10 @@ Systematically enumerate SSE classes for small matrices (e.g. all irreducible 2Ã
 
 The WASM bindings exist but there is no frontend yet. A web-based explorer where users input two matrices and get back either a proof (the SSE path) or evidence against (which invariants fail) would be useful to the symbolic dynamics community.
 
+### Search improvements
+
+See [docs/TODO.md](docs/TODO.md) for concrete approaches: bidirectional BFS, iterative deepening, smarter factorisation pruning, spectral pruning, and aligned shift equivalence.
+
 ### Parallelism
 
 The BFS frontier expansion is embarrassingly parallel. Adding `rayon` to the factorisation enumeration loop would give near-linear speedup.

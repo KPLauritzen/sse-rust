@@ -1,6 +1,9 @@
 test:
     cargo test
 
+bench:
+    cargo bench
+
 build:
     cargo build --release
 
