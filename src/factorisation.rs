@@ -14,6 +14,14 @@ pub fn enumerate_square_factorisations_2x2(
     max_entry: u32,
 ) -> Vec<(DynMatrix, DynMatrix)> {
     let mut results = Vec::new();
+    visit_square_factorisations_2x2(a, max_entry, &mut |u, v| results.push((u, v)));
+    results
+}
+
+fn visit_square_factorisations_2x2<F>(a: &SqMatrix<2>, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
     let [[a00, a01], [a10, a11]] = a.data;
 
     let me = max_entry as i64;
@@ -79,12 +87,11 @@ pub fn enumerate_square_factorisations_2x2(
                     let u = DynMatrix::new(2, 2, vec![u00, u01, u10, u11]);
                     let v =
                         DynMatrix::new(2, 2, vec![v00 as u32, v01 as u32, v10 as u32, v11 as u32]);
-                    results.push((u, v));
+                    visit(u, v);
                 }
             }
         }
     }
-    results
 }
 
 /// Compute VU as a SqMatrix<2> given DynMatrix factors.
@@ -264,6 +271,15 @@ pub fn enumerate_rect_factorisations_2x3(
     a: &SqMatrix<2>,
     max_entry: u32,
 ) -> Vec<(DynMatrix, DynMatrix)> {
+    let mut results = Vec::new();
+    visit_rect_factorisations_2x3(a, max_entry, &mut |u, v| results.push((u, v)));
+    results
+}
+
+fn visit_rect_factorisations_2x3<F>(a: &SqMatrix<2>, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
     let me = max_entry;
     let a_cols: [[i64; 2]; 2] = [
         [a.data[0][0] as i64, a.data[1][0] as i64],
@@ -317,27 +333,26 @@ pub fn enumerate_rect_factorisations_2x3(
                 )
             })
             .collect();
-        let total = per_row0.iter().map(Vec::len).sum();
-        let mut results = Vec::with_capacity(total);
         for row_results in per_row0 {
-            results.extend(row_results);
+            for (u, v) in row_results {
+                visit(u, v);
+            }
         }
-        results
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        let mut results = Vec::new();
         for row0 in valid_row0s {
-            results.extend(enumerate_rect_factorisations_2x3_from_row0(
+            for (u, v) in enumerate_rect_factorisations_2x3_from_row0(
                 row0,
                 &a_cols,
                 a,
                 max_entry,
                 min_row_sum_1,
-            ));
+            ) {
+                visit(u, v);
+            }
         }
-        results
     }
 }
 
@@ -415,6 +430,15 @@ pub fn enumerate_factorisations_3x3_to_2(
     c: &DynMatrix,
     max_entry: u32,
 ) -> Vec<(DynMatrix, DynMatrix)> {
+    let mut results = Vec::new();
+    visit_factorisations_3x3_to_2(c, max_entry, &mut |u, v| results.push((u, v)));
+    results
+}
+
+fn visit_factorisations_3x3_to_2<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
     assert_eq!(c.rows, 3);
     assert_eq!(c.cols, 3);
     let me = max_entry;
@@ -488,28 +512,27 @@ pub fn enumerate_factorisations_3x3_to_2(
                 )
             })
             .collect();
-        let total = per_row0.iter().map(Vec::len).sum();
-        let mut results = Vec::with_capacity(total);
         for row_results in per_row0 {
-            results.extend(row_results);
+            for (u, v) in row_results {
+                visit(u, v);
+            }
         }
-        results
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        let mut results = Vec::new();
         for row0 in valid_row0s {
-            results.extend(enumerate_factorisations_3x3_to_2_from_row0(
+            for (u, v) in enumerate_factorisations_3x3_to_2_from_row0(
                 row0,
                 &c_cols,
                 &c_row2,
                 max_entry,
                 me_i64,
                 min_row_sum,
-            ));
+            ) {
+                visit(u, v);
+            }
         }
-        results
     }
 }
 
@@ -704,25 +727,37 @@ pub fn enumerate_all_factorisations(
     max_intermediate_dim: usize,
     max_entry: u32,
 ) -> Vec<(DynMatrix, DynMatrix)> {
+    let mut results = Vec::new();
+    visit_all_factorisations(a, max_intermediate_dim, max_entry, |u, v| {
+        results.push((u, v));
+    });
+    results
+}
+
+pub fn visit_all_factorisations<F>(
+    a: &DynMatrix,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    mut visit: F,
+) where
+    F: FnMut(DynMatrix, DynMatrix),
+{
     assert!(a.is_square());
     let k = a.rows;
-    let mut results = Vec::new();
 
     if k == 2 {
         // Square factorisations (m=2).
         let sq: SqMatrix<2> = a.to_sq().unwrap();
-        results.extend(enumerate_square_factorisations_2x2(&sq, max_entry));
+        visit_square_factorisations_2x2(&sq, max_entry, &mut visit);
 
         // Rectangular factorisations for m=3..=max_intermediate_dim.
         if max_intermediate_dim >= 3 {
-            results.extend(enumerate_rect_factorisations_2x3(&sq, max_entry));
+            visit_rect_factorisations_2x3(&sq, max_entry, &mut visit);
         }
     } else if k == 3 {
         // Only rectangular to dimension 2 (the return trip). Skip square 3×3.
-        results.extend(enumerate_factorisations_3x3_to_2(a, max_entry));
+        visit_factorisations_3x3_to_2(a, max_entry, &mut visit);
     }
-
-    results
 }
 
 fn gcd(a: u64, b: u64) -> u64 {

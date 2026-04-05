@@ -18,3 +18,4 @@ c86b908	6	6	5	825	59	kept	Removed heap allocation from specialized 2x2 and 3x3 c
 1eb69df	6	6	5	825	44	kept	Parallelized the 3x3-to-2 rectangular factorisation enumerator on native builds; same score with another reduction in warm harness runtime
 4e568d7	6	6	5	825	49	rejected	Parallelized the square 2x2 factorisation enumerator too; stayed correct but regressed the new warm-runtime baseline
 4e568d7	6	6	5	825	46	rejected	Skipped outer rayon frontier scheduling for single-node layers; neutral on correctness but slower than the current best runtime
+67f679a	6	6	5	825	38	kept	Streamed factorisation visitation directly into BFS expansion to avoid building merged factorisation vectors before successor filtering

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::factorisation::enumerate_all_factorisations;
+use crate::factorisation::visit_all_factorisations;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
@@ -282,39 +282,36 @@ fn expand_frontier_layer(
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
-            .expect("frontier node should have an original matrix")
-            .clone();
-        let factorisations =
-            enumerate_all_factorisations(&current, max_intermediate_dim, max_entry);
+            .expect("frontier node should have an original matrix");
         let mut expansions = Vec::new();
         let mut seen_successors = HashSet::new();
         let mut stats = FrontierExpansionStats {
             frontier_nodes: 1,
             factorisation_calls: 1,
-            factorisations_enumerated: factorisations.len(),
-            candidates_generated: factorisations.len(),
             ..FrontierExpansionStats::default()
         };
 
-        for (u, v) in factorisations {
+        visit_all_factorisations(current, max_intermediate_dim, max_entry, |u, v| {
+            stats.factorisations_enumerated += 1;
+            stats.candidates_generated += 1;
             let next = v.mul(&u);
 
             // Size bound: don't explore matrices larger than max_intermediate_dim.
             if next.rows > max_intermediate_dim {
                 stats.pruned_by_size += 1;
-                continue;
+                return;
             }
 
             // Spectral pruning: nonzero eigenvalues are preserved by SSE,
             // so every intermediate must have the same nonzero spectrum.
             if !is_spectrally_consistent(&next, source_trace, source_det) {
                 stats.pruned_by_spectrum += 1;
-                continue;
+                return;
             }
 
             let next_canon = next.canonical_perm();
             if !seen_successors.insert(next_canon.clone()) {
-                continue;
+                return;
             }
             let step = EsseStep { u, v };
             expansions.push(FrontierExpansion {
@@ -323,7 +320,7 @@ fn expand_frontier_layer(
                 next_orig: next,
                 step,
             });
-        }
+        });
 
         (expansions, stats)
     };
