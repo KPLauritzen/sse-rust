@@ -14,6 +14,7 @@ pub fn enumerate_square_factorisations_2x2(
     let [[a00, a01], [a10, a11]] = a.data;
 
     let me = max_entry as i64;
+    let det_a = a00 as i64 * a11 as i64 - a01 as i64 * a10 as i64;
 
     for u00 in 0..=max_entry {
         for u01 in 0..=max_entry {
@@ -21,6 +22,11 @@ pub fn enumerate_square_factorisations_2x2(
                 for u11 in 0..=max_entry {
                     let det = u00 as i64 * u11 as i64 - u01 as i64 * u10 as i64;
                     if det <= 0 {
+                        continue;
+                    }
+
+                    // det(A) = det(U)*det(V), so det(U) must divide det(A).
+                    if det_a % det != 0 {
                         continue;
                     }
 
@@ -265,12 +271,36 @@ pub fn enumerate_rect_factorisations_2x3(
         [a.data[0][1] as i64, a.data[1][1] as i64],
     ];
 
+    // Minimum row sum for each row of U: since a_{ij} <= row_sum(U_i) * max_entry,
+    // we need row_sum(U_i) >= ceil(max(a_{i0}, a_{i1}) / max_entry).
+    let max_a_row0 = a.data[0][0].max(a.data[0][1]) as u64;
+    let max_a_row1 = a.data[1][0].max(a.data[1][1]) as u64;
+    let min_row_sum_0 = ((max_a_row0 + me as u64 - 1) / me as u64) as u32;
+    let min_row_sum_1 = ((max_a_row1 + me as u64 - 1) / me as u64) as u32;
+
     for u00 in 0..=me {
         for u01 in 0..=me {
             for u02 in 0..=me {
+                let row0_sum = u00 + u01 + u02;
+                // Row 0 must be able to produce A's entries via V with entries <= max_entry.
+                if row0_sum < min_row_sum_0 {
+                    continue;
+                }
+                // Row 0 all zeros can't produce nonzero A entries.
+                if row0_sum == 0 && (a.data[0][0] > 0 || a.data[0][1] > 0) {
+                    continue;
+                }
+
                 for u10 in 0..=me {
                     for u11 in 0..=me {
                         for u12 in 0..=me {
+                            let row1_sum = u10 + u11 + u12;
+                            if row1_sum < min_row_sum_1 {
+                                continue;
+                            }
+                            if row1_sum == 0 && (a.data[1][0] > 0 || a.data[1][1] > 0) {
+                                continue;
+                            }
                             let u_rows: [[i64; 3]; 2] = [
                                 [u00 as i64, u01 as i64, u02 as i64],
                                 [u10 as i64, u11 as i64, u12 as i64],
@@ -345,12 +375,37 @@ pub fn enumerate_factorisations_3x3_to_2(
         [c.get(0, 2) as i64, c.get(1, 2) as i64, c.get(2, 2) as i64],
     ];
 
+    // Minimum row sum for each row of U (3×2): row_sum(U_i) >= ceil(max(c[i][*]) / max_entry).
+    let min_row_sum: [u32; 3] = [
+        {
+            let mx = c.get(0, 0).max(c.get(0, 1)).max(c.get(0, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+        {
+            let mx = c.get(1, 0).max(c.get(1, 1)).max(c.get(1, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+        {
+            let mx = c.get(2, 0).max(c.get(2, 1)).max(c.get(2, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+    ];
+
     for u00 in 0..=me {
         for u01 in 0..=me {
+            if u00 + u01 < min_row_sum[0] {
+                continue;
+            }
             for u10 in 0..=me {
                 for u11 in 0..=me {
+                    if u10 + u11 < min_row_sum[1] {
+                        continue;
+                    }
                     for u20 in 0..=me {
                         for u21 in 0..=me {
+                            if u20 + u21 < min_row_sum[2] {
+                                continue;
+                            }
                             let u_rows: [[i64; 2]; 3] = [
                                 [u00 as i64, u01 as i64],
                                 [u10 as i64, u11 as i64],
