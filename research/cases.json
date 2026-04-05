@@ -119,7 +119,8 @@
       "config": {
         "max_lag": 6,
         "max_intermediate_dim": 3,
-        "max_entry": 6
+        "max_entry": 6,
+        "beam_width": 500
       },
       "timeout_ms": 4000,
       "allowed_outcomes": ["equivalent", "unknown"],
@@ -141,7 +142,8 @@
       "config": {
         "max_lag": 8,
         "max_intermediate_dim": 3,
-        "max_entry": 8
+        "max_entry": 8,
+        "beam_width": 500
       },
       "timeout_ms": 4000,
       "allowed_outcomes": ["equivalent", "unknown"],
@@ -163,7 +165,8 @@
       "config": {
         "max_lag": 8,
         "max_intermediate_dim": 3,
-        "max_entry": 8
+        "max_entry": 8,
+        "beam_width": 500
       },
       "timeout_ms": 4000,
       "allowed_outcomes": ["equivalent", "unknown"],

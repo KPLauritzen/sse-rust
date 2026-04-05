@@ -50,6 +50,7 @@ struct JsonSearchConfig {
     max_lag: usize,
     max_intermediate_dim: usize,
     max_entry: u32,
+    beam_width: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -234,6 +235,7 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
         max_lag: case.config.max_lag,
         max_intermediate_dim: case.config.max_intermediate_dim,
         max_entry: case.config.max_entry,
+        beam_width: case.config.beam_width,
     };
 
     let started = Instant::now();

@@ -12,6 +12,9 @@ pub struct SearchConfig {
     pub max_intermediate_dim: usize,
     /// Maximum entry value in intermediate matrices U, V.
     pub max_entry: u32,
+    /// Optional beam width: if set, each frontier is capped at this many nodes
+    /// after expansion, keeping nodes with smallest entry sum.
+    pub beam_width: Option<usize>,
 }
 
 impl Default for SearchConfig {
@@ -20,6 +23,7 @@ impl Default for SearchConfig {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 25,
+            beam_width: None,
         }
     }
 }

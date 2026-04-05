@@ -48,11 +48,13 @@ fn main() {
         max_lag,
         max_intermediate_dim: 2,
         max_entry: search_max_entry,
+        ..SearchConfig::default()
     };
     let dim3_config = SearchConfig {
         max_lag,
         max_intermediate_dim: 3,
         max_entry: search_max_entry,
+        ..SearchConfig::default()
     };
 
     let mut rectangular_buckets: HashMap<DynMatrix, HashSet<SqMatrix<2>>> = HashMap::new();

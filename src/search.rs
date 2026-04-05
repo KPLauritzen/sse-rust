@@ -263,6 +263,26 @@ pub fn search_sse_2x2_with_telemetry(
         if next_frontier.is_empty() {
             break;
         }
+
+        // Beam pruning: if frontier exceeds beam_width, keep only the nodes
+        // with smallest entry sum (simpler matrices are more likely to bridge).
+        if let Some(beam_width) = config.beam_width {
+            if next_frontier.len() > beam_width {
+                let mut scored: Vec<(u64, DynMatrix)> = next_frontier
+                    .into_iter()
+                    .map(|canon| {
+                        let score = orig
+                            .get(&canon)
+                            .map_or(u64::MAX, |m| m.data.iter().map(|&e| e as u64).sum());
+                        (score, canon)
+                    })
+                    .collect();
+                scored.sort_by_key(|(score, _)| *score);
+                scored.truncate(beam_width);
+                next_frontier = scored.into_iter().map(|(_, canon)| canon).collect();
+            }
+        }
+
         *frontier = next_frontier;
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
@@ -596,6 +616,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 10,
+            ..SearchConfig::default()
         }
     }
 
@@ -712,6 +733,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 6,
+            ..SearchConfig::default()
         };
         let result = search_sse_2x2(&a, &b, &config);
         match result {
@@ -728,6 +750,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 4,
+            ..SearchConfig::default()
         };
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
         assert!(!telemetry.invariant_filtered);
@@ -838,6 +861,7 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
+            ..SearchConfig::default()
         };
         let result = search_sse_2x2(&m1, &m2, &config);
         assert!(
@@ -854,6 +878,7 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
+            ..SearchConfig::default()
         };
         let result = search_sse_2x2(&m1, &m3, &config);
         assert!(
@@ -882,6 +907,7 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
+            ..SearchConfig::default()
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -915,6 +941,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 4,
+            ..SearchConfig::default()
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -953,6 +980,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 5,
+            ..SearchConfig::default()
         };
         let result = search_sse_2x2(&a, &b, &config);
         match &result {

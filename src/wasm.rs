@@ -86,6 +86,7 @@ pub fn search_sse(
         max_lag,
         max_intermediate_dim,
         max_entry,
+        ..SearchConfig::default()
     };
 
     let result = search_sse_2x2(&a, &b, &config);
