@@ -1,214 +1,231 @@
 # Research Ideas
 
-These notes come from reading `README.md`, `docs/TODO.md`, the current search code, and all papers in `references/` via `pdftotext -layout`.
+These notes come from reading `README.md`, `docs/TODO.md`, the current search code, and all papers in `references/`.
 
-The goal here is not to filter aggressively. If an idea looked even mildly plausible as a way to improve the search, it goes here.
+The goal is not to filter too aggressively. If an idea looked even somewhat plausible as a way to improve the search, it goes here. But the document is no longer flat: the papers now support a clearer priority order than before.
 
-## Reprioritization From Sidecar Evidence
+## Major Corrections To The Local Picture
 
-The local Brix-Ruiz sidecar experiments sharpen the picture.
-
-- Positive conjugacy is now a higher-priority direction, not just a paper-driven hunch. The sidecar log finds simple diagonal conjugacies for `k = 3` and `k = 4`, with sampled affine paths staying positive.
-- Blind widening of small split-sidecar graphs is lower priority than this document originally suggested. One-step and two-step out-split refinements fail, mixed in/out refinements fail, and the bounded `3x3 -> 2x2 -> 3x3` zig-zag sidecar appears to preserve small isolated components.
-- Direct same-size balanced-elementary attacks also look less promising on the Brix-Ruiz family than they did at first glance.
-
-So, after the sidecar pass, graph refinements should be thought of mainly as:
-
-- heuristic signals,
-- pruning or component-detection tools,
-- and sources of candidate moves for the main solver,
-
-not as something to keep widening blindly in isolation.
+- The note in [`docs/TODO.md`](/home/kasper/dev/sse-rust/docs/TODO.md) about aligned shift equivalence being blocked on a missing matrix-level definition is now stale.
+- Bilich-Dor-On-Ruiz 2024 defines matrix-level aligned, balanced, and compatible shift equivalence for finite essential matrices and proves that they coincide with each other and with SSE.
+- So aligned/balanced/compatible search is no longer a speculative sidecar. It is a legitimate search substrate for the main problem.
+- The current [`src/aligned.rs`](/home/kasper/dev/sse-rust/src/aligned.rs) still reflects the older module-level aligned viewpoint from Brix-Dor-On-Hazrat-Ruiz 2025. That code may still be useful heuristically, but it is behind the literature for matrix search.
+- Carlsen-Dor-On-Eilers 2024 and the Matsumoto line of papers make the operator-algebraic witness spaces much less "remote" than they first looked. In several finite-essential settings they are exactly the same equivalence relation seen through better-structured data.
 
 ## What The Code Already Has
 
 - Bounded bidirectional integer SSE search in [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs).
-- Invariant filtering in [`src/invariants.rs`](/home/kasper/dev/sse-rust/src/invariants.rs), including Bowen-Franks, generalized Bowen-Franks, and the Eilers-Kiming ideal-class invariant for `2x2`.
+- Factorization enumeration in [`src/factorisation.rs`](/home/kasper/dev/sse-rust/src/factorisation.rs).
+- `2x2` invariants in [`src/invariants.rs`](/home/kasper/dev/sse-rust/src/invariants.rs), including Bowen-Franks, generalized Bowen-Franks, and an Eilers-Kiming ideal-class test.
+- Module-aligned sidecar search in [`src/aligned.rs`](/home/kasper/dev/sse-rust/src/aligned.rs).
+- Balanced one-step search in [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs).
+- Positive-conjugacy search in [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs).
 - Graph-move search experiments in [`src/graph_moves.rs`](/home/kasper/dev/sse-rust/src/graph_moves.rs).
-- A bounded balanced-elementary witness search in [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs).
-- A bounded positive-conjugacy search in [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs).
 
-So the next ideas should mostly do one of three things:
+That means the best next ideas are mostly about:
 
-- turn those side searches into better move generators for the main search,
-- add new bounded search substrates,
-- or add stronger obstructions so we stop wasting time earlier.
+- replacing generic expansion with more structured moves,
+- turning existing sidecars into proposal generators,
+- and adding stronger screens before expensive search.
 
-## Near-Term Search Ideas
+## Current Priority Order
 
-- Use positive conjugacy as a proposal engine, not just a yes/no experiment.
-  Why: Boyle-Kim-Roush show that paths of positive conjugate matrices are strongly tied to SSE over `R_+`. We already have a small positive-conjugacy search, but right now it only reports a witness. A better use would be:
-  - find a small conjugator or a short path in conjugacy space,
+### Tier 1: Best Near-Term Bets
+
+- Implement fixed-lag matrix-level aligned or compatible witness search.
+  Why: this is now mathematically first-class, not heuristic. Bilich-Dor-On-Ruiz proves aligned, balanced, compatible, and SSE coincide on finite essential matrices. A lag-bounded solver in one of these formulations is therefore a direct SSE solver, not merely evidence.
+
+- Choose the easiest of aligned, balanced, and compatible formulations and treat the others as equivalent frontends.
+  Why: the papers prove equivalence, so there is no reason to commit to the hardest encoding. If compatible witnesses or balanced witnesses are easier to enumerate than aligned ones, use them.
+
+- Add explicit row-splitting, column-splitting, and diagonal-refactorization moves as first-class search edges.
+  Why: Boyle-Kim-Roush 2013 repeatedly reduce constructive SSE arguments to exactly these move families. The current search is much closer to generic factorization enumeration than to that structured decomposition.
+
+- Turn positive conjugacy into a proposal engine rather than a standalone experiment.
+  Why: the current code already finds simple positive conjugators in small Brix-Ruiz cases. Boyle-Kim-Roush suggest using positive-conjugacy paths as a bridge toward SSE. The productive workflow looks like:
+  - find a small conjugator or path,
   - sample intermediate positive matrices,
-  - round or factor those samples into candidate row/column splits or rectangular factorizations,
-  - inject those candidates into the integer search as prioritized moves.
+  - extract candidate splits or refactorizations,
+  - feed those candidates into the integer search with high priority.
 
-- Add explicit row-split, column-split, and diagonal-refactorization moves as first-class edges.
-  Why: Boyle-Kim-Roush repeatedly reduce arguments to row splittings, column splittings, and diagonal refactorizations. The current search is mostly generic factorization plus graph moves. A more structured move set may be much easier to guide than generic `RS/SR` enumeration.
-
-- Search over small shear/diagonal conjugators before generic BFS expansion.
-  Why: the Brix-Ruiz family already comes with concrete similarity matrices, and the current code finds simple positive conjugators like `diag(1, 2)` and `diag(1, 3)` in small cases. There may be a productive restricted family:
-  - diagonal scalings,
-  - unitriangular shears,
-  - short products of those.
-  If one of these almost works over `Z_+`, its failure pattern might tell us which split to try next.
-
-- Turn balanced elementary equivalence into a layered search, not a one-shot bounded witness check.
-  Why: Brix's eventual-conjugacy paper makes balanced SSE central, and the repo already has a bounded search for one balanced elementary step. But the sidecar evidence suggests direct same-size balanced witnesses are structurally unlikely for the Brix-Ruiz family, so this should be treated as a secondary direction unless it is feeding the main solver. The next move would be to:
-  - search for short balanced zig-zags,
-  - alternate balanced steps with ordinary SSE steps,
-  - cache common intermediates `S`,
-  - canonicalize by permuting columns of `S` to avoid duplicate states.
-
-- Search for canonical common refinements instead of arbitrary graph-move sequences.
-  Why: several papers suggest that repeated split operations can often be compressed into a better common refinement picture. However, the current sidecar log already rules out the smallest obvious common-refinement attacks around the Brix-Ruiz family, so this idea now looks more useful as a negative probe or ranking feature than as a mainline search program.
-
-- Add a higher-block / power-graph move family.
-  Why: Brix 2022 and Brix-Mundey-Rennie suggest that iterated in-splits can often be packaged as a single in-split on a higher-power graph. That suggests a bounded move:
-  - build a small higher-block presentation,
-  - perform one larger canonical split there,
-  - project back down.
-  This may dominate many tiny split moves, but only if it helps the main solver escape the isolated components already seen in the sidecar graph.
-
-- Treat the complete in-split or dual graph as a "maximal refinement" waypoint.
-  Why: Brix-Mundey-Rennie describe complete in-splits as a largest or universal-looking in-split. The sidecar evidence says we should be cautious here: this is more plausible as a restart heuristic or canonical probe than as a standalone refinement search.
-
-- Interleave matrix search and graph search deliberately.
-  Why: right now these are mostly separate experiments. A better strategy may be:
-  - matrix BFS until stuck,
-  - graph refinement burst used to score, prune, or propose moves,
-  - matrix reduction burst,
-  - repeat.
-  The papers keep moving between these viewpoints; the implementation probably should too. But the sidecar log suggests the graph part should support the main solver, not become a separate widening project.
-
-- Add best-first search with paper-driven heuristics instead of pure depth-bounded BFS.
-  Candidate priorities:
+- Replace pure bounded BFS with best-first search guided by paper-driven structure.
+  Good ranking signals look like:
+  - closeness to a sampled positive-conjugacy path,
+  - closeness to a small aligned or compatible witness,
   - lower total entry sum,
   - lower intermediate dimension,
-  - fewer distinct row/column types,
-  - closer to a known positive-conjugacy path sample,
-  - closer to a common balanced witness `S`,
-  - closer to an explicit similarity form from the Brix-Ruiz family.
-  Why: the hard cases look less like "deep" instances than "badly guided" ones.
+  - fewer distinct row and column types,
+  - cheaper arithmetic profile in the quadratic-order data,
+  - explicit similarity-form proximity on the Brix-Ruiz family.
+  Why: the hard cases increasingly look mis-guided rather than merely deep.
 
-- Normalize states more aggressively after each move.
-  Candidates:
-  - simultaneous row/column permutations,
-  - remove duplicate rows/columns when a move creates obvious redundancy,
-  - sort by row/column signatures,
-  - canonical labeling of the associated graph.
-  Why: graph-move searches can explode on isomorphic duplicates.
+- Make the Brix-Ruiz family the default benchmark family.
+  Use `A_k = [[1, k], [k-1, 1]]` and `B_k = [[1, k(k-1)], [1, 1]]`.
+  Why: the family is explicit, hard, and comes with known similarities and unital shift-equivalence structure. It is the right place to test whether a new heuristic is genuinely helping.
 
-## Brix-Ruiz Family Ideas
+### Tier 2: Strong Secondary Directions
 
-- Special-case the family `A_k = [[1, k], [k-1, 1]]`, `B_k = [[1, k(k-1)], [1, 1]]` as a template-search benchmark.
-  Why: the family is explicit, the conjugator `P_k` is explicit, and the open cases are exactly the ones we care about.
+- Upgrade balanced search from one-step witness detection to short balanced zig-zag search.
+  Why: Brix 2022 makes balanced SSE central to eventual conjugacy, and Bilich-Dor-On-Ruiz now shows balanced shift equivalence is actually equivalent to SSE in the finite-essential setting. The current same-size one-step search is too narrow.
 
-- Search near the known similarity `P_k` instead of from scratch.
-  Concrete idea:
-  - factor `P_k` into short products of shear and diagonal matrices,
-  - ask whether each factor can be simulated by a bounded sequence of positive elementary moves,
-  - stitch those local simulations together.
-  Local evidence already strengthens this idea: for `k = 3, 4`, much simpler diagonal conjugators exist than the generic `P_k`.
+- Add same-future and same-past graph moves as deliberate proposal generators.
+  Why: Eilers-Ruiz 2019 and Brix 2022 make the refined split moves much more specific than "try random graph refinements". In particular, the `(I+)` viewpoint of redistributing the past of vertices with the same future looks like a natural bounded move family to mine for matrix proposals.
 
-- Use family induction experiments.
-  Half-baked idea:
-  - compute witnesses for small `k`,
-  - look for recurring split patterns,
-  - extrapolate a parametric move schema in `k`.
-  Even a wrong pattern could still give a strong heuristic for larger search.
+- Search for canonical common refinements instead of arbitrary split bursts.
+  Why: the graph papers repeatedly compress many local splits into more canonical refinement pictures. That said, the local sidecar evidence already says small blind refinement universes can stay trapped in isolated components, so this should support the main solver rather than replace it.
 
-- Search for "repair moves" that convert the explicit similarity into a positive integer zig-zag.
-  Why: the obstruction may be narrow. The sidecar log suggests the conjugacy side is simple while the small split/refinement side is stubborn, which is exactly the pattern that makes "repair the similarity" look more plausible than "discover a common refinement from scratch".
+- Add higher-block or higher-power refinement moves.
+  Why: Brix-Mundey-Rennie show that iterated in-splits can often be realized as a single in-split on a higher-power graph. That suggests a bounded move family which may dominate many tiny local split steps.
 
-## Alternate Witness Spaces
+- Use complete in-splits or dual graphs only as canonical probes or restart waypoints.
+  Why: the literature gives them a universal flavor, but the local search evidence argues against widening blindly there. They look more useful as "jump to a canonical refinement and re-evaluate" than as a standalone search space.
 
-- Compatible shift equivalence as a shadow search space.
-  Why: Carlsen-Dor-On-Eilers prove compatible/representable/strong Morita shift equivalence collapse back to SSE for finite essential matrices. That does not give a shortcut by itself, but it suggests searching for a compatible witness first, then trying to discretize it into an SSE path.
+- Strengthen the arithmetic pre-filter beyond the current ideal-class check.
+  Why: Eilers-Kiming 2008 contains more structure than the current code uses. In particular:
+  - the ideal quotient equations `xy = lambda^k` in colon ideals,
+  - conductor and Picard-group conditions under good hypotheses,
+  - finer order-theoretic restrictions in the quadratic setting.
+  Even partial implementations should prune cases before expensive search.
 
-- Representable shift equivalence as a scoring heuristic.
-  Half-baked idea:
-  - use the operator-theoretic compatibility equations to define a real-valued "distance to representability",
-  - prioritize matrix states that improve that score,
-  - ignore correctness at the heuristic level.
-  This is speculative, but it may be better than blind breadth-first expansion.
+- Add a bounded search over small diagonal and shear conjugators before generic expansion.
+  Why: the Brix-Ruiz family already carries explicit similarities, and the current code finds very small diagonal conjugators for `k = 3, 4`. Short products of diagonal scalings and unitriangular shears may be a productive restricted witness family.
 
-- Aligned module shift equivalence as a bridge generator.
-  Why: the current `aligned.rs` machinery is already a sidecar. The paper does not yet give the missing matrix-level equivalence, so this is not a proof route. But aligned witnesses may still suggest useful intermediate rectangular factorizations or graph correspondences to try.
+### Tier 3: Plausible But More Experimental
 
-- Block-map search instead of only matrix search.
-  Why: Brix 2022 ties eventual conjugacy to finite block-code data after suitable splits. Maybe the right search state is not just a matrix, but a bounded block map plus a refinement state. Then matrices are derived from that state, not the other way around.
+- Search over compatible shift equivalence data directly.
+  Why: Carlsen-Dor-On-Eilers prove compatible shift equivalence and SSE coincide in the finite-essential setting. The witness equations may be easier to organize than raw matrix BFS, even if they are larger.
+
+- Search over representable shift equivalence or common operator models as a heuristic state space.
+  Why: representable shift equivalence is equivalent to SSE in the same regime, but the associated data are less obviously discrete. This looks more like a heuristic relaxation than a first implementation target.
+
+- Search over block maps rather than only adjacency matrices.
+  Why: Brix 2022 frames eventual conjugacy through block-map data after suitable splits. For some instances, the right state may be "bounded block code plus refinement metadata", with matrices derived from that state.
+
+- Carry a relaxed real or rational witness along the integer search.
+  Why: several papers move through larger ambient categories and then descend back to integer SSE. A practical version would solve a relaxed real problem, then use its failure pattern to prioritize integer moves.
+
+- Learn a move policy from solved small instances.
+  Why: if we can generate many small positive examples, the successful move traces may be regular enough to train a ranking heuristic. This is not a theorem-driven idea, but it matches the "guidance matters more than raw depth" picture.
+
+- Build a library of reusable zig-zag motifs.
+  Why: once a hard instance yields a witness, the short subpatterns in that witness are likely more reusable than the full proof.
+
+## Ideas That Should Be Downgraded
+
+- Blind widening of split-sidecar graphs.
+  Why: the local sidecar experiments already push against this. One-step and two-step split refinements do not look like a robust mainline strategy.
+
+- Treating module-aligned search as the main aligned program.
+  Why: it is no longer the right target. It should be viewed as a heuristic bridge at most.
+
+- Expecting one more cheap invariant to settle the hard cases.
+  Why: Boyle-Schmieding and Kim-Roush both point the other way. Over rings, the SE/SSE gap is genuinely subtle; over `Z_+`, deep obstructions already exist. Better guidance and better structured witness spaces look more promising than hoping for one last easy obstruction.
+
+- Same-size balanced-elementary search as a standalone solver.
+  Why: the Brix-Ruiz sidecar evidence makes this look too rigid. Balanced search becomes more interesting once it is allowed to form short zig-zags or to propose moves for the main search.
+
+## Family-Specific Ideas For `A_k, B_k`
+
+- Search near the known similarity rather than from scratch.
+  Concrete plan:
+  - factor the known similarity into short diagonal and shear pieces,
+  - ask which pieces already preserve positivity,
+  - convert the failure of the others into candidate split or refactorization moves.
+
+- Run induction-style experiments in `k`.
+  Why: even a partially wrong parametric pattern can still be a strong heuristic.
+
+- Use unital shift equivalence as benchmark information, not as proof.
+  Why: Brix-Ruiz 2025 shows the family is unitally shift equivalent, but that notion is weaker than SSE. It is useful as structure and as a source of candidate witnesses, not as a terminating certificate.
+
+- Treat the family as the default regression test for any new heuristic move source.
+  A new idea should answer at least one of:
+  - does it find `k = 3` or `k = 4` more directly,
+  - does it explain the diagonal conjugators already found,
+  - does it improve the frontier on `k = 5+`,
+  - does it avoid the isolated graph-sidecar components seen locally.
 
 ## Stronger Obstruction Ideas
 
-- Push the Eilers-Kiming arithmetic further.
-  Why: the current code already uses their ideal-class invariant, and the paper suggests a deeper arithmetic structure around quadratic orders and equation solving. Even an incomplete implementation could rule out more candidates before the expensive search starts.
+- Extend the Eilers-Kiming arithmetic in the exact quadratic order attached to the `2x2` pair.
+  Why: the current code stops early in that story. The paper suggests more necessary arithmetic compatibility than just matching an ideal class.
 
-- Add a second-stage arithmetic screen specialized to the discriminant / order of the `2x2` pair.
-  Half-baked idea:
-  - once trace and determinant match,
-  - compute the associated quadratic order,
-  - test cheap necessary conditions for the relevant ideal-class equations,
-  - only then launch the expensive search.
+- Add a second-stage "hard case arithmetic dossier" after the easy invariants pass.
+  Candidates:
+  - the quadratic order and conductor,
+  - class-group and Picard-group data when computable,
+  - bounded searches for the colon-ideal product equations from Eilers-Kiming.
 
-- Use Boyle-Schmieding only as a "do not over-promise" boundary.
-  Why: the `NK_1` classification says the gap between SE and SSE is real and subtle. This does not look computationally useful for the current code, but it warns against assuming a simple invariant is still missing. In practice that argues for better search guidance rather than hoping for one easy obstruction.
+- Use Boyle-Schmieding as a boundary marker, not as an implementation blueprint.
+  Why: its main value here is to warn that the SE/SSE gap can hide in nilpotent or `NK_1` data over general rings. That is a reason not to over-promise from weak invariants.
 
-- Revisit Kim-Roush style sign-gyration or periodic-point data only if it can be made algorithmic.
-  Why: this looks more like obstruction theory than a direct search method, but if a cheap computable fragment exists, it could still be a useful prune.
+- Revisit Kim-Roush style periodic-point or sign-gyration data only if a cheap computable fragment exists.
+  Why: this is conceptually relevant obstruction theory, but it is far from an obvious practical prune in the current repo.
 
-## Wild Ideas
+## How The Papers Change The Search Strategy
 
-- Learn a move policy from solved toy instances.
-  Not a theorem, just an experiment:
-  - generate many small equivalent pairs,
-  - log successful move sequences,
-  - train a ranking heuristic for next moves.
-  The search space may be too combinatorial for hand-written heuristics alone.
+- Boyle-Kim-Roush 2013 pushes strongly toward structured move families:
+  - row splits,
+  - column splits,
+  - diagonal refactorizations,
+  - positive-conjugacy paths.
 
-- Maintain a "cloud" of nearby real positive matrices while doing integer search.
-  Why: the real path methods seem smoother than the integer problem. Maybe each integer state should carry a few nearby real conjugacy samples, and the integer search should prefer moves that keep that cloud connected.
+- Bilich-Dor-On-Ruiz 2024 upgrades aligned, balanced, and compatible shift equivalence from side ideas to direct SSE formulations.
 
-- Search for a canonical over-approximate witness first, then tighten it.
-  Example:
-  - allow rational or real factorizations,
-  - solve an easier relaxed problem,
-  - project the relaxed witness back to integer candidates.
-  This could fail badly, but it matches the way several papers move through larger ambient categories before returning to integer SSE.
+- Carlsen-Dor-On-Eilers 2024 says compatible and representable shift equivalence are not merely suggestive analogies. In the finite-essential setting they are equivalent to SSE.
 
-- Use complete in-splits as a restart mechanism.
-  When BFS stalls:
-  - replace the current frontier by bounded complete in-split refinements,
-  - canonicalize,
-  - restart the matrix search from there.
-  This should be treated as a cautious experiment, not a default strategy, because the current sidecar evidence shows small refinement universes can stay trapped in isolated components.
+- Brix 2022 and Eilers-Ruiz 2019 make refined split moves much more targeted than the current graph sidecar code.
 
-- Build a library of reusable "motifs" for successful zig-zags.
-  If a hard case eventually yields a witness, store short subpatterns:
-  - split shape,
-  - rectangular factor shape,
-  - reduction pattern.
-  Then reuse those motifs in future searches.
+- Brix-Mundey-Rennie 2024 argues for compressed refinement moves via higher powers and complete in-splits.
 
-## Implementation Candidates
+- Eilers-Kiming 2008 says the current arithmetic pruning is only a first slice of the available `2x2` theory.
 
-- Promote [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs) from a standalone experiment into a heuristic move generator for [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs).
-- Promote [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs) from one-step witness search into a side-information module for ranking, proposal generation, and selective bounded zig-zag search.
-- Add a unified experimental driver that can alternate:
+- Boyle-Schmieding 2019 and Kim-Roush 1999 both argue against magical thinking. There may not be one short missing invariant that makes the hard cases trivial.
+
+## Concrete Implementation Candidates
+
+- Add a new matrix-level aligned or compatible search module and wire it into [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs) as both:
+  - a direct bounded witness search,
+  - and a proposal source for the generic search.
+
+- Promote [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs) into a move generator that emits prioritized candidate factorizations or structured split moves.
+
+- Extend [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs) from one-step search to short balanced zig-zag search with caching of common intermediates.
+
+- Refactor [`src/graph_moves.rs`](/home/kasper/dev/sse-rust/src/graph_moves.rs) around targeted move families from the papers:
+  - out-splits,
+  - refined in-splits of the `(I+)` flavor,
+  - higher-block refinements,
+  - canonical probe moves.
+
+- Upgrade [`src/invariants.rs`](/home/kasper/dev/sse-rust/src/invariants.rs) with a second arithmetic stage specialized to the quadratic-order data of the `2x2` case.
+
+- Add a unified experimental driver which can alternate:
   - ordinary factorization moves,
-  - graph refinement probes,
-  - balanced side-information,
-  - conjugacy-guided proposal moves.
-- Build benchmark scripts specifically around the Brix-Ruiz `k=3,4,5,...` family so each new heuristic can be measured against the same hard instances, especially whether it escapes the isolated sidecar components already observed locally.
+  - aligned or compatible witness search,
+  - balanced side information,
+  - conjugacy-guided proposals,
+  - graph-refinement probes.
 
-## Papers Behind These Notes
+- Build benchmark scripts centered on the Brix-Ruiz family and record:
+  - witness length,
+  - maximum intermediate size,
+  - number of expanded states,
+  - which heuristic generated the successful move.
 
-- Boyle-Kim-Roush 2013: path methods, conjugacy paths, row/column splittings, diagonal refactorizations.
-- Boyle-Schmieding 2019: `NK_1` and the algebraic gap between SE and SSE.
-- Brix 2022: balanced SSE, eventual conjugacy, out-splits plus balanced in-splits, block-map viewpoint.
-- Brix-Dor-On-Hazrat-Ruiz 2025: aligned module shift equivalence as a promising but not yet matrix-complete sidecar.
-- Brix-Mundey-Rennie 2024: iterated in-splits compressed via higher-power graphs; complete in-splits as canonical refinements.
-- Brix-Ruiz 2025: the explicit hard family and explicit similarities.
-- Carlsen-Dor-On-Eilers 2024: compatible/representable shift equivalence as alternate witness spaces collapsing to SSE.
-- Eilers-Kiming 2008: stronger arithmetic obstructions for `2x2`.
-- Kim-Roush 1999: deeper obstruction phenomena that do not automatically yield constructive searches.
+## Short Per-Paper Takeaways
+
+- Boyle-Kim-Roush 2013: constructive SSE arguments like row splits, column splits, diagonal refactorizations, and positive-conjugacy paths should become actual move families.
+- Boyle-Schmieding 2019: the SE/SSE gap is structurally real; do not expect one cheap invariant to close it.
+- Bilich-Dor-On-Ruiz 2024: matrix-level aligned, balanced, and compatible shift equivalence are defined and are equivalent to SSE for finite essential matrices.
+- Brix 2022: balanced SSE and refined split moves are central, especially through the block-map and eventual-conjugacy viewpoints.
+- Brix-Dor-On-Hazrat-Ruiz 2025: module-aligned search still has heuristic value, but matrix-level aligned search is now the more relevant target.
+- Brix-Mundey-Rennie 2024: iterated in-splits can often be compressed through higher-power constructions; complete in-splits are natural canonical probes.
+- Brix-Ruiz 2025: the explicit `A_k, B_k` family is the right benchmark family, and unital shift equivalence provides structure but not proof.
+- Carlsen-Dor-On-Eilers 2024: compatible and representable shift equivalence collapse to SSE in the finite-essential setting.
+- Eilers-Kiming 2008: there is more `2x2` arithmetic available than the repo currently uses.
+- Eilers-Ruiz 2019: refined graph moves, especially the "same future" in-split picture, suggest more targeted proposal moves than blind graph widening.
+- Kim-Roush 1999: sophisticated periodic-point obstructions exist, but converting them into practical computation is nontrivial.
+- Matsumoto 2007: diagonal-preserving orbit-equivalence data come with explicit cocycle structure and topological full-group witnesses.
+- Matsumoto 2015: continuous orbit equivalence and eventual one-sided conjugacy can be expressed through gauge and diagonal preserving isomorphisms with cocycle control.
+- Matsumoto-Matui 2013: continuous orbit equivalence forces flow equivalence and determinant compatibility, reinforcing the usefulness of ordered cohomology and groupoid data as screens.
