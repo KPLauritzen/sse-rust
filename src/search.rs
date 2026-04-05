@@ -103,6 +103,10 @@ pub fn search_sse_2x2_with_telemetry(
     bwd_orig.insert(b_canon.clone(), DynMatrix::from_sq(b));
     bwd_frontier.push_back(b_canon.clone());
     telemetry.max_frontier_size = 1;
+    let mut fwd_factorisations_per_node = 1.0f64;
+    let mut bwd_factorisations_per_node = 1.0f64;
+    let mut fwd_cost_sample_nodes = 0usize;
+    let mut bwd_cost_sample_nodes = 0usize;
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -128,8 +132,15 @@ pub fn search_sse_2x2_with_telemetry(
     let source_det = a.det();
 
     for layer_index in 0..config.max_lag {
-        // Expand the smaller frontier to keep work balanced.
-        let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
+        // Expand the frontier with the lower estimated factorisation cost.
+        let expand_forward = should_expand_forward(
+            fwd_frontier.len(),
+            bwd_frontier.len(),
+            fwd_factorisations_per_node,
+            bwd_factorisations_per_node,
+            fwd_cost_sample_nodes,
+            bwd_cost_sample_nodes,
+        );
         let direction = if expand_forward {
             SearchDirection::Forward
         } else {
@@ -168,6 +179,17 @@ pub fn search_sse_2x2_with_telemetry(
         telemetry.candidates_generated += expansion_stats.candidates_generated;
         telemetry.pruned_by_size += expansion_stats.pruned_by_size;
         telemetry.pruned_by_spectrum += expansion_stats.pruned_by_spectrum;
+        if expansion_stats.frontier_nodes > 0 {
+            let factorisations_per_node =
+                expansion_stats.factorisations_enumerated.max(1) as f64 / expansion_stats.frontier_nodes as f64;
+            if expand_forward {
+                fwd_factorisations_per_node = factorisations_per_node;
+                fwd_cost_sample_nodes = expansion_stats.frontier_nodes;
+            } else {
+                bwd_factorisations_per_node = factorisations_per_node;
+                bwd_cost_sample_nodes = expansion_stats.frontier_nodes;
+            }
+        }
         let candidates_after_pruning = expansions.len();
         telemetry.candidates_after_pruning += candidates_after_pruning;
         let mut next_frontier: VecDeque<DynMatrix> = VecDeque::new();
@@ -269,6 +291,26 @@ pub fn search_sse_2x2_with_telemetry(
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
     (SseResult::Unknown, telemetry)
+}
+
+fn should_expand_forward(
+    fwd_frontier_len: usize,
+    bwd_frontier_len: usize,
+    fwd_factorisations_per_node: f64,
+    bwd_factorisations_per_node: f64,
+    fwd_cost_sample_nodes: usize,
+    bwd_cost_sample_nodes: usize,
+) -> bool {
+    if fwd_frontier_len == 0 || bwd_frontier_len == 0 {
+        return fwd_frontier_len <= bwd_frontier_len;
+    }
+    if fwd_cost_sample_nodes < 8 || bwd_cost_sample_nodes < 8 {
+        return fwd_frontier_len <= bwd_frontier_len;
+    }
+
+    let fwd_estimated_work = fwd_frontier_len as f64 * fwd_factorisations_per_node.max(1.0);
+    let bwd_estimated_work = bwd_frontier_len as f64 * bwd_factorisations_per_node.max(1.0);
+    fwd_estimated_work <= bwd_estimated_work
 }
 
 fn expand_frontier_layer(
@@ -778,6 +820,24 @@ mod tests {
         );
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
+    }
+
+    #[test]
+    fn test_should_expand_forward_prefers_lower_estimated_work() {
+        assert!(!should_expand_forward(
+            1002,
+            1137,
+            151644.0 / 323.0,
+            103760.0 / 662.0,
+            323,
+            662,
+        ));
+    }
+
+    #[test]
+    fn test_should_expand_forward_falls_back_to_smaller_frontier_when_untrained() {
+        assert!(should_expand_forward(3, 5, 100.0, 1.0, 0, 0));
+        assert!(!should_expand_forward(7, 2, 1.0, 100.0, 0, 0));
     }
 
     // --- Literature examples ---
