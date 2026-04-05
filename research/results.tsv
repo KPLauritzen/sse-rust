@@ -6,3 +6,5 @@ commit	required_passes	required_total	target_hits	total_points	total_ms	status	d
 7dea2f2	6	6	5	825	119	rejected	Combined deeper frontier exploration with det(U)<0 square factorisations; still no Brix-Ruiz hit and slower
 7dea2f2	6	6	5	825	79	kept	Revalidated canonical-successor dedup on a fresh harness run; same score with lower total runtime
 6d60073	6	6	5	825	80	kept	Deduplicated canonical successors across each full frontier layer; same score with much lower duplicate work on Brix-Ruiz telemetry
+e16edbf	6	6	5	825	129	rejected	Added bounded 3x3 same-size moves via cached identity splits; huge factorisation blow-up with no new Brix-Ruiz nodes
+e16edbf	6	6	5	825	111	rejected	Deduplicated factorisation outputs by VU inside the dispatcher; fewer factors but slower overall due extra multiplication cost
