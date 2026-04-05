@@ -36,7 +36,7 @@ Replace pure BFS with a priority queue. Rank frontier nodes by heuristic distanc
 
 Instead of committing to a single large `max_entry`, search with `(max_entry=2, max_dim=2)`, then `(3, 2)`, then `(3, 3)`, etc. Each round is much cheaper than one large bound, and most SSE paths use small entries. Visited sets from earlier rounds can be reused.
 
-## 5. Constraint propagation in factorisation
+## 5. Implemented: Constraint propagation in factorisation
 
 When enumerating U for A = UV, once the first row of U is fixed, the space of valid V columns is tightly constrained. Propagating these constraints column-by-column (rather than enumerating all of U then solving for V) could prune the inner loops earlier. Turns factorisation enumeration into a constraint satisfaction problem.
 
