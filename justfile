@@ -4,6 +4,12 @@ test:
 bench:
     cargo bench
 
+research:
+    cargo run --release --bin research_harness -- --cases research/cases.json --format pretty
+
+research-json:
+    cargo run --release --bin research_harness -- --cases research/cases.json --format json
+
 build:
     cargo build --release
 

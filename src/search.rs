@@ -3,7 +3,10 @@ use std::collections::{HashMap, VecDeque};
 use crate::factorisation::enumerate_all_factorisations;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
-use crate::types::{EsseStep, SearchConfig, SsePath, SseResult};
+use crate::types::{
+    EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry, SearchTelemetry, SsePath,
+    SseResult,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -16,6 +19,16 @@ struct FrontierExpansion {
     step: EsseStep,
 }
 
+#[derive(Clone, Default)]
+struct FrontierExpansionStats {
+    frontier_nodes: usize,
+    factorisation_calls: usize,
+    factorisations_enumerated: usize,
+    candidates_generated: usize,
+    pruned_by_size: usize,
+    pruned_by_spectrum: usize,
+}
+
 /// Search for a strong shift equivalence path between two 2x2 matrices.
 ///
 /// Uses bidirectional BFS over the graph where nodes are square matrices of
@@ -23,30 +36,49 @@ struct FrontierExpansion {
 /// SSE steps (A = UV, B = VU). Searching from both ends reduces complexity
 /// from O(branching^L) to O(2 * branching^(L/2)).
 pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -> SseResult<2> {
+    search_sse_2x2_with_telemetry(a, b, config).0
+}
+
+/// Search for a strong shift equivalence path, returning aggregate telemetry.
+pub fn search_sse_2x2_with_telemetry(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &SearchConfig,
+) -> (SseResult<2>, SearchTelemetry) {
+    let mut telemetry = SearchTelemetry::default();
+
     // Quick check: are they already equal?
     if a == b {
-        return SseResult::Equivalent(SsePath {
-            matrices: vec![a.clone()],
-            steps: vec![],
-        });
+        return (
+            SseResult::Equivalent(SsePath {
+                matrices: vec![a.clone()],
+                steps: vec![],
+            }),
+            telemetry,
+        );
     }
 
     // Pre-filter with invariants.
     if let Some(reason) = check_invariants_2x2(a, b) {
-        return SseResult::NotEquivalent(reason);
+        telemetry.invariant_filtered = true;
+        return (SseResult::NotEquivalent(reason), telemetry);
     }
 
     // If a and b have the same canonical form, they are related by permutation
     // similarity. For 2x2, b = PAP where P = [[0,1],[1,0]].
     // Elementary SSE: U = AP, V = P, then UV = APP = A, VU = PAP = B.
     if a.canonical() == b.canonical() && a != b {
+        telemetry.permutation_shortcut = true;
         let p = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
         let ap = DynMatrix::from_sq(a).mul(&p);
         let step = EsseStep { u: ap, v: p };
-        return SseResult::Equivalent(SsePath {
-            matrices: vec![a.clone(), b.clone()],
-            steps: vec![step],
-        });
+        return (
+            SseResult::Equivalent(SsePath {
+                matrices: vec![a.clone(), b.clone()],
+                steps: vec![step],
+            }),
+            telemetry,
+        );
     }
 
     // Bidirectional BFS: expand from both A and B, meet in the middle.
@@ -70,28 +102,39 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
     bwd_parent.insert(b_canon.clone(), None);
     bwd_orig.insert(b_canon.clone(), DynMatrix::from_sq(b));
     bwd_frontier.push_back(b_canon.clone());
+    telemetry.max_frontier_size = 1;
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
     if a_canon == b_canon {
-        return SseResult::Equivalent(reconstruct_bidirectional_path(
-            a,
-            b,
-            &a_canon,
-            &fwd_parent,
-            &fwd_orig,
-            &bwd_parent,
-            &bwd_orig,
-        ));
+        telemetry.canonical_shortcut = true;
+        telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+        return (
+            SseResult::Equivalent(reconstruct_bidirectional_path(
+                a,
+                b,
+                &a_canon,
+                &fwd_parent,
+                &fwd_orig,
+                &bwd_parent,
+                &bwd_orig,
+            )),
+            telemetry,
+        );
     }
 
     // Precompute spectral invariants for pruning intermediates.
     let source_trace = a.trace();
     let source_det = a.det();
 
-    for _lag in 0..config.max_lag {
+    for layer_index in 0..config.max_lag {
         // Expand the smaller frontier to keep work balanced.
         let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
+        let direction = if expand_forward {
+            SearchDirection::Forward
+        } else {
+            SearchDirection::Backward
+        };
 
         let (frontier, parent, orig, other_parent) = if expand_forward {
             (
@@ -109,8 +152,9 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
             )
         };
 
+        telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
-        let expansions = expand_frontier_layer(
+        let (expansions, expansion_stats) = expand_frontier_layer(
             &current_frontier,
             orig,
             config.max_intermediate_dim,
@@ -118,13 +162,27 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
             source_trace,
             source_det,
         );
+        telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
+        telemetry.factorisation_calls += expansion_stats.factorisation_calls;
+        telemetry.factorisations_enumerated += expansion_stats.factorisations_enumerated;
+        telemetry.candidates_generated += expansion_stats.candidates_generated;
+        telemetry.pruned_by_size += expansion_stats.pruned_by_size;
+        telemetry.pruned_by_spectrum += expansion_stats.pruned_by_spectrum;
+        let candidates_after_pruning = expansions.len();
+        telemetry.candidates_after_pruning += candidates_after_pruning;
         let mut next_frontier: VecDeque<DynMatrix> = VecDeque::new();
+        let mut collisions_with_seen = 0usize;
+        let mut collisions_with_other_frontier = 0usize;
+        let mut discovered_nodes = 0usize;
+        let mut enqueued_nodes = 0usize;
 
         for expansion in expansions {
             if parent.contains_key(&expansion.next_canon) {
+                collisions_with_seen += 1;
                 continue;
             }
 
+            discovered_nodes += 1;
             parent.insert(
                 expansion.next_canon.clone(),
                 Some((expansion.parent_canon, expansion.step)),
@@ -133,15 +191,41 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
 
             // Check if the other side has already visited this node.
             if other_parent.contains_key(&expansion.next_canon) {
-                return SseResult::Equivalent(reconstruct_bidirectional_path(
-                    a,
-                    b,
-                    &expansion.next_canon,
-                    &fwd_parent,
-                    &fwd_orig,
-                    &bwd_parent,
-                    &bwd_orig,
-                ));
+                collisions_with_other_frontier += 1;
+                telemetry.collisions_with_seen += collisions_with_seen;
+                telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
+                telemetry.discovered_nodes += discovered_nodes;
+                telemetry.enqueued_nodes += enqueued_nodes;
+                telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+                telemetry.layers.push(SearchLayerTelemetry {
+                    layer_index,
+                    direction: Some(direction.clone()),
+                    frontier_nodes: expansion_stats.frontier_nodes,
+                    factorisation_calls: expansion_stats.factorisation_calls,
+                    factorisations_enumerated: expansion_stats.factorisations_enumerated,
+                    candidates_generated: expansion_stats.candidates_generated,
+                    pruned_by_size: expansion_stats.pruned_by_size,
+                    pruned_by_spectrum: expansion_stats.pruned_by_spectrum,
+                    candidates_after_pruning,
+                    collisions_with_seen,
+                    collisions_with_other_frontier,
+                    discovered_nodes,
+                    enqueued_nodes,
+                    next_frontier_nodes: next_frontier.len(),
+                    total_visited_nodes: telemetry.total_visited_nodes,
+                });
+                return (
+                    SseResult::Equivalent(reconstruct_bidirectional_path(
+                        a,
+                        b,
+                        &expansion.next_canon,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    )),
+                    telemetry,
+                );
             }
 
             // For 2x2 nodes, bound entries to prevent unbounded growth.
@@ -149,16 +233,42 @@ pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -
             // back to 2x2 already bounds factor entries via max_entry.
             if expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry {
                 next_frontier.push_back(expansion.next_canon);
+                enqueued_nodes += 1;
             }
         }
+
+        telemetry.collisions_with_seen += collisions_with_seen;
+        telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
+        telemetry.discovered_nodes += discovered_nodes;
+        telemetry.enqueued_nodes += enqueued_nodes;
+        telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+        telemetry.layers.push(SearchLayerTelemetry {
+            layer_index,
+            direction: Some(direction),
+            frontier_nodes: expansion_stats.frontier_nodes,
+            factorisation_calls: expansion_stats.factorisation_calls,
+            factorisations_enumerated: expansion_stats.factorisations_enumerated,
+            candidates_generated: expansion_stats.candidates_generated,
+            pruned_by_size: expansion_stats.pruned_by_size,
+            pruned_by_spectrum: expansion_stats.pruned_by_spectrum,
+            candidates_after_pruning,
+            collisions_with_seen,
+            collisions_with_other_frontier,
+            discovered_nodes,
+            enqueued_nodes,
+            next_frontier_nodes: next_frontier.len(),
+            total_visited_nodes: telemetry.total_visited_nodes,
+        });
 
         if next_frontier.is_empty() {
             break;
         }
         *frontier = next_frontier;
+        telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    SseResult::Unknown
+    telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+    (SseResult::Unknown, telemetry)
 }
 
 fn expand_frontier_layer(
@@ -168,7 +278,7 @@ fn expand_frontier_layer(
     max_entry: u32,
     source_trace: u64,
     source_det: i64,
-) -> Vec<FrontierExpansion> {
+) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
@@ -177,18 +287,27 @@ fn expand_frontier_layer(
         let factorisations =
             enumerate_all_factorisations(&current, max_intermediate_dim, max_entry);
         let mut expansions = Vec::new();
+        let mut stats = FrontierExpansionStats {
+            frontier_nodes: 1,
+            factorisation_calls: 1,
+            factorisations_enumerated: factorisations.len(),
+            candidates_generated: factorisations.len(),
+            ..FrontierExpansionStats::default()
+        };
 
         for (u, v) in factorisations {
             let next = v.mul(&u);
 
             // Size bound: don't explore matrices larger than max_intermediate_dim.
             if next.rows > max_intermediate_dim {
+                stats.pruned_by_size += 1;
                 continue;
             }
 
             // Spectral pruning: nonzero eigenvalues are preserved by SSE,
             // so every intermediate must have the same nonzero spectrum.
             if !is_spectrally_consistent(&next, source_trace, source_det) {
+                stats.pruned_by_spectrum += 1;
                 continue;
             }
 
@@ -202,20 +321,52 @@ fn expand_frontier_layer(
             });
         }
 
-        expansions
+        (expansions, stats)
     };
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let per_node: Vec<Vec<FrontierExpansion>> =
+        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
             current_frontier.par_iter().map(expand_node).collect();
-        per_node.into_iter().flatten().collect()
+        let mut expansions = Vec::new();
+        let mut stats = FrontierExpansionStats::default();
+        for (node_expansions, node_stats) in per_node {
+            expansions.extend(node_expansions);
+            accumulate_frontier_stats(&mut stats, &node_stats);
+        }
+        (expansions, stats)
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        current_frontier.iter().flat_map(expand_node).collect()
+        let mut expansions = Vec::new();
+        let mut stats = FrontierExpansionStats::default();
+        for (node_expansions, node_stats) in current_frontier.iter().map(expand_node) {
+            expansions.extend(node_expansions);
+            accumulate_frontier_stats(&mut stats, &node_stats);
+        }
+        (expansions, stats)
     }
+}
+
+fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &FrontierExpansionStats) {
+    total.frontier_nodes += delta.frontier_nodes;
+    total.factorisation_calls += delta.factorisation_calls;
+    total.factorisations_enumerated += delta.factorisations_enumerated;
+    total.candidates_generated += delta.candidates_generated;
+    total.pruned_by_size += delta.pruned_by_size;
+    total.pruned_by_spectrum += delta.pruned_by_spectrum;
+}
+
+fn visited_union_size(
+    fwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
+    bwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
+) -> usize {
+    fwd_parent.len()
+        + bwd_parent
+            .keys()
+            .filter(|key| !fwd_parent.contains_key(*key))
+            .count()
 }
 
 /// Check whether a candidate intermediate matrix has a nonzero spectrum
@@ -415,6 +566,17 @@ mod tests {
     }
 
     #[test]
+    fn test_telemetry_for_invariant_rejection() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let b = SqMatrix::new([[3, 1], [1, 1]]);
+        let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &default_config());
+        assert!(matches!(result, SseResult::NotEquivalent(_)));
+        assert!(telemetry.invariant_filtered);
+        assert_eq!(telemetry.frontier_nodes_expanded, 0);
+        assert!(telemetry.layers.is_empty());
+    }
+
+    #[test]
     fn test_different_det_not_equivalent() {
         let a = SqMatrix::new([[3, 1], [1, 1]]); // tr=4, det=2
         let b = SqMatrix::new([[2, 1], [1, 2]]); // tr=4, det=3
@@ -442,6 +604,41 @@ mod tests {
                 assert_eq!(step.u.cols, step.v.rows);
             }
         }
+    }
+
+    #[test]
+    fn test_telemetry_for_elementary_pair_search() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let b = SqMatrix::new([[1, 1], [1, 2]]);
+        let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &default_config());
+        assert!(matches!(result, SseResult::Equivalent(_)));
+        assert!(telemetry.permutation_shortcut || !telemetry.layers.is_empty());
+        if telemetry.permutation_shortcut {
+            assert_eq!(telemetry.frontier_nodes_expanded, 0);
+            assert!(telemetry.layers.is_empty());
+        } else {
+            assert!(telemetry.frontier_nodes_expanded >= 1);
+            assert!(telemetry.factorisation_calls >= 1);
+            assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
+            assert!(telemetry.total_visited_nodes >= 2);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_for_brix_ruiz_search() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+        };
+        let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
+        assert!(!telemetry.invariant_filtered);
+        assert!(!telemetry.permutation_shortcut);
+        assert!(!telemetry.layers.is_empty());
+        assert!(telemetry.frontier_nodes_expanded >= 1);
+        assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
     }
 
     // --- Literature examples ---

@@ -291,9 +291,7 @@ pub fn enumerate_rect_factorisations_2x3(
                 // Constraint propagation: for U·x = A[:,j] to have a nonneg integer
                 // solution, gcd(row0) must divide every A[0,j].
                 let g0 = gcd3(u00 as u64, u01 as u64, u02 as u64);
-                if g0 > 1
-                    && (a.data[0][0] as u64 % g0 != 0 || a.data[0][1] as u64 % g0 != 0)
-                {
+                if g0 > 1 && (a.data[0][0] as u64 % g0 != 0 || a.data[0][1] as u64 % g0 != 0) {
                     continue;
                 }
 
@@ -311,8 +309,7 @@ pub fn enumerate_rect_factorisations_2x3(
                             // Constraint propagation: gcd(row1) must divide every A[1,j].
                             let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
                             if g1 > 1
-                                && (a.data[1][0] as u64 % g1 != 0
-                                    || a.data[1][1] as u64 % g1 != 0)
+                                && (a.data[1][0] as u64 % g1 != 0 || a.data[1][1] as u64 % g1 != 0)
                             {
                                 continue;
                             }
@@ -457,8 +454,8 @@ pub fn enumerate_factorisations_3x3_to_2(
                         for j in 0..3 {
                             let b0 = c_cols[j][0]; // C[0, j]
                             let b1 = c_cols[j][1]; // C[1, j]
-                            // Cramer: v0 = (u11·b0 − u01·b1) / det01
-                            //         v1 = (u00·b1 − u10·b0) / det01
+                                                   // Cramer: v0 = (u11·b0 − u01·b1) / det01
+                                                   //         v1 = (u00·b1 − u10·b0) / det01
                             let v0_num = (u11 as i64) * b0 - (u01 as i64) * b1;
                             let v1_num = (u00 as i64) * b1 - (u10 as i64) * b0;
                             if v0_num % det01 != 0 || v1_num % det01 != 0 {
@@ -586,35 +583,27 @@ pub fn enumerate_factorisations_3x3_to_2(
                                 ];
 
                                 // det01 = 0 already; rank requires d02 or d12 nonzero.
-                                let d02 = u_rows[0][0] * u_rows[2][1]
-                                    - u_rows[0][1] * u_rows[2][0];
-                                let d12 = u_rows[1][0] * u_rows[2][1]
-                                    - u_rows[1][1] * u_rows[2][0];
+                                let d02 = u_rows[0][0] * u_rows[2][1] - u_rows[0][1] * u_rows[2][0];
+                                let d12 = u_rows[1][0] * u_rows[2][1] - u_rows[1][1] * u_rows[2][0];
                                 if d02 == 0 && d12 == 0 {
                                     continue;
                                 }
 
                                 // Solve for each column of V (overdetermined: 3 eqns, 2 unknowns).
                                 let v0 = match solve_overdetermined_3x2(
-                                    &u_rows,
-                                    &c_cols[0],
-                                    max_entry,
+                                    &u_rows, &c_cols[0], max_entry,
                                 ) {
                                     Some(v) => v,
                                     None => continue,
                                 };
                                 let v1 = match solve_overdetermined_3x2(
-                                    &u_rows,
-                                    &c_cols[1],
-                                    max_entry,
+                                    &u_rows, &c_cols[1], max_entry,
                                 ) {
                                     Some(v) => v,
                                     None => continue,
                                 };
                                 let v2 = match solve_overdetermined_3x2(
-                                    &u_rows,
-                                    &c_cols[2],
-                                    max_entry,
+                                    &u_rows, &c_cols[2], max_entry,
                                 ) {
                                     Some(v) => v,
                                     None => continue,
