@@ -15,3 +15,4 @@ c86b908	6	6	5	825	139	rejected	Combined 3x3 shear moves with explicit forward/ba
 c86b908	6	6	5	825	59	kept	Removed heap allocation from specialized 2x2 and 3x3 canonicalization paths; same score with the fastest warm harness run so far
 6070a45	6	6	5	825	62	rejected	Added explicit tiny-shape multiplication specializations; stayed correct but regressed the best warm harness runtime
 6070a45	6	6	5	825	46	kept	Parallelized the expensive 2x3 rectangular factorisation enumerator on native builds; same score with a much faster warm harness runtime
+1eb69df	6	6	5	825	44	kept	Parallelized the 3x3-to-2 rectangular factorisation enumerator on native builds; same score with another reduction in warm harness runtime
