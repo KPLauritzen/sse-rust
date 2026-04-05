@@ -38,14 +38,28 @@ There is also a separate WASM entry point, `search_aligned_module`, exposed from
 
 ## What is still blocked
 
-The exact matrix-level alignment constraints are still not encoded locally.
+The exact matrix-level alignment constraints are still not encoded locally, and this is because the primary matrix-level source is not yet present in the repo.
 
 The repo README points to:
 
 - Carlsen, Dor-On & Eilers (2024), which establishes intermediary relations between SE and SSE
 - Brix, Dor-On, Hazrat & Ruiz (2025), which states that a forthcoming work defines matrix-level aligned shift equivalence and proves it equivalent to SSE
 
-The 2025 paper gives the graph/module aligned condition as shift equivalence plus associator relations, and that part is now implemented. What is still missing is the matrix-level aligned relation from the forthcoming work cited in Remark 5.3. Until that definition is transcribed precisely, an implementation that claims to decide aligned shift equivalence of matrices would still be guessing.
+Concretely, after checking the local references:
+
+- [references/carlsen-doron-eilers-2024-2011.10320.pdf](/home/kasper/dev/sse-rust/references/carlsen-doron-eilers-2024-2011.10320.pdf) proves several intermediary relations and shows they collapse back to SSE in the Cuntz-Krieger setting, but it does not give the matrix-level aligned witness format used by this repo's search code.
+- [references/brix-doron-hazrat-ruiz-2025-2409.03950.pdf](/home/kasper/dev/sse-rust/references/brix-doron-hazrat-ruiz-2025-2409.03950.pdf) defines module shift equivalence in Definition 5.1 and aligned module shift equivalence in Definition 5.2. That is exactly the level now implemented in `src/aligned.rs`.
+- The same 2025 paper says in Remark 5.3 that a forthcoming work by Bilich, Dor-On and Ruiz defines aligned shift equivalence for finite essential matrices and proves it equivalent to strong shift equivalence.
+- Remark 5.5 in the 2025 paper also states that it is not currently known whether aligned module shift equivalence implies strong shift equivalence.
+
+So the missing ingredient is not "more brute force" over the current module witness space. The missing ingredient is the exact matrix-level relation itself:
+
+- what the matrix-level witness data is
+- what equations/compatibility constraints that witness must satisfy
+- what the fixed-lag algorithmic search space should be
+- and the precise theorem connecting that relation back to SSE
+
+Until that definition is transcribed precisely from the primary source, an implementation that claims to decide aligned shift equivalence of matrices would still be guessing.
 
 ## Practical rollout
 
@@ -66,4 +80,11 @@ This means the present aligned-module implementation is useful as an experimenta
 
 ## Immediate next coding step
 
-Implement the exact matrix-level aligned witness and validator in `src/aligned.rs`, then add a bounded `find_aligned_shift_equivalence_with_lag_2x2` solver before wiring it into `search_sse_2x2`.
+This work is blocked until the primary matrix-level source is available.
+
+Once unblocked, the next coding step is:
+
+1. Implement the exact matrix-level aligned witness and validator in `src/aligned.rs`.
+2. Add a bounded `find_aligned_shift_equivalence_with_lag_2x2` solver.
+3. Cross-check that matrix-level witnesses imply the currently implemented module-level validator on 2x2 examples.
+4. Only then wire the aligned fixed-lag solver into `search_sse_2x2`.

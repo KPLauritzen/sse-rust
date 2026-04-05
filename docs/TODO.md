@@ -2,6 +2,20 @@
 
 The BFS search currently returns `Unknown` for known-SSE pairs like Brix-Ruiz k=3 (`[[1,3],[2,1]]` ↔ `[[1,6],[1,1]]`) because the search space explodes at practical bounds. Items are ranked by expected benchmark impact (high → low).
 
+## Status note on aligned work
+
+Aligned shift equivalence is currently blocked on specification, not on engineering.
+
+What is implemented locally today is the graph/module-aligned condition from Definition 5.2 of Brix, Dor-On, Hazrat & Ruiz (2025); see [docs/aligned-shift-equivalence.md](aligned-shift-equivalence.md). What is still missing is the exact matrix-level relation that is claimed to be equivalent to SSE.
+
+The local reference [references/brix-doron-hazrat-ruiz-2025-2409.03950.pdf](../references/brix-doron-hazrat-ruiz-2025-2409.03950.pdf) says in Remark 5.3 that a forthcoming work by Bilich, Dor-On and Ruiz defines aligned shift equivalence for finite essential matrices and proves it is equivalent to strong shift equivalence. Until that source is available, implementing a matrix-level aligned solver here would be guesswork.
+
+So for now:
+
+- keep the current aligned-module code separate from `search_sse`
+- treat item 2 below as blocked on obtaining the primary matrix-level definition
+- prefer improvements to the existing BFS/search stack for immediate solver gains
+
 ## 1. Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is independent. Wrapping the frontier iteration in `rayon::par_iter()` gives near-linear speedup on multi-core machines. The merge step (collision detection) needs a concurrent map or a collect-then-merge pattern. Easy to implement, multiplicative speedup on all benchmarks.
@@ -9,6 +23,10 @@ Factorisation enumeration for each frontier node is independent. Wrapping the fr
 ## 2. Aligned shift equivalence
 
 Carlsen, Dor-On & Eilers (2024) showed that fixed-lag aligned SE algorithms outperform naive factorisation search. This reformulates the problem algebraically and could complement or replace brute-force BFS for certain cases. Potentially the biggest win for hard cases like Brix-Ruiz k=3, but significant implementation effort.
+
+Status: blocked pending the exact matrix-level definition of aligned shift equivalence. The repo already implements the module-level aligned witness search from Brix, Dor-On, Hazrat & Ruiz (2025), but that paper explicitly does not establish that aligned module shift equivalence implies SSE. The missing input is the forthcoming Bilich-Dor-On-Ruiz matrix-level formulation cited in Remark 5.3 of the 2025 paper.
+
+Unblock condition: obtain the primary source defining matrix-level aligned shift equivalence, then implement the matrix-level witness, validator, and fixed-lag bounded solver in `src/aligned.rs` before integrating it into `search_sse`.
 
 ## 3. Best-first / A* search
 
