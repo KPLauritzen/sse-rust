@@ -715,6 +715,345 @@ fn enumerate_factorisations_3x3_to_2_from_row0(
     results
 }
 
+// --- Elementary conjugation moves for 3×3 ---
+
+/// Generate 3x3 -> 3x3 elementary SSE steps via conjugation by
+/// P = I + k*e_i*e_j^T (an elementary matrix with det=1).
+///
+/// Row-operation direction: U = P, V = P^{-1}*C (subtract k*row_j from row_i).
+///   UV = C, VU = P^{-1}*C*P (the new node).
+///
+/// Column-operation direction: V = P, U = C*P^{-1} (subtract k*col_i from col_j).
+///   UV = C, VU = P*C*P^{-1} (the new node).
+fn visit_elementary_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let n = 3usize;
+
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..n {
+        for j in 0..n {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+
+            // --- Row-operation direction: U = P = I + k*e_i*e_j^T ---
+            // V = P^{-1}*C = C with row_i -= k*row_j.
+            // Nonneg iff row_i(C) >= k*row_j(C) entrywise.
+            let max_k_row = if cm[j].iter().all(|&v| v == 0) {
+                0 // row_j zero -> V=C, trivial
+            } else {
+                let mut mk = i64::MAX;
+                for col in 0..n {
+                    if cm[j][col] > 0 {
+                        mk = mk.min(cm[i][col] / cm[j][col]);
+                    }
+                }
+                mk.min(me)
+            };
+
+            for k in 1..=max_k_row {
+                if k > me {
+                    break;
+                }
+                let mut v_arr = cm;
+                for col in 0..n {
+                    v_arr[i][col] = cm[i][col] - k * cm[j][col];
+                }
+                // V entries are nonneg by construction; check max_entry.
+                if v_arr[i].iter().any(|&e| e > me) {
+                    continue;
+                }
+                // U = P = I + k*e_i*e_j^T
+                let mut u_arr = [[0i64; 3]; 3];
+                for d in 0..n {
+                    u_arr[d][d] = 1;
+                }
+                u_arr[i][j] = k;
+
+                let u_mat = mat3_i64_to_dyn(&u_arr);
+                let v_mat = mat3_i64_to_dyn(&v_arr);
+                visit(u_mat, v_mat);
+            }
+
+            // --- Column-operation direction: V = P = I + k*e_i*e_j^T ---
+            // U = C*P^{-1} = C with col_j -= k*col_i.
+            // Nonneg iff col_j(C) >= k*col_i(C) entrywise.
+            let max_k_col = {
+                let mut mk = i64::MAX;
+                let mut any_pos = false;
+                for row in 0..n {
+                    if cm[row][i] > 0 {
+                        any_pos = true;
+                        mk = mk.min(cm[row][j] / cm[row][i]);
+                    }
+                }
+                if !any_pos {
+                    0
+                } else {
+                    mk.min(me)
+                }
+            };
+
+            for k in 1..=max_k_col {
+                if k > me {
+                    break;
+                }
+                let mut u_arr = cm;
+                for row in 0..n {
+                    u_arr[row][j] = cm[row][j] - k * cm[row][i];
+                }
+                if u_arr.iter().flat_map(|r| r.iter()).any(|&e| e > me) {
+                    continue;
+                }
+                // V = P = I + k*e_i*e_j^T
+                let mut v_arr = [[0i64; 3]; 3];
+                for d in 0..n {
+                    v_arr[d][d] = 1;
+                }
+                v_arr[i][j] = k;
+
+                let u_mat = mat3_i64_to_dyn(&u_arr);
+                let v_mat = mat3_i64_to_dyn(&v_arr);
+                visit(u_mat, v_mat);
+            }
+        }
+    }
+}
+
+/// Generate 3x3 -> 3x3 elementary SSE steps via conjugation by
+/// P = (I + k*e_i*e_j^T)(I + l*e_j*e_i^T) for ordered pairs i != j.
+///
+/// These opposite-shear products stay unimodular but can realize diagonal
+/// weights above the capped square-factorisation bound, while remaining much
+/// narrower than a general diagonal-conjugation sweep.
+fn visit_opposite_shear_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let sq3_cap = max_entry.min(4) as i64;
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for i in 0..3 {
+        for j in 0..3 {
+            if i == j {
+                continue;
+            }
+
+            for k in 1..=max_entry {
+                for l in 1..=max_entry {
+                    let (k, l) = (k as i64, l as i64);
+                    let boosted_diag = 1 + k * l;
+                    if boosted_diag > me {
+                        continue;
+                    }
+
+                    let mut p = identity_mat3_i64();
+                    p[i][i] = boosted_diag;
+                    p[i][j] = k;
+                    p[j][i] = l;
+
+                    if max_entry_mat3_i64(&p) <= sq3_cap {
+                        continue;
+                    }
+
+                    let mut pinv = identity_mat3_i64();
+                    pinv[i][j] = -k;
+                    pinv[j][i] = -l;
+                    pinv[j][j] = boosted_diag;
+
+                    let row_v = mul_mat3_i64(&pinv, &cm);
+                    if entries_fit_nonnegative_bound_mat3_i64(&row_v, me) {
+                        visit(mat3_i64_to_dyn(&p), mat3_i64_to_dyn(&row_v));
+                    }
+
+                    let col_u = mul_mat3_i64(&cm, &pinv);
+                    if entries_fit_nonnegative_bound_mat3_i64(&col_u, me) {
+                        visit(mat3_i64_to_dyn(&col_u), mat3_i64_to_dyn(&p));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Generate 3x3 -> 3x3 elementary SSE steps via paired shears sharing a pivot:
+/// P = I + a*e_i*e_j^T + b*e_i*e_k^T for distinct i, j, k.
+///
+/// Because the two nilpotent terms have the same source row, they square to
+/// zero and commute, so P^{-1} = I - a*e_i*e_j^T - b*e_i*e_k^T.
+///
+/// This reaches a structured family of "subtract two rows/columns at once"
+/// moves that the capped square 3x3 enumeration only sees when all entries of P
+/// stay within the cap.
+fn visit_parallel_shear_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let sq3_cap = max_entry.min(4) as i64;
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for pivot in 0..3 {
+        let support: Vec<usize> = (0..3).filter(|&idx| idx != pivot).collect();
+        let j = support[0];
+        let k = support[1];
+
+        for a in 1..=max_entry {
+            for b in 1..=max_entry {
+                let (a, b) = (a as i64, b as i64);
+
+                let mut p = identity_mat3_i64();
+                p[pivot][j] = a;
+                p[pivot][k] = b;
+                if max_entry_mat3_i64(&p) <= sq3_cap {
+                    continue;
+                }
+
+                let mut pinv = identity_mat3_i64();
+                pinv[pivot][j] = -a;
+                pinv[pivot][k] = -b;
+
+                let row_v = mul_mat3_i64(&pinv, &cm);
+                if entries_fit_nonnegative_bound_mat3_i64(&row_v, me) {
+                    visit(mat3_i64_to_dyn(&p), mat3_i64_to_dyn(&row_v));
+                }
+
+                let col_u = mul_mat3_i64(&cm, &pinv);
+                if entries_fit_nonnegative_bound_mat3_i64(&col_u, me) {
+                    visit(mat3_i64_to_dyn(&col_u), mat3_i64_to_dyn(&p));
+                }
+            }
+        }
+    }
+}
+
+/// Generate 3x3 -> 3x3 elementary SSE steps via paired shears sharing a
+/// common target:
+/// P = I + a*e_j*e_i^T + b*e_k*e_i^T for distinct i, j, k.
+///
+/// As in the parallel-source case, the nilpotent terms square to zero and
+/// commute, so P^{-1} = I - a*e_j*e_i^T - b*e_k*e_i^T.
+fn visit_convergent_shear_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let sq3_cap = max_entry.min(4) as i64;
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for target in 0..3 {
+        let support: Vec<usize> = (0..3).filter(|&idx| idx != target).collect();
+        let j = support[0];
+        let k = support[1];
+
+        for a in 1..=max_entry {
+            for b in 1..=max_entry {
+                let (a, b) = (a as i64, b as i64);
+
+                let mut p = identity_mat3_i64();
+                p[j][target] = a;
+                p[k][target] = b;
+                if max_entry_mat3_i64(&p) <= sq3_cap {
+                    continue;
+                }
+
+                let mut pinv = identity_mat3_i64();
+                pinv[j][target] = -a;
+                pinv[k][target] = -b;
+
+                let row_v = mul_mat3_i64(&pinv, &cm);
+                if entries_fit_nonnegative_bound_mat3_i64(&row_v, me) {
+                    visit(mat3_i64_to_dyn(&p), mat3_i64_to_dyn(&row_v));
+                }
+
+                let col_u = mul_mat3_i64(&cm, &pinv);
+                if entries_fit_nonnegative_bound_mat3_i64(&col_u, me) {
+                    visit(mat3_i64_to_dyn(&col_u), mat3_i64_to_dyn(&p));
+                }
+            }
+        }
+    }
+}
+
+fn identity_mat3_i64() -> [[i64; 3]; 3] {
+    let mut m = [[0i64; 3]; 3];
+    for idx in 0..3 {
+        m[idx][idx] = 1;
+    }
+    m
+}
+
+fn mul_mat3_i64(a: &[[i64; 3]; 3], b: &[[i64; 3]; 3]) -> [[i64; 3]; 3] {
+    let mut out = [[0i64; 3]; 3];
+    for i in 0..3 {
+        for k in 0..3 {
+            if a[i][k] == 0 {
+                continue;
+            }
+            for j in 0..3 {
+                out[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+    out
+}
+
+fn entries_fit_nonnegative_bound_mat3_i64(m: &[[i64; 3]; 3], max_entry: i64) -> bool {
+    m.iter()
+        .flat_map(|row| row.iter())
+        .all(|&entry| (0..=max_entry).contains(&entry))
+}
+
+fn max_entry_mat3_i64(m: &[[i64; 3]; 3]) -> i64 {
+    m.iter()
+        .flat_map(|row| row.iter())
+        .copied()
+        .max()
+        .unwrap_or(0)
+}
+
+fn mat3_i64_to_dyn(m: &[[i64; 3]; 3]) -> DynMatrix {
+    let data: Vec<u32> = m.iter().flat_map(|r| r.iter()).map(|&e| e as u32).collect();
+    DynMatrix::new(3, 3, data)
+}
+
 // --- Square 3×3 factorisation ---
 
 /// Solve A·x = b where A is 3×3 (given as rows), for nonneg integer x with
@@ -775,8 +1114,9 @@ fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32
         let solutions = solve_nonneg_2x3(&rows, &b_sub, max_entry);
         let mut results = Vec::new();
         for x in solutions {
-            let check =
-                a[r_check][0] * x[0] as i64 + a[r_check][1] * x[1] as i64 + a[r_check][2] * x[2] as i64;
+            let check = a[r_check][0] * x[0] as i64
+                + a[r_check][1] * x[1] as i64
+                + a[r_check][2] * x[2] as i64;
             if check == b[r_check] {
                 results.push(x);
             }
@@ -857,9 +1197,7 @@ where
     {
         let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
             .par_iter()
-            .map(|&row0| {
-                enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum)
-            })
+            .map(|&row0| enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum))
             .collect();
         for row_results in per_row0 {
             for (u, v) in row_results {
@@ -871,8 +1209,7 @@ where
     #[cfg(target_arch = "wasm32")]
     {
         for row0 in valid_row0s {
-            for (u, v) in enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum)
-            {
+            for (u, v) in enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum) {
                 visit(u, v);
             }
         }
@@ -917,20 +1254,17 @@ fn enumerate_sq3_from_row0(
                 ];
 
                 // Solve for each column of V: u_top · v_j = [C[0,j], C[1,j]].
-                let v_col0 =
-                    solve_nonneg_2x3(&u_top, &[c_cols[0][0], c_cols[0][1]], max_entry);
+                let v_col0 = solve_nonneg_2x3(&u_top, &[c_cols[0][0], c_cols[0][1]], max_entry);
                 if v_col0.is_empty() {
                     continue;
                 }
 
-                let v_col1 =
-                    solve_nonneg_2x3(&u_top, &[c_cols[1][0], c_cols[1][1]], max_entry);
+                let v_col1 = solve_nonneg_2x3(&u_top, &[c_cols[1][0], c_cols[1][1]], max_entry);
                 if v_col1.is_empty() {
                     continue;
                 }
 
-                let v_col2 =
-                    solve_nonneg_2x3(&u_top, &[c_cols[2][0], c_cols[2][1]], max_entry);
+                let v_col2 = solve_nonneg_2x3(&u_top, &[c_cols[2][0], c_cols[2][1]], max_entry);
                 if v_col2.is_empty() {
                     continue;
                 }
@@ -962,8 +1296,8 @@ fn enumerate_sq3_from_row0(
                                     3,
                                     3,
                                     vec![
-                                        vc0[0], vc1[0], vc2[0], vc0[1], vc1[1], vc2[1],
-                                        vc0[2], vc1[2], vc2[2],
+                                        vc0[0], vc1[0], vc2[0], vc0[1], vc1[1], vc2[1], vc0[2],
+                                        vc1[2], vc2[2],
                                     ],
                                 );
                                 results.push((u_mat, v_mat));
@@ -1026,6 +1360,13 @@ pub fn visit_all_factorisations<F>(
         if max_intermediate_dim >= 3 {
             let sq3_cap = max_entry.min(4);
             visit_square_factorisations_3x3(a, sq3_cap, &mut visit);
+            // Elementary conjugation moves C = P·(P⁻¹C), where P = I ± k·eᵢeⱼᵀ.
+            // These are O(1) per move and reach 3×3 nodes that the capped
+            // square enumeration misses (factor entries > cap).
+            visit_elementary_conjugations_3x3(a, max_entry, &mut visit);
+            visit_opposite_shear_conjugations_3x3(a, max_entry, &mut visit);
+            visit_parallel_shear_conjugations_3x3(a, max_entry, &mut visit);
+            visit_convergent_shear_conjugations_3x3(a, max_entry, &mut visit);
         }
     }
 }
@@ -1192,6 +1533,54 @@ mod tests {
         let b = [-1, 3, 2];
         let result = solve_overdetermined_3x2(&u, &b, 10);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_opposite_shear_conjugation() {
+        let u = DynMatrix::new(3, 3, vec![5, 2, 0, 2, 1, 0, 0, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
+        let c = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
+            if cand_u == u && cand_v == v {
+                found = true;
+            }
+        });
+
+        assert!(found, "expected opposite-shear conjugation factorisation");
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_parallel_shear_conjugation() {
+        let u = DynMatrix::new(3, 3, vec![1, 5, 1, 0, 1, 0, 0, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 0, 0, 1, 1, 0, 1, 0, 1]);
+        let c = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
+            if cand_u == u && cand_v == v {
+                found = true;
+            }
+        });
+
+        assert!(found, "expected parallel-shear conjugation factorisation");
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_convergent_shear_conjugation() {
+        let u = DynMatrix::new(3, 3, vec![1, 0, 0, 5, 1, 0, 1, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
+        let c = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
+            if cand_u == u && cand_v == v {
+                found = true;
+            }
+        });
+
+        assert!(found, "expected convergent-shear conjugation factorisation");
     }
 
     // --- Rectangular factorisation tests ---

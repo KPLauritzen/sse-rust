@@ -1,3 +1,4 @@
+use crate::aligned::ConcreteShiftWitness2x2;
 use serde::{Deserialize, Serialize};
 
 use crate::matrix::{DynMatrix, SqMatrix};
@@ -46,6 +47,8 @@ pub struct SsePath<const N: usize> {
 pub enum SseResult<const N: usize> {
     /// Found a path proving SSE.
     Equivalent(SsePath<N>),
+    /// Found a direct aligned/balanced/compatible concrete-shift witness.
+    EquivalentByConcreteShift(ConcreteShiftWitness2x2),
     /// Proved not SSE by an invariant mismatch.
     NotEquivalent(String),
     /// Search exhausted without finding a path or proving non-equivalence.
@@ -86,6 +89,7 @@ pub struct SearchTelemetry {
     pub invariant_filtered: bool,
     pub permutation_shortcut: bool,
     pub canonical_shortcut: bool,
+    pub concrete_shift_shortcut: bool,
     pub frontier_nodes_expanded: usize,
     pub factorisation_calls: usize,
     pub factorisations_enumerated: usize,

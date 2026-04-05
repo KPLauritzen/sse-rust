@@ -67,7 +67,9 @@ fn two_step_counts(first_step: &[sse_core::graph_moves::OutsplitWitness]) -> (us
     for witness in first_step {
         for second in enumerate_one_step_outsplits(&witness.outsplit) {
             total += 1;
-            canonical.entry(second.outsplit.canonical_perm()).or_insert(());
+            canonical
+                .entry(second.outsplit.canonical_perm())
+                .or_insert(());
         }
     }
     (total, canonical.len())

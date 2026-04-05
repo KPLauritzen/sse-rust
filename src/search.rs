@@ -1,6 +1,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::aligned::{
+    search_concrete_shift_equivalence_2x2, ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2,
+    ConcreteShiftSearchResult2x2,
+};
 use crate::factorisation::visit_all_factorisations;
+use crate::graph_moves::{
+    enumerate_same_future_insplits_2x2_to_3x3, enumerate_same_past_outsplits_2x2_to_3x3,
+};
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
@@ -103,6 +110,10 @@ pub fn search_sse_2x2_with_telemetry(
     bwd_orig.insert(b_canon.clone(), DynMatrix::from_sq(b));
     bwd_frontier.push_back(b_canon.clone());
     telemetry.max_frontier_size = 1;
+    let mut fwd_factorisations_per_node = 1.0f64;
+    let mut bwd_factorisations_per_node = 1.0f64;
+    let mut fwd_cost_sample_nodes = 0usize;
+    let mut bwd_cost_sample_nodes = 0usize;
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -128,8 +139,15 @@ pub fn search_sse_2x2_with_telemetry(
     let source_det = a.det();
 
     for layer_index in 0..config.max_lag {
-        // Expand the smaller frontier to keep work balanced.
-        let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
+        // Expand the frontier with the lower estimated factorisation cost.
+        let expand_forward = should_expand_forward(
+            fwd_frontier.len(),
+            bwd_frontier.len(),
+            fwd_factorisations_per_node,
+            bwd_factorisations_per_node,
+            fwd_cost_sample_nodes,
+            bwd_cost_sample_nodes,
+        );
         let direction = if expand_forward {
             SearchDirection::Forward
         } else {
@@ -168,6 +186,17 @@ pub fn search_sse_2x2_with_telemetry(
         telemetry.candidates_generated += expansion_stats.candidates_generated;
         telemetry.pruned_by_size += expansion_stats.pruned_by_size;
         telemetry.pruned_by_spectrum += expansion_stats.pruned_by_spectrum;
+        if expansion_stats.frontier_nodes > 0 {
+            let factorisations_per_node = expansion_stats.factorisations_enumerated.max(1) as f64
+                / expansion_stats.frontier_nodes as f64;
+            if expand_forward {
+                fwd_factorisations_per_node = factorisations_per_node;
+                fwd_cost_sample_nodes = expansion_stats.frontier_nodes;
+            } else {
+                bwd_factorisations_per_node = factorisations_per_node;
+                bwd_cost_sample_nodes = expansion_stats.frontier_nodes;
+            }
+        }
         let candidates_after_pruning = expansions.len();
         telemetry.candidates_after_pruning += candidates_after_pruning;
         let mut next_frontier: VecDeque<DynMatrix> = VecDeque::new();
@@ -268,7 +297,72 @@ pub fn search_sse_2x2_with_telemetry(
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+
+    // If bounded ESSE search exhausts on a finite essential pair, try the
+    // aligned concrete-shift substrate before reporting `Unknown`.
+    if should_try_concrete_shift_fallback(a, b, config) {
+        let concrete_config = ConcreteShiftSearchConfig2x2 {
+            relation: ConcreteShiftRelation2x2::Aligned,
+            max_lag: config.max_lag as u32,
+            max_entry: config.max_entry,
+            max_witnesses: concrete_shift_witness_budget(config),
+        };
+        if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
+            search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
+        {
+            telemetry.concrete_shift_shortcut = true;
+            return (SseResult::EquivalentByConcreteShift(witness), telemetry);
+        }
+    }
+
     (SseResult::Unknown, telemetry)
+}
+
+fn is_essential_matrix_2x2(m: &SqMatrix<2>) -> bool {
+    let row0 = m.data[0][0] + m.data[0][1];
+    let row1 = m.data[1][0] + m.data[1][1];
+    let col0 = m.data[0][0] + m.data[1][0];
+    let col1 = m.data[0][1] + m.data[1][1];
+    row0 > 0 && row1 > 0 && col0 > 0 && col1 > 0
+}
+
+fn concrete_shift_witness_budget(config: &SearchConfig) -> usize {
+    if config.max_lag <= 4 && config.max_entry <= 6 {
+        10_000
+    } else {
+        25_000
+    }
+}
+
+fn should_try_concrete_shift_fallback(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &SearchConfig,
+) -> bool {
+    is_essential_matrix_2x2(a)
+        && is_essential_matrix_2x2(b)
+        && config.max_lag <= 4
+        && config.max_entry <= 6
+}
+
+fn should_expand_forward(
+    fwd_frontier_len: usize,
+    bwd_frontier_len: usize,
+    fwd_factorisations_per_node: f64,
+    bwd_factorisations_per_node: f64,
+    fwd_cost_sample_nodes: usize,
+    bwd_cost_sample_nodes: usize,
+) -> bool {
+    if fwd_frontier_len == 0 || bwd_frontier_len == 0 {
+        return fwd_frontier_len <= bwd_frontier_len;
+    }
+    if fwd_cost_sample_nodes < 8 || bwd_cost_sample_nodes < 8 {
+        return fwd_frontier_len <= bwd_frontier_len;
+    }
+
+    let fwd_estimated_work = fwd_frontier_len as f64 * fwd_factorisations_per_node.max(1.0);
+    let bwd_estimated_work = bwd_frontier_len as f64 * bwd_factorisations_per_node.max(1.0);
+    fwd_estimated_work <= bwd_estimated_work
 }
 
 fn expand_frontier_layer(
@@ -290,6 +384,64 @@ fn expand_frontier_layer(
             factorisation_calls: 1,
             ..FrontierExpansionStats::default()
         };
+
+        if let Some(current_sq) = current.to_sq::<2>() {
+            for witness in enumerate_same_past_outsplits_2x2_to_3x3(&current_sq) {
+                stats.candidates_generated += 1;
+                let next = witness.outsplit;
+                if next.rows > max_intermediate_dim {
+                    stats.pruned_by_size += 1;
+                    continue;
+                }
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                let step = EsseStep {
+                    u: witness.division,
+                    v: witness.edge,
+                };
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step,
+                });
+            }
+
+            for witness in enumerate_same_future_insplits_2x2_to_3x3(&current_sq) {
+                stats.candidates_generated += 1;
+                let next = witness.outsplit;
+                if next.rows > max_intermediate_dim {
+                    stats.pruned_by_size += 1;
+                    continue;
+                }
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                let step = EsseStep {
+                    u: witness.edge,
+                    v: witness.division,
+                };
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step,
+                });
+            }
+        }
 
         visit_all_factorisations(current, max_intermediate_dim, max_entry, |u, v| {
             stats.factorisations_enumerated += 1;
@@ -691,9 +843,16 @@ mod tests {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         let b = SqMatrix::new([[1, 1], [1, 2]]);
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &default_config());
-        assert!(matches!(result, SseResult::Equivalent(_)));
-        assert!(telemetry.permutation_shortcut || !telemetry.layers.is_empty());
-        if telemetry.permutation_shortcut {
+        assert!(matches!(
+            result,
+            SseResult::Equivalent(_) | SseResult::EquivalentByConcreteShift(_)
+        ));
+        assert!(
+            telemetry.permutation_shortcut
+                || telemetry.concrete_shift_shortcut
+                || !telemetry.layers.is_empty()
+        );
+        if telemetry.permutation_shortcut || telemetry.concrete_shift_shortcut {
             assert_eq!(telemetry.frontier_nodes_expanded, 0);
             assert!(telemetry.layers.is_empty());
         } else {
@@ -716,6 +875,7 @@ mod tests {
         let result = search_sse_2x2(&a, &b, &config);
         match result {
             SseResult::Equivalent(path) => assert_valid_path(&path),
+            SseResult::EquivalentByConcreteShift(_witness) => {}
             other => panic!("expected Equivalent path, got {:?}", other),
         }
     }
@@ -778,6 +938,24 @@ mod tests {
         );
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
+    }
+
+    #[test]
+    fn test_should_expand_forward_prefers_lower_estimated_work() {
+        assert!(!should_expand_forward(
+            1002,
+            1137,
+            151644.0 / 323.0,
+            103760.0 / 662.0,
+            323,
+            662,
+        ));
+    }
+
+    #[test]
+    fn test_should_expand_forward_falls_back_to_smaller_frontier_when_untrained() {
+        assert!(should_expand_forward(3, 5, 100.0, 1.0, 0, 0));
+        assert!(!should_expand_forward(7, 2, 1.0, 100.0, 0, 0));
     }
 
     // --- Literature examples ---
@@ -918,7 +1096,12 @@ mod tests {
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
-            matches!(result, SseResult::Equivalent(_) | SseResult::Unknown),
+            matches!(
+                result,
+                SseResult::Equivalent(_)
+                    | SseResult::EquivalentByConcreteShift(_)
+                    | SseResult::Unknown
+            ),
             "Should not be NotEquivalent — these are known SSE"
         );
     }
@@ -963,11 +1146,15 @@ mod tests {
                 // rectangular factorisation enabled.
                 assert_valid_path(path);
             }
+            SseResult::EquivalentByConcreteShift(_witness) => {}
             _ => panic!(
                 "Expected Equivalent for constructed rectangular SSE pair A={:?} B={:?}, got {:?}",
                 a,
                 b,
                 match &result {
+                    SseResult::EquivalentByConcreteShift(_) => {
+                        "EquivalentByConcreteShift".to_string()
+                    }
                     SseResult::NotEquivalent(r) => format!("NotEquivalent({})", r),
                     SseResult::Unknown => "Unknown".to_string(),
                     _ => unreachable!(),

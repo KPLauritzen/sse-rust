@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use sse_core::graph_moves::{
-    enumerate_one_step_split_refinements, enumerate_insplits_2x2_to_3x3,
+    enumerate_insplits_2x2_to_3x3, enumerate_one_step_split_refinements,
     enumerate_outsplits_2x2_to_3x3,
 };
 use sse_core::matrix::{DynMatrix, SqMatrix};

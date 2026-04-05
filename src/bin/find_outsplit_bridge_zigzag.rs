@@ -95,7 +95,16 @@ fn main() {
                     println!("A bridge = {:?}", left);
                     println!("B bridge = {:?}", right);
                     println!("lag = {}", path.steps.len());
-                    println!("frontier_nodes_expanded = {}", telemetry.frontier_nodes_expanded);
+                    println!(
+                        "frontier_nodes_expanded = {}",
+                        telemetry.frontier_nodes_expanded
+                    );
+                    return;
+                }
+                SseResult::EquivalentByConcreteShift(_witness) => {
+                    println!("Found bridge zig-zag via aligned concrete-shift witness");
+                    println!("A bridge = {:?}", left);
+                    println!("B bridge = {:?}", right);
                     return;
                 }
                 SseResult::NotEquivalent(reason) => {

@@ -106,6 +106,11 @@ pub fn search_sse(
                 steps: Some(steps),
             }
         }
+        crate::types::SseResult::EquivalentByConcreteShift(_witness) => WasmSseResult {
+            status: "equivalent".into(),
+            reason: Some("aligned concrete-shift witness".into()),
+            steps: None,
+        },
         crate::types::SseResult::NotEquivalent(reason) => WasmSseResult {
             status: "not_equivalent".into(),
             reason: Some(reason),
@@ -121,14 +126,7 @@ pub fn search_sse(
     serde_json::to_string(&wasm_result).unwrap()
 }
 
-/// Search for a bounded aligned module shift-equivalence witness between two 2x2 matrices.
-///
-/// This is experimental and should not be interpreted as an SSE proof procedure:
-/// the current implementation searches for the graph/module aligned witnesses
-/// from Brix, Dor-On, Hazrat & Ruiz (2025), not the forthcoming matrix-level
-/// aligned shift equivalence relation.
-#[wasm_bindgen]
-pub fn search_aligned_module(
+fn search_aligned_shift_impl(
     a00: u32,
     a01: u32,
     a10: u32,
@@ -167,4 +165,68 @@ pub fn search_aligned_module(
     };
 
     serde_json::to_string(&wasm_result).unwrap()
+}
+
+/// Search for a bounded aligned concrete-shift witness between two 2x2 matrices.
+///
+/// This is experimental and should not be interpreted as a complete SSE proof
+/// procedure, but it now targets the matrix-level concrete aligned relation
+/// from Bilich, Dor-On & Ruiz (2024).
+#[wasm_bindgen]
+pub fn search_aligned_shift(
+    a00: u32,
+    a01: u32,
+    a10: u32,
+    a11: u32,
+    b00: u32,
+    b01: u32,
+    b10: u32,
+    b11: u32,
+    max_lag: u32,
+    max_entry: u32,
+    max_module_witnesses: usize,
+) -> String {
+    search_aligned_shift_impl(
+        a00,
+        a01,
+        a10,
+        a11,
+        b00,
+        b01,
+        b10,
+        b11,
+        max_lag,
+        max_entry,
+        max_module_witnesses,
+    )
+}
+
+/// Backwards-compatible alias for older frontend code.
+#[wasm_bindgen]
+pub fn search_aligned_module(
+    a00: u32,
+    a01: u32,
+    a10: u32,
+    a11: u32,
+    b00: u32,
+    b01: u32,
+    b10: u32,
+    b11: u32,
+    max_lag: u32,
+    max_entry: u32,
+    max_module_witnesses: usize,
+) -> String {
+    search_aligned_shift_impl(
+        a00,
+        a01,
+        a10,
+        a11,
+        b00,
+        b01,
+        b10,
+        b11,
+        max_lag,
+        max_entry,
+        max_module_witnesses,
+    )
 }
