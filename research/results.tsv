@@ -10,3 +10,6 @@ e16edbf	6	6	5	825	129	rejected	Added bounded 3x3 same-size moves via cached iden
 e16edbf	6	6	5	825	111	rejected	Deduplicated factorisation outputs by VU inside the dispatcher; fewer factors but slower overall due extra multiplication cost
 1672ada	6	6	5	825	65	kept	Specialized 2x2 and 3x3 permutation canonicalization in the search hot loop; same score with faster warm harness runtime
 1672ada	6	6	5	825	64	kept	Optimized small-matrix multiplication to use row slices and zero-skips; same score with a slightly faster warm harness run
+c86b908	6	6	5	825	94	rejected	Added restricted 3x3 same-size shear factorisations; much deeper Brix frontier growth but no new target hit and slower warm harness runtime
+c86b908	6	6	5	825	139	rejected	Combined 3x3 shear moves with explicit forward/backward depth budgeting; explored farther but still missed Brix and regressed total runtime
+c86b908	6	6	5	825	59	kept	Removed heap allocation from specialized 2x2 and 3x3 canonicalization paths; same score with the fastest warm harness run so far

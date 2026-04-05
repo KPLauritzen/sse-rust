@@ -333,13 +333,14 @@ impl DynMatrix {
     fn canonical_perm_2x2(&self) -> Self {
         debug_assert_eq!(self.rows, 2);
         debug_assert_eq!(self.cols, 2);
-        let swapped = DynMatrix::new(
-            2,
-            2,
-            vec![self.get(1, 1), self.get(1, 0), self.get(0, 1), self.get(0, 0)],
-        );
-        if swapped < *self {
-            swapped
+        let swapped = [
+            self.data[3],
+            self.data[2],
+            self.data[1],
+            self.data[0],
+        ];
+        if swapped.as_slice() < self.data.as_slice() {
+            DynMatrix::new(2, 2, swapped.to_vec())
         } else {
             self.clone()
         }
@@ -358,24 +359,25 @@ impl DynMatrix {
             [2, 1, 0],
         ];
 
-        let mut best_data = self.data.clone();
+        let mut best_data = [0u32; 9];
+        best_data.copy_from_slice(&self.data);
         for perm in PERMS.iter().skip(1) {
-            let candidate = vec![
-                self.get(perm[0], perm[0]),
-                self.get(perm[0], perm[1]),
-                self.get(perm[0], perm[2]),
-                self.get(perm[1], perm[0]),
-                self.get(perm[1], perm[1]),
-                self.get(perm[1], perm[2]),
-                self.get(perm[2], perm[0]),
-                self.get(perm[2], perm[1]),
-                self.get(perm[2], perm[2]),
+            let candidate = [
+                self.data[perm[0] * 3 + perm[0]],
+                self.data[perm[0] * 3 + perm[1]],
+                self.data[perm[0] * 3 + perm[2]],
+                self.data[perm[1] * 3 + perm[0]],
+                self.data[perm[1] * 3 + perm[1]],
+                self.data[perm[1] * 3 + perm[2]],
+                self.data[perm[2] * 3 + perm[0]],
+                self.data[perm[2] * 3 + perm[1]],
+                self.data[perm[2] * 3 + perm[2]],
             ];
             if candidate < best_data {
                 best_data = candidate;
             }
         }
-        DynMatrix::new(3, 3, best_data)
+        DynMatrix::new(3, 3, best_data.to_vec())
     }
 
     /// Conjugate by a permutation: result[i][j] = self[perm[i]][perm[j]].
