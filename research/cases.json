@@ -131,7 +131,51 @@
         "timeout": -3000,
         "panic": -3000
       },
-      "tags": ["hard-positive", "target"]
+      "tags": ["hard-positive", "target", "telemetry-focus"]
+    },
+    {
+      "id": "brix_ruiz_k3_wide_probe",
+      "description": "Wider telemetry probe for the same hard known-SSE pair. This case is for progress diagnostics, not target scoring.",
+      "a": [[1, 3], [2, 1]],
+      "b": [[1, 6], [1, 1]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": -2000,
+        "unknown": 0,
+        "timeout": -3000,
+        "panic": -3000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "wide-probe"]
+    },
+    {
+      "id": "brix_ruiz_k4_probe",
+      "description": "Telemetry-only family probe for the open Brix-Ruiz k=4 pair. This should never count as a scored target, but it is useful for checking whether heuristics generalize beyond k=3.",
+      "a": [[1, 4], [3, 1]],
+      "b": [[1, 12], [1, 1]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": -2000,
+        "unknown": 0,
+        "timeout": -3000,
+        "panic": -3000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "family-probe"]
     }
   ]
 }

@@ -423,6 +423,56 @@ fn permutation_step(m: &DynMatrix) -> EsseStep {
     EsseStep { u: mp, v: p }
 }
 
+fn permutation_step_between(from: &DynMatrix, to: &DynMatrix) -> Option<EsseStep> {
+    if from.rows != from.cols || to.rows != to.cols || from.rows != to.rows {
+        return None;
+    }
+    let n = from.rows;
+    let mut perm: Vec<usize> = (0..n).collect();
+    let mut result = None;
+    for_each_permutation(&mut perm, 0, &mut |perm| {
+        if result.is_some() {
+            return;
+        }
+        let (p, pinv) = permutation_matrices(perm);
+        let candidate = pinv.mul(from).mul(&p);
+        if candidate == *to {
+            let u = from.mul(&p);
+            result = Some(EsseStep { u, v: pinv });
+        }
+    });
+    result
+}
+
+fn permutation_matrices(perm: &[usize]) -> (DynMatrix, DynMatrix) {
+    let n = perm.len();
+    let mut p_data = vec![0u32; n * n];
+    let mut pinv_data = vec![0u32; n * n];
+    for (row, &col) in perm.iter().enumerate() {
+        p_data[row * n + col] = 1;
+        pinv_data[col * n + row] = 1;
+    }
+    (
+        DynMatrix::new(n, n, p_data),
+        DynMatrix::new(n, n, pinv_data),
+    )
+}
+
+fn for_each_permutation<F>(perm: &mut [usize], start: usize, visit: &mut F)
+where
+    F: FnMut(&[usize]),
+{
+    if start == perm.len() {
+        visit(perm);
+        return;
+    }
+    for idx in start..perm.len() {
+        perm.swap(start, idx);
+        for_each_permutation(perm, start + 1, visit);
+        perm.swap(start, idx);
+    }
+}
+
 /// Walk a parent chain from `node` back to the root, returning
 /// (matrices, steps) in root-to-node order.
 fn walk_parent_chain(
@@ -469,8 +519,23 @@ fn reconstruct_bidirectional_path(
     // Backward: B -> ... -> M, which we reverse to M -> ... -> B.
     let (bwd_matrices, bwd_steps) = walk_parent_chain(meeting_canon, bwd_parent, bwd_orig);
 
+    let fwd_meeting = fwd_matrices
+        .last()
+        .expect("forward chain should end at the meeting node")
+        .clone();
+    let bwd_meeting = bwd_matrices
+        .last()
+        .expect("backward chain should end at the meeting node")
+        .clone();
+
     // Build the combined step list.
     let mut all_steps = fwd_steps;
+
+    if fwd_meeting != bwd_meeting {
+        let step = permutation_step_between(&fwd_meeting, &bwd_meeting)
+            .expect("meeting representatives should be permutation-similar");
+        all_steps.push(step);
+    }
 
     // Reverse backward steps: each backward step had current=UV, neighbor=VU.
     // In the forward direction (M->...->B) we need neighbor=UV, current=VU,
@@ -484,6 +549,9 @@ fn reconstruct_bidirectional_path(
 
     // Build the combined matrix list (all intermediate DynMatrix nodes).
     let mut all_dyn_matrices: Vec<DynMatrix> = fwd_matrices;
+    if fwd_meeting != bwd_meeting {
+        all_dyn_matrices.push(bwd_meeting);
+    }
     // bwd_matrices is [B, ..., M] — reversed and skip M (already in fwd).
     for m in bwd_matrices.into_iter().rev().skip(1) {
         all_dyn_matrices.push(m);
@@ -633,6 +701,22 @@ mod tests {
             assert!(telemetry.factorisation_calls >= 1);
             assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
             assert!(telemetry.total_visited_nodes >= 2);
+        }
+    }
+
+    #[test]
+    fn test_bfs_positive_pair_path_is_valid() {
+        let a = SqMatrix::new([[1, 1], [2, 5]]);
+        let b = SqMatrix::new([[1, 2], [1, 5]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+        };
+        let result = search_sse_2x2(&a, &b, &config);
+        match result {
+            SseResult::Equivalent(path) => assert_valid_path(&path),
+            other => panic!("expected Equivalent path, got {:?}", other),
         }
     }
 
