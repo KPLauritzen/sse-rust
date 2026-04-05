@@ -1,3 +1,4 @@
+pub mod aligned;
 pub mod factorisation;
 pub mod invariants;
 pub mod matrix;
