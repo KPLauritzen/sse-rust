@@ -338,7 +338,7 @@ fn expand_frontier_layer(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        (expansions, stats)
+        (deduplicate_expansions(expansions), stats)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -349,8 +349,19 @@ fn expand_frontier_layer(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        (expansions, stats)
+        (deduplicate_expansions(expansions), stats)
     }
+}
+
+fn deduplicate_expansions(expansions: Vec<FrontierExpansion>) -> Vec<FrontierExpansion> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::with_capacity(expansions.len());
+    for expansion in expansions {
+        if seen.insert(expansion.next_canon.clone()) {
+            deduped.push(expansion);
+        }
+    }
+    deduped
 }
 
 fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &FrontierExpansionStats) {
@@ -658,6 +669,34 @@ mod tests {
 
         assert!(!expansions.is_empty());
         assert!(stats.factorisations_enumerated > expansions.len());
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_deduplicates_across_frontier_nodes() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let a_canon = a_dyn.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(a_canon.clone(), a_dyn);
+
+        let (single_expansions, _) = expand_frontier_layer(
+            std::slice::from_ref(&a_canon),
+            &orig,
+            2,
+            10,
+            a.trace(),
+            a.det(),
+        );
+        let (duplicate_frontier_expansions, _) = expand_frontier_layer(
+            &[a_canon.clone(), a_canon],
+            &orig,
+            2,
+            10,
+            a.trace(),
+            a.det(),
+        );
+
+        assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
     }
 
     // --- Literature examples ---

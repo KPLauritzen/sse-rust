@@ -5,3 +5,4 @@ commit	required_passes	required_total	target_hits	total_points	total_ms	status	d
 7dea2f2	6	6	5	825	104	rejected	Continue exploring when one bidirectional frontier empties; no target gain and slower overall runtime
 7dea2f2	6	6	5	825	119	rejected	Combined deeper frontier exploration with det(U)<0 square factorisations; still no Brix-Ruiz hit and slower
 7dea2f2	6	6	5	825	79	kept	Revalidated canonical-successor dedup on a fresh harness run; same score with lower total runtime
+6d60073	6	6	5	825	80	kept	Deduplicated canonical successors across each full frontier layer; same score with much lower duplicate work on Brix-Ruiz telemetry
