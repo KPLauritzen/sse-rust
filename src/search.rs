@@ -5,6 +5,7 @@ use crate::aligned::{
     ConcreteShiftSearchResult2x2,
 };
 use crate::factorisation::visit_all_factorisations;
+use crate::graph_moves::enumerate_same_future_insplits_2x2_to_3x3;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
@@ -381,6 +382,36 @@ fn expand_frontier_layer(
             factorisation_calls: 1,
             ..FrontierExpansionStats::default()
         };
+
+        if let Some(current_sq) = current.to_sq::<2>() {
+            for witness in enumerate_same_future_insplits_2x2_to_3x3(&current_sq) {
+                stats.candidates_generated += 1;
+                let next = witness.outsplit;
+                if next.rows > max_intermediate_dim {
+                    stats.pruned_by_size += 1;
+                    continue;
+                }
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                let step = EsseStep {
+                    u: witness.edge,
+                    v: witness.division,
+                };
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step,
+                });
+            }
+        }
 
         visit_all_factorisations(current, max_intermediate_dim, max_entry, |u, v| {
             stats.factorisations_enumerated += 1;
