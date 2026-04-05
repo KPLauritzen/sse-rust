@@ -34,6 +34,8 @@ and can check the associator relations `(5.3)` and `(5.4)` directly on enumerate
 
 The bounded search is intentionally exposed as module-level search only. It should not be used as a proof of SSE, because Remark 5.5 in the 2025 paper explicitly says it is not currently known whether aligned module shift equivalence implies strong shift equivalence.
 
+There is also a separate WASM entry point, `search_aligned_module`, exposed from [src/wasm.rs](/home/kasper/dev/sse-rust/src/wasm.rs). It returns witness data only for the experimental module-level search and is intentionally separate from `search_sse`.
+
 ## What is still blocked
 
 The exact matrix-level alignment constraints are still not encoded locally.
@@ -52,6 +54,15 @@ The 2025 paper gives the graph/module aligned condition as shift equivalence plu
 3. Use the current graph/module validator as a correctness target for any matrix-level reformulation.
 4. Add the matrix-level alignment constraints once the primary definition is transcribed from the source.
 5. Only then integrate an aligned fixed-lag solver into the top-level SSE search.
+
+## Current benchmark snapshot
+
+Using the Criterion benchmarks in [benches/search.rs](/home/kasper/dev/sse-rust/benches/search.rs):
+
+- For the elementary pair `[[2,1],[1,1]]` ↔ `[[1,1],[1,2]]`, the current BFS search runs in about `1.76 µs`, while the current aligned-module brute-force search takes about `19 ms` and hits its witness limit under the benchmark configuration.
+- For the Brix-Ruiz `k=3` pair `[[1,3],[2,1]]` ↔ `[[1,6],[1,1]]`, the current BFS search takes about `342 ms`, while the aligned-module search returns in about `206 µs` but exhausts the bounded search without finding a witness.
+
+This means the present aligned-module implementation is useful as an experimental search substrate, but not yet as a competitive solver. The immediate need is search-space reduction, not more exhaustive benchmarking.
 
 ## Immediate next coding step
 

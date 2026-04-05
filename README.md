@@ -117,16 +117,19 @@ Rust library crate (`sse-core`) with WASM bindings. No external dependencies bey
 
 - BFS search for SSE paths between 2×2 matrices, including through 3×3 intermediate matrices (rectangular factorisations).
 - Disprove SSE via a chain of invariants: trace, determinant, Bowen-Franks group, generalised Bowen-Franks groups (18 polynomials from Eilers & Kiming 2008), and the Eilers-Kiming ideal class invariant.
+- Experimentally search for aligned module shift-equivalence witnesses for small 2×2 cases.
+  This is exposed separately from SSE search and is not currently used as an SSE proof method.
 - Compile to WASM for in-browser use.
 
 **Key source files:**
 
+- [`src/aligned.rs`](src/aligned.rs) — Fixed-lag SE witnesses, aligned module witness verification, and bounded aligned module search.
 - [`src/search.rs`](src/search.rs) — BFS search engine. Entry point: `search_sse_2x2`.
 - [`src/invariants.rs`](src/invariants.rs) — All invariant checks, called as pre-filters before search. Entry point: `check_invariants_2x2`.
 - [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).
 - [`src/factorisation.rs`](src/factorisation.rs) — Exhaustive enumeration of nonneg integer factorisations A = UV (square and rectangular).
 - [`src/matrix.rs`](src/matrix.rs) — Fixed-size `SqMatrix<N>` and dynamic `DynMatrix` types.
-- [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse` as a JSON-returning function.
+- [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse` and the experimental `search_aligned_module` as JSON-returning functions.
 
 **Building WASM:**
 
