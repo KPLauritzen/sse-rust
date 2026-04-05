@@ -60,6 +60,23 @@ Next coding step after that negative result:
 - search whether out-splits of the Brix-Ruiz `2x2` pair admit a short balanced chain or another highly structured common refinement in size `3`
 - only after that decide whether to fold any discovered move family into the main `search_sse` engine
 
+Status update on one-step out-splits:
+
+- explicit `2x2 -> 3x3` out-split enumeration now exists locally
+- for `brix_ruiz_k3`, the search finds `42` out-splits on the `A` side and `54` on the `B` side
+- for `brix_ruiz_k4`, the counts are `54` and `90`, respectively
+- there is no common one-step `3x3` out-split refinement up to permutation for either pair
+- after factoring those `3x3` out-splits back down with the existing bounded `3x3 -> 2x2` search, there is still no shared `2x2` bridge under `max_entry = 8`
+
+This rules out the smallest obvious graph-move patterns around the Brix-Ruiz family.
+
+Next coding step after that:
+
+- search two-step split chains rather than one-step refinements
+- either:
+  `2x2 -> 3x3 -> 4x4` out-splits on both sides looking for a common canonical refinement, or
+  bounded search among `3x3` out-splits for a short `3x3 <-> 2x2 <-> 3x3` zig-zag that the current sidecar probes do not yet capture
+
 ## 1. Implemented: Rayon parallelism on frontier expansion
 
 Factorisation enumeration for each frontier node is now parallelised on native targets with `rayon::par_iter()`, using a collect-then-merge pass for collision detection and parent-map updates. The `wasm32` target keeps a serial fallback so the browser build does not depend on threading support.
