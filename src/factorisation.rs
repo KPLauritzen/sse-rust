@@ -897,6 +897,121 @@ where
     }
 }
 
+/// Generate 3x3 -> 3x3 elementary SSE steps via paired shears sharing a pivot:
+/// P = I + a*e_i*e_j^T + b*e_i*e_k^T for distinct i, j, k.
+///
+/// Because the two nilpotent terms have the same source row, they square to
+/// zero and commute, so P^{-1} = I - a*e_i*e_j^T - b*e_i*e_k^T.
+///
+/// This reaches a structured family of "subtract two rows/columns at once"
+/// moves that the capped square 3x3 enumeration only sees when all entries of P
+/// stay within the cap.
+fn visit_parallel_shear_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let sq3_cap = max_entry.min(4) as i64;
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for pivot in 0..3 {
+        let support: Vec<usize> = (0..3).filter(|&idx| idx != pivot).collect();
+        let j = support[0];
+        let k = support[1];
+
+        for a in 1..=max_entry {
+            for b in 1..=max_entry {
+                let (a, b) = (a as i64, b as i64);
+
+                let mut p = identity_mat3_i64();
+                p[pivot][j] = a;
+                p[pivot][k] = b;
+                if max_entry_mat3_i64(&p) <= sq3_cap {
+                    continue;
+                }
+
+                let mut pinv = identity_mat3_i64();
+                pinv[pivot][j] = -a;
+                pinv[pivot][k] = -b;
+
+                let row_v = mul_mat3_i64(&pinv, &cm);
+                if entries_fit_nonnegative_bound_mat3_i64(&row_v, me) {
+                    visit(mat3_i64_to_dyn(&p), mat3_i64_to_dyn(&row_v));
+                }
+
+                let col_u = mul_mat3_i64(&cm, &pinv);
+                if entries_fit_nonnegative_bound_mat3_i64(&col_u, me) {
+                    visit(mat3_i64_to_dyn(&col_u), mat3_i64_to_dyn(&p));
+                }
+            }
+        }
+    }
+}
+
+/// Generate 3x3 -> 3x3 elementary SSE steps via paired shears sharing a
+/// common target:
+/// P = I + a*e_j*e_i^T + b*e_k*e_i^T for distinct i, j, k.
+///
+/// As in the parallel-source case, the nilpotent terms square to zero and
+/// commute, so P^{-1} = I - a*e_j*e_i^T - b*e_k*e_i^T.
+fn visit_convergent_shear_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry as i64;
+    let sq3_cap = max_entry.min(4) as i64;
+    let mut cm = [[0i64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            cm[i][j] = c.get(i, j) as i64;
+        }
+    }
+
+    for target in 0..3 {
+        let support: Vec<usize> = (0..3).filter(|&idx| idx != target).collect();
+        let j = support[0];
+        let k = support[1];
+
+        for a in 1..=max_entry {
+            for b in 1..=max_entry {
+                let (a, b) = (a as i64, b as i64);
+
+                let mut p = identity_mat3_i64();
+                p[j][target] = a;
+                p[k][target] = b;
+                if max_entry_mat3_i64(&p) <= sq3_cap {
+                    continue;
+                }
+
+                let mut pinv = identity_mat3_i64();
+                pinv[j][target] = -a;
+                pinv[k][target] = -b;
+
+                let row_v = mul_mat3_i64(&pinv, &cm);
+                if entries_fit_nonnegative_bound_mat3_i64(&row_v, me) {
+                    visit(mat3_i64_to_dyn(&p), mat3_i64_to_dyn(&row_v));
+                }
+
+                let col_u = mul_mat3_i64(&cm, &pinv);
+                if entries_fit_nonnegative_bound_mat3_i64(&col_u, me) {
+                    visit(mat3_i64_to_dyn(&col_u), mat3_i64_to_dyn(&p));
+                }
+            }
+        }
+    }
+}
+
 fn identity_mat3_i64() -> [[i64; 3]; 3] {
     let mut m = [[0i64; 3]; 3];
     for idx in 0..3 {
@@ -1250,6 +1365,8 @@ pub fn visit_all_factorisations<F>(
             // square enumeration misses (factor entries > cap).
             visit_elementary_conjugations_3x3(a, max_entry, &mut visit);
             visit_opposite_shear_conjugations_3x3(a, max_entry, &mut visit);
+            visit_parallel_shear_conjugations_3x3(a, max_entry, &mut visit);
+            visit_convergent_shear_conjugations_3x3(a, max_entry, &mut visit);
         }
     }
 }
@@ -1432,6 +1549,38 @@ mod tests {
         });
 
         assert!(found, "expected opposite-shear conjugation factorisation");
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_parallel_shear_conjugation() {
+        let u = DynMatrix::new(3, 3, vec![1, 5, 1, 0, 1, 0, 0, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 0, 0, 1, 1, 0, 1, 0, 1]);
+        let c = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
+            if cand_u == u && cand_v == v {
+                found = true;
+            }
+        });
+
+        assert!(found, "expected parallel-shear conjugation factorisation");
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_convergent_shear_conjugation() {
+        let u = DynMatrix::new(3, 3, vec![1, 0, 0, 5, 1, 0, 1, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
+        let c = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
+            if cand_u == u && cand_v == v {
+                found = true;
+            }
+        });
+
+        assert!(found, "expected convergent-shear conjugation factorisation");
     }
 
     // --- Rectangular factorisation tests ---
