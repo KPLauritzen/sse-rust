@@ -39,22 +39,20 @@ fn main() {
     let a_in = enumerate_insplits_2x2_to_3x3(&a);
     let b_in = enumerate_insplits_2x2_to_3x3(&b);
 
-    println!(
-        "A out/in counts: {}/{}",
-        a_out.len(),
-        a_in.len()
-    );
-    println!(
-        "B out/in counts: {}/{}",
-        b_out.len(),
-        b_in.len()
-    );
+    println!("A out/in counts: {}/{}", a_out.len(), a_in.len());
+    println!("B out/in counts: {}/{}", b_out.len(), b_in.len());
     let a_out_canon = canonical_map(&a_out);
     let a_in_canon = canonical_map(&a_in);
     let b_out_canon = canonical_map(&b_out);
     let b_in_canon = canonical_map(&b_in);
-    println!("A out/in canonical sets equal: {}", a_out_canon == a_in_canon);
-    println!("B out/in canonical sets equal: {}", b_out_canon == b_in_canon);
+    println!(
+        "A out/in canonical sets equal: {}",
+        a_out_canon == a_in_canon
+    );
+    println!(
+        "B out/in canonical sets equal: {}",
+        b_out_canon == b_in_canon
+    );
 
     report_overlap("out/out", &a_out, &b_out, &a_out_canon, &b_out_canon);
     report_overlap("in/in", &a_in, &b_in, &a_in_canon, &b_in_canon);

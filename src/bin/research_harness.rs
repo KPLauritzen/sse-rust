@@ -475,7 +475,10 @@ fn derive_telemetry_summary(
         .filter(|layer| layer.discovered_nodes > 0 || layer.collisions_with_other_frontier > 0)
         .collect();
     let productive_layers = productive_layers_vec.len();
-    let deepest_productive_layer = productive_layers_vec.iter().map(|layer| layer.layer_index).max();
+    let deepest_productive_layer = productive_layers_vec
+        .iter()
+        .map(|layer| layer.layer_index)
+        .max();
     let first_stagnant_layer = telemetry
         .layers
         .iter()
@@ -505,11 +508,13 @@ fn derive_telemetry_summary(
         .layers
         .last()
         .expect("non-empty layers already checked");
-    let exhausted_before_max_lag =
-        actual_outcome == "unknown" && last_layer.next_frontier_nodes == 0 && telemetry.layers.len() < configured_max_lag;
+    let exhausted_before_max_lag = actual_outcome == "unknown"
+        && last_layer.next_frontier_nodes == 0
+        && telemetry.layers.len() < configured_max_lag;
 
     let terminal_bottleneck = classify_bottleneck(actual_outcome, telemetry, last_layer);
-    let focus_progress_score = compute_focus_progress_score(telemetry, productive_layers, deepest_productive_layer);
+    let focus_progress_score =
+        compute_focus_progress_score(telemetry, productive_layers, deepest_productive_layer);
 
     DerivedTelemetrySummary {
         productive_layers,
@@ -555,7 +560,8 @@ fn classify_bottleneck(
         return "duplicate_dominated".to_string();
     }
     if telemetry.candidates_generated > 0
-        && telemetry.pruned_by_spectrum.saturating_mul(5) >= telemetry.candidates_generated.saturating_mul(4)
+        && telemetry.pruned_by_spectrum.saturating_mul(5)
+            >= telemetry.candidates_generated.saturating_mul(4)
     {
         return "spectral_pruning_dominated".to_string();
     }

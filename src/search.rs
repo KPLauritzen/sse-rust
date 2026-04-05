@@ -180,8 +180,8 @@ pub fn search_sse_2x2_with_telemetry(
         telemetry.pruned_by_size += expansion_stats.pruned_by_size;
         telemetry.pruned_by_spectrum += expansion_stats.pruned_by_spectrum;
         if expansion_stats.frontier_nodes > 0 {
-            let factorisations_per_node =
-                expansion_stats.factorisations_enumerated.max(1) as f64 / expansion_stats.frontier_nodes as f64;
+            let factorisations_per_node = expansion_stats.factorisations_enumerated.max(1) as f64
+                / expansion_stats.frontier_nodes as f64;
             if expand_forward {
                 fwd_factorisations_per_node = factorisations_per_node;
                 fwd_cost_sample_nodes = expansion_stats.frontier_nodes;

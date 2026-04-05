@@ -185,13 +185,7 @@ pub fn enumerate_3x3_outsplit_zigzag_neighbors(
 fn child_parent_assignments(child_count: usize, parent_count: usize) -> Vec<Vec<usize>> {
     let mut assignments = Vec::new();
     let mut current = vec![0usize; child_count];
-    recurse_child_parent_assignments(
-        0,
-        child_count,
-        parent_count,
-        &mut current,
-        &mut assignments,
-    );
+    recurse_child_parent_assignments(0, child_count, parent_count, &mut current, &mut assignments);
     assignments
 }
 
