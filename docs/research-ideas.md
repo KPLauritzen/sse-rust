@@ -4,6 +4,22 @@ These notes come from reading `README.md`, `docs/TODO.md`, the current search co
 
 The goal here is not to filter aggressively. If an idea looked even mildly plausible as a way to improve the search, it goes here.
 
+## Reprioritization From Sidecar Evidence
+
+The local Brix-Ruiz sidecar experiments sharpen the picture.
+
+- Positive conjugacy is now a higher-priority direction, not just a paper-driven hunch. The sidecar log finds simple diagonal conjugacies for `k = 3` and `k = 4`, with sampled affine paths staying positive.
+- Blind widening of small split-sidecar graphs is lower priority than this document originally suggested. One-step and two-step out-split refinements fail, mixed in/out refinements fail, and the bounded `3x3 -> 2x2 -> 3x3` zig-zag sidecar appears to preserve small isolated components.
+- Direct same-size balanced-elementary attacks also look less promising on the Brix-Ruiz family than they did at first glance.
+
+So, after the sidecar pass, graph refinements should be thought of mainly as:
+
+- heuristic signals,
+- pruning or component-detection tools,
+- and sources of candidate moves for the main solver,
+
+not as something to keep widening blindly in isolation.
+
 ## What The Code Already Has
 
 - Bounded bidirectional integer SSE search in [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs).
@@ -38,32 +54,32 @@ So the next ideas should mostly do one of three things:
   If one of these almost works over `Z_+`, its failure pattern might tell us which split to try next.
 
 - Turn balanced elementary equivalence into a layered search, not a one-shot bounded witness check.
-  Why: Brix's eventual-conjugacy paper makes balanced SSE central, and the repo already has a bounded search for one balanced elementary step. The next move is to chain them:
+  Why: Brix's eventual-conjugacy paper makes balanced SSE central, and the repo already has a bounded search for one balanced elementary step. But the sidecar evidence suggests direct same-size balanced witnesses are structurally unlikely for the Brix-Ruiz family, so this should be treated as a secondary direction unless it is feeding the main solver. The next move would be to:
   - search for short balanced zig-zags,
   - alternate balanced steps with ordinary SSE steps,
   - cache common intermediates `S`,
   - canonicalize by permuting columns of `S` to avoid duplicate states.
 
 - Search for canonical common refinements instead of arbitrary graph-move sequences.
-  Why: several papers suggest that repeated split operations can often be compressed into a better common refinement picture. Rather than letting the search wander through arbitrary split orders, try to force both sides toward a shared refinement object, then reduce from there.
+  Why: several papers suggest that repeated split operations can often be compressed into a better common refinement picture. However, the current sidecar log already rules out the smallest obvious common-refinement attacks around the Brix-Ruiz family, so this idea now looks more useful as a negative probe or ranking feature than as a mainline search program.
 
 - Add a higher-block / power-graph move family.
   Why: Brix 2022 and Brix-Mundey-Rennie suggest that iterated in-splits can often be packaged as a single in-split on a higher-power graph. That suggests a bounded move:
   - build a small higher-block presentation,
   - perform one larger canonical split there,
   - project back down.
-  This may dominate many tiny split moves.
+  This may dominate many tiny split moves, but only if it helps the main solver escape the isolated components already seen in the sidecar graph.
 
 - Treat the complete in-split or dual graph as a "maximal refinement" waypoint.
-  Why: Brix-Mundey-Rennie describe complete in-splits as a largest or universal-looking in-split. That smells like a good search hub: move each side toward a bounded canonical refinement, then compare there.
+  Why: Brix-Mundey-Rennie describe complete in-splits as a largest or universal-looking in-split. The sidecar evidence says we should be cautious here: this is more plausible as a restart heuristic or canonical probe than as a standalone refinement search.
 
 - Interleave matrix search and graph search deliberately.
   Why: right now these are mostly separate experiments. A better strategy may be:
   - matrix BFS until stuck,
-  - graph refinement burst,
+  - graph refinement burst used to score, prune, or propose moves,
   - matrix reduction burst,
   - repeat.
-  The papers keep moving between these viewpoints; the implementation probably should too.
+  The papers keep moving between these viewpoints; the implementation probably should too. But the sidecar log suggests the graph part should support the main solver, not become a separate widening project.
 
 - Add best-first search with paper-driven heuristics instead of pure depth-bounded BFS.
   Candidate priorities:
@@ -93,6 +109,7 @@ So the next ideas should mostly do one of three things:
   - factor `P_k` into short products of shear and diagonal matrices,
   - ask whether each factor can be simulated by a bounded sequence of positive elementary moves,
   - stitch those local simulations together.
+  Local evidence already strengthens this idea: for `k = 3, 4`, much simpler diagonal conjugators exist than the generic `P_k`.
 
 - Use family induction experiments.
   Half-baked idea:
@@ -102,7 +119,7 @@ So the next ideas should mostly do one of three things:
   Even a wrong pattern could still give a strong heuristic for larger search.
 
 - Search for "repair moves" that convert the explicit similarity into a positive integer zig-zag.
-  Why: the obstruction may be narrow. If `P_k` almost gives the right path, maybe a single bounded split before or after conjugation fixes positivity/integrality.
+  Why: the obstruction may be narrow. The sidecar log suggests the conjugacy side is simple while the small split/refinement side is stubborn, which is exactly the pattern that makes "repair the similarity" look more plausible than "discover a common refinement from scratch".
 
 ## Alternate Witness Spaces
 
@@ -164,6 +181,7 @@ So the next ideas should mostly do one of three things:
   - replace the current frontier by bounded complete in-split refinements,
   - canonicalize,
   - restart the matrix search from there.
+  This should be treated as a cautious experiment, not a default strategy, because the current sidecar evidence shows small refinement universes can stay trapped in isolated components.
 
 - Build a library of reusable "motifs" for successful zig-zags.
   If a hard case eventually yields a witness, store short subpatterns:
@@ -175,13 +193,13 @@ So the next ideas should mostly do one of three things:
 ## Implementation Candidates
 
 - Promote [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs) from a standalone experiment into a heuristic move generator for [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs).
-- Promote [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs) from one-step witness search into bounded multi-step balanced search with caching and canonicalization.
+- Promote [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs) from one-step witness search into a side-information module for ranking, proposal generation, and selective bounded zig-zag search.
 - Add a unified experimental driver that can alternate:
   - ordinary factorization moves,
-  - graph refinement moves,
-  - balanced moves,
+  - graph refinement probes,
+  - balanced side-information,
   - conjugacy-guided proposal moves.
-- Build benchmark scripts specifically around the Brix-Ruiz `k=3,4,5,...` family so each new heuristic can be measured against the same hard instances.
+- Build benchmark scripts specifically around the Brix-Ruiz `k=3,4,5,...` family so each new heuristic can be measured against the same hard instances, especially whether it escapes the isolated sidecar components already observed locally.
 
 ## Papers Behind These Notes
 
