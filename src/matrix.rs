@@ -333,12 +333,7 @@ impl DynMatrix {
     fn canonical_perm_2x2(&self) -> Self {
         debug_assert_eq!(self.rows, 2);
         debug_assert_eq!(self.cols, 2);
-        let swapped = [
-            self.data[3],
-            self.data[2],
-            self.data[1],
-            self.data[0],
-        ];
+        let swapped = [self.data[3], self.data[2], self.data[1], self.data[0]];
         if swapped.as_slice() < self.data.as_slice() {
             DynMatrix::new(2, 2, swapped.to_vec())
         } else {
