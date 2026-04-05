@@ -715,13 +715,276 @@ fn enumerate_factorisations_3x3_to_2_from_row0(
     results
 }
 
+// --- Square 3×3 factorisation ---
+
+/// Solve A·x = b where A is 3×3 (given as rows), for nonneg integer x with
+/// entries ≤ max_entry. If the system is full-rank, there is at most one solution.
+/// If rank-2, reduces to solve_nonneg_2x3 + verification of the remaining equation.
+fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32; 3]> {
+    let me = max_entry as i64;
+
+    // Compute determinant via cofactor expansion along row 0.
+    let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+
+    if det != 0 {
+        // Unique solution: x = adj(A)·b / det.
+        let adj = [
+            [
+                a[1][1] * a[2][2] - a[1][2] * a[2][1],
+                a[0][2] * a[2][1] - a[0][1] * a[2][2],
+                a[0][1] * a[1][2] - a[0][2] * a[1][1],
+            ],
+            [
+                a[1][2] * a[2][0] - a[1][0] * a[2][2],
+                a[0][0] * a[2][2] - a[0][2] * a[2][0],
+                a[0][2] * a[1][0] - a[0][0] * a[1][2],
+            ],
+            [
+                a[1][0] * a[2][1] - a[1][1] * a[2][0],
+                a[0][1] * a[2][0] - a[0][0] * a[2][1],
+                a[0][0] * a[1][1] - a[0][1] * a[1][0],
+            ],
+        ];
+        let mut x = [0i64; 3];
+        for i in 0..3 {
+            let num = adj[i][0] * b[0] + adj[i][1] * b[1] + adj[i][2] * b[2];
+            if num % det != 0 {
+                return vec![];
+            }
+            x[i] = num / det;
+            if x[i] < 0 || x[i] > me {
+                return vec![];
+            }
+        }
+        return vec![[x[0] as u32, x[1] as u32, x[2] as u32]];
+    }
+
+    // det = 0: find a rank-2 row pair and reduce to solve_nonneg_2x3.
+    for &(r0, r1, r_check) in &[(0, 1, 2), (0, 2, 1), (1, 2, 0)] {
+        let rows: [[i64; 3]; 2] = [a[r0], a[r1]];
+        let d01 = rows[0][0] * rows[1][1] - rows[0][1] * rows[1][0];
+        let d02 = rows[0][0] * rows[1][2] - rows[0][2] * rows[1][0];
+        let d12 = rows[0][1] * rows[1][2] - rows[0][2] * rows[1][1];
+        if d01 == 0 && d02 == 0 && d12 == 0 {
+            continue;
+        }
+
+        let b_sub = [b[r0], b[r1]];
+        let solutions = solve_nonneg_2x3(&rows, &b_sub, max_entry);
+        let mut results = Vec::new();
+        for x in solutions {
+            let check =
+                a[r_check][0] * x[0] as i64 + a[r_check][1] * x[1] as i64 + a[r_check][2] * x[2] as i64;
+            if check == b[r_check] {
+                results.push(x);
+            }
+        }
+        return results;
+    }
+
+    // Rank ≤ 1: skip (degenerate, rarely contributes useful factorisations).
+    vec![]
+}
+
+/// Enumerate all square 3×3 nonneg integer factorisations C = UV where U and V
+/// are both 3×3 with entries in 0..=max_entry.
+///
+/// Algorithm: enumerate rows 0 and 1 of U, solve for each column of V using
+/// `solve_nonneg_2x3`, then derive row 2 of U via `solve_nonneg_3x3`.
+fn visit_square_factorisations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry;
+
+    // C as columns: c_cols[j][i] = C[i,j].
+    let c_cols: [[i64; 3]; 3] = [
+        [c.get(0, 0) as i64, c.get(1, 0) as i64, c.get(2, 0) as i64],
+        [c.get(0, 1) as i64, c.get(1, 1) as i64, c.get(2, 1) as i64],
+        [c.get(0, 2) as i64, c.get(1, 2) as i64, c.get(2, 2) as i64],
+    ];
+
+    let c_row2 = [c.get(2, 0) as i64, c.get(2, 1) as i64, c.get(2, 2) as i64];
+
+    // Minimum row sum: row_sum(U_i) >= ceil(max(C[i,*]) / max_entry).
+    let min_row_sum: [u32; 3] = [
+        {
+            let mx = c.get(0, 0).max(c.get(0, 1)).max(c.get(0, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+        {
+            let mx = c.get(1, 0).max(c.get(1, 1)).max(c.get(1, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+        {
+            let mx = c.get(2, 0).max(c.get(2, 1)).max(c.get(2, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+    ];
+
+    // Collect valid row-0 candidates with early GCD pruning.
+    let mut valid_row0s = Vec::new();
+    for u00 in 0..=me {
+        for u01 in 0..=me {
+            for u02 in 0..=me {
+                if u00 + u01 + u02 < min_row_sum[0] {
+                    continue;
+                }
+                let g = gcd3(u00 as u64, u01 as u64, u02 as u64);
+                if g > 1 {
+                    let mut skip = false;
+                    for j in 0..3 {
+                        if c_cols[j][0] as u64 % g != 0 {
+                            skip = true;
+                            break;
+                        }
+                    }
+                    if skip {
+                        continue;
+                    }
+                }
+                valid_row0s.push([u00, u01, u02]);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
+            .par_iter()
+            .map(|&row0| {
+                enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum)
+            })
+            .collect();
+        for row_results in per_row0 {
+            for (u, v) in row_results {
+                visit(u, v);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        for row0 in valid_row0s {
+            for (u, v) in enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum)
+            {
+                visit(u, v);
+            }
+        }
+    }
+}
+
+fn enumerate_sq3_from_row0(
+    row0: [u32; 3],
+    c_cols: &[[i64; 3]; 3],
+    c_row2: &[i64; 3],
+    max_entry: u32,
+    min_row_sum: &[u32; 3],
+) -> Vec<(DynMatrix, DynMatrix)> {
+    let [u00, u01, u02] = row0;
+    let me = max_entry;
+    let mut results = Vec::new();
+
+    for u10 in 0..=me {
+        for u11 in 0..=me {
+            for u12 in 0..=me {
+                if u10 + u11 + u12 < min_row_sum[1] {
+                    continue;
+                }
+
+                let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
+                if g1 > 1 {
+                    let mut skip = false;
+                    for j in 0..3 {
+                        if c_cols[j][1] as u64 % g1 != 0 {
+                            skip = true;
+                            break;
+                        }
+                    }
+                    if skip {
+                        continue;
+                    }
+                }
+
+                let u_top: [[i64; 3]; 2] = [
+                    [u00 as i64, u01 as i64, u02 as i64],
+                    [u10 as i64, u11 as i64, u12 as i64],
+                ];
+
+                // Solve for each column of V: u_top · v_j = [C[0,j], C[1,j]].
+                let v_col0 =
+                    solve_nonneg_2x3(&u_top, &[c_cols[0][0], c_cols[0][1]], max_entry);
+                if v_col0.is_empty() {
+                    continue;
+                }
+
+                let v_col1 =
+                    solve_nonneg_2x3(&u_top, &[c_cols[1][0], c_cols[1][1]], max_entry);
+                if v_col1.is_empty() {
+                    continue;
+                }
+
+                let v_col2 =
+                    solve_nonneg_2x3(&u_top, &[c_cols[2][0], c_cols[2][1]], max_entry);
+                if v_col2.is_empty() {
+                    continue;
+                }
+
+                // For each combination of column solutions, derive row 2 of U.
+                for vc0 in &v_col0 {
+                    for vc1 in &v_col1 {
+                        for vc2 in &v_col2 {
+                            // V^T rows = V columns. System: V^T · u2^T = c_row2^T.
+                            let vt: [[i64; 3]; 3] = [
+                                [vc0[0] as i64, vc0[1] as i64, vc0[2] as i64],
+                                [vc1[0] as i64, vc1[1] as i64, vc1[2] as i64],
+                                [vc2[0] as i64, vc2[1] as i64, vc2[2] as i64],
+                            ];
+
+                            let row2_solutions = solve_nonneg_3x3(&vt, c_row2, max_entry);
+
+                            for [u20, u21, u22] in row2_solutions {
+                                if u20 + u21 + u22 < min_row_sum[2] {
+                                    continue;
+                                }
+
+                                let u_mat = DynMatrix::new(
+                                    3,
+                                    3,
+                                    vec![u00, u01, u02, u10, u11, u12, u20, u21, u22],
+                                );
+                                let v_mat = DynMatrix::new(
+                                    3,
+                                    3,
+                                    vec![
+                                        vc0[0], vc1[0], vc2[0], vc0[1], vc1[1], vc2[1],
+                                        vc0[2], vc1[2], vc2[2],
+                                    ],
+                                );
+                                results.push((u_mat, v_mat));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
 /// Unified factorisation dispatcher for any square matrix (given as DynMatrix).
 /// Enumerates factorisations A = UV for intermediate dimensions m = 2, ..., max_intermediate_dim.
 /// For k×k input:
 ///   - k=2, m=2: square factorisations
 ///   - k=2, m=3: rectangular 2×3 × 3×2
 ///   - k=3, m=2: rectangular 3×2 × 2×3 (the return trip)
-///   - k=3, m=3: skipped (too expensive)
+///   - k=3, m=3: square 3×3 factorisations
 pub fn enumerate_all_factorisations(
     a: &DynMatrix,
     max_intermediate_dim: usize,
@@ -755,8 +1018,15 @@ pub fn visit_all_factorisations<F>(
             visit_rect_factorisations_2x3(&sq, max_entry, &mut visit);
         }
     } else if k == 3 {
-        // Only rectangular to dimension 2 (the return trip). Skip square 3×3.
+        // Rectangular 3×2 × 2×3 factorisations (the return trip to 2×2).
         visit_factorisations_3x3_to_2(a, max_entry, &mut visit);
+        // Square 3×3 factorisations (allows chaining through 3×3 space).
+        // Factor entry bound is capped to keep enumeration tractable: the cost
+        // is O((cap+1)^6) per node, so cap=4 gives ~15K iterations per node.
+        if max_intermediate_dim >= 3 {
+            let sq3_cap = max_entry.min(4);
+            visit_square_factorisations_3x3(a, sq3_cap, &mut visit);
+        }
     }
 }
 
