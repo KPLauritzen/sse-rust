@@ -312,7 +312,9 @@ mod tests {
     // so it should return Unknown.
 
     #[test]
-    fn test_eilers_kiming_triple_invariants_match() {
+    fn test_eilers_kiming_triple_classical_invariants_match() {
+        // Classical invariants (trace, det, Bowen-Franks) all match for this triple.
+        // The Eilers-Kiming ideal class invariant distinguishes them.
         let m1 = SqMatrix::new([[5, 13], [6, 1]]);
         let m2 = SqMatrix::new([[5, 6], [13, 1]]);
         let m3 = SqMatrix::new([[4, 9], [9, 2]]);
@@ -322,13 +324,10 @@ mod tests {
         assert_eq!(m1.det(), -73);
         assert_eq!(m2.det(), -73);
         assert_eq!(m3.det(), -73);
-        assert!(check_invariants_2x2(&m1, &m2).is_none());
-        assert!(check_invariants_2x2(&m1, &m3).is_none());
-        assert!(check_invariants_2x2(&m2, &m3).is_none());
     }
 
     #[test]
-    fn test_eilers_kiming_m1_m2_unknown() {
+    fn test_eilers_kiming_m1_m2_not_equivalent() {
         let m1 = SqMatrix::new([[5, 13], [6, 1]]);
         let m2 = SqMatrix::new([[5, 6], [13, 1]]);
         let config = SearchConfig {
@@ -338,13 +337,13 @@ mod tests {
         };
         let result = search_sse_2x2(&m1, &m2, &config);
         assert!(
-            matches!(result, SseResult::Unknown),
-            "Expected Unknown for Eilers-Kiming non-SSE pair (m1, m2)"
+            matches!(result, SseResult::NotEquivalent(_)),
+            "Expected NotEquivalent for Eilers-Kiming non-SSE pair (m1, m2)"
         );
     }
 
     #[test]
-    fn test_eilers_kiming_m1_m3_unknown() {
+    fn test_eilers_kiming_m1_m3_not_equivalent() {
         let m1 = SqMatrix::new([[5, 13], [6, 1]]);
         let m3 = SqMatrix::new([[4, 9], [9, 2]]);
         let config = SearchConfig {
@@ -354,8 +353,8 @@ mod tests {
         };
         let result = search_sse_2x2(&m1, &m3, &config);
         assert!(
-            matches!(result, SseResult::Unknown),
-            "Expected Unknown for Eilers-Kiming non-SSE pair (m1, m3)"
+            matches!(result, SseResult::NotEquivalent(_)),
+            "Expected NotEquivalent for Eilers-Kiming non-SSE pair (m1, m3)"
         );
     }
 
@@ -363,16 +362,16 @@ mod tests {
     // classical invariants (char poly x^2 - 14x - 2) but are NOT SSE.
 
     #[test]
-    fn test_eilers_kiming_14_2_invariants_match() {
+    fn test_eilers_kiming_14_2_classical_invariants_match() {
+        // Classical invariants match, but the ideal class invariant distinguishes them.
         let a = SqMatrix::new([[14, 2], [1, 0]]);
         let b = SqMatrix::new([[13, 5], [3, 1]]);
         assert_eq!(a.trace(), b.trace());
         assert_eq!(a.det(), b.det());
-        assert!(check_invariants_2x2(&a, &b).is_none());
     }
 
     #[test]
-    fn test_eilers_kiming_14_2_unknown() {
+    fn test_eilers_kiming_14_2_not_equivalent() {
         let a = SqMatrix::new([[14, 2], [1, 0]]);
         let b = SqMatrix::new([[13, 5], [3, 1]]);
         let config = SearchConfig {
@@ -382,8 +381,8 @@ mod tests {
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
-            matches!(result, SseResult::Unknown),
-            "Expected Unknown for Eilers-Kiming non-SSE pair ([[14,2],[1,0]], [[13,5],[3,1]])"
+            matches!(result, SseResult::NotEquivalent(_)),
+            "Expected NotEquivalent for Eilers-Kiming non-SSE pair ([[14,2],[1,0]], [[13,5],[3,1]])"
         );
     }
 

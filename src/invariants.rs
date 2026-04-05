@@ -35,6 +35,16 @@ pub fn check_invariants_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> 
         ));
     }
 
+    // 5. Generalized Bowen-Franks groups: Z^2 / p(A)Z^2 for various polynomials
+    if let Some(reason) = check_generalized_bowen_franks_2x2(a, b) {
+        return Some(reason);
+    }
+
+    // 6. Eilers-Kiming ideal class invariant
+    if let Some(reason) = check_eilers_kiming_2x2(a, b) {
+        return Some(reason);
+    }
+
     None
 }
 
@@ -82,6 +92,117 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
         a = t;
     }
     a
+}
+
+/// Evaluate a polynomial p(x) = coeffs[0] + coeffs[1]*x + coeffs[2]*x^2 + ...
+/// at a 2x2 matrix A, returning a 2x2 i64 matrix.
+fn eval_poly_at_matrix_2x2(coeffs: &[i64], a: &SqMatrix<2>) -> [[i64; 2]; 2] {
+    let [[a00, a01], [a10, a11]] = a.data;
+    let (a00, a01, a10, a11) = (a00 as i64, a01 as i64, a10 as i64, a11 as i64);
+
+    // Build up: result = sum of coeffs[k] * A^k
+    // We track A^k iteratively.
+    let mut result = [[0i64; 2]; 2];
+    // pow = A^k, starting at I
+    let mut pow = [[1i64, 0], [0, 1i64]];
+
+    for &c in coeffs {
+        for i in 0..2 {
+            for j in 0..2 {
+                result[i][j] += c * pow[i][j];
+            }
+        }
+        // pow = pow * A
+        let new_pow = [
+            [pow[0][0] * a00 + pow[0][1] * a10, pow[0][0] * a01 + pow[0][1] * a11],
+            [pow[1][0] * a00 + pow[1][1] * a10, pow[1][0] * a01 + pow[1][1] * a11],
+        ];
+        pow = new_pow;
+    }
+    result
+}
+
+/// Smith normal form of a 2x2 integer matrix.
+/// Returns (d1, d2) where d1 | d2 (using absolute values).
+fn smith_normal_form_2x2_i64(m: &[[i64; 2]; 2]) -> (i64, i64) {
+    let g = gcd(
+        gcd(m[0][0].unsigned_abs(), m[0][1].unsigned_abs()),
+        gcd(m[1][0].unsigned_abs(), m[1][1].unsigned_abs()),
+    );
+    if g == 0 {
+        return (0, 0);
+    }
+    let det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+    let d1 = g as i64;
+    let d2 = det / d1;
+    (d1, d2)
+}
+
+/// Check generalized Bowen-Franks groups Z^2 / p(A)Z^2 for a battery of
+/// polynomials from Eilers-Kiming (2008), Section 3.
+fn check_generalized_bowen_franks_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
+    // Polynomials from Eilers-Kiming p.7, represented as coefficient vectors
+    // [c0, c1, c2, ...] for c0 + c1*x + c2*x^2 + ...
+    let polynomials: &[(&str, &[i64])] = &[
+        // x - 1 is already checked as standard Bowen-Franks, skip
+        ("x+1", &[1, 1]),
+        ("2x-1", &[-1, 2]),
+        ("2x+1", &[1, 2]),
+        ("x^2-x-1", &[-1, -1, 1]),
+        ("x^2-x+1", &[1, -1, 1]),
+        ("x^2+x-1", &[-1, 1, 1]),
+        ("x^2+x+1", &[1, 1, 1]),
+        ("x^2-2x+1", &[1, -2, 1]),
+        ("x^2+2x+1", &[1, 2, 1]),
+        ("x^2-1", &[-1, 0, 1]),
+        ("x^2+1", &[1, 0, 1]),
+        ("2x^2-x-1", &[-1, -1, 2]),
+        ("2x^2+x-1", &[-1, 1, 2]),
+        ("2x^2-3x+1", &[1, -3, 2]),
+        ("2x^2+3x+1", &[1, 3, 2]),
+        ("4x^2-4x+1", &[1, -4, 4]),
+        ("4x^2+4x+1", &[1, 4, 4]),
+        ("4x^2-1", &[-1, 0, 4]),
+    ];
+
+    for (name, coeffs) in polynomials {
+        let pa = eval_poly_at_matrix_2x2(coeffs, a);
+        let pb = eval_poly_at_matrix_2x2(coeffs, b);
+        let snf_a = smith_normal_form_2x2_i64(&pa);
+        let snf_b = smith_normal_form_2x2_i64(&pb);
+        if snf_a != snf_b {
+            return Some(format!(
+                "generalized Bowen-Franks mismatch for p(x)={}: {:?} vs {:?}",
+                name, snf_a, snf_b
+            ));
+        }
+    }
+    None
+}
+
+/// Check the Eilers-Kiming ideal class invariant (Theorem 1, part iii).
+/// For irreducible 2x2 matrices over a quadratic number field, computes the
+/// ideal class of the Perron eigenvector ideal in O_K and compares.
+fn check_eilers_kiming_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
+    use crate::quadratic;
+
+    let class_a = quadratic::eigenvector_ideal_class_2x2(a);
+    let class_b = quadratic::eigenvector_ideal_class_2x2(b);
+
+    match (class_a, class_b) {
+        (Some(ca), Some(cb)) => {
+            if ca != cb {
+                Some(format!(
+                    "Eilers-Kiming ideal class mismatch: {:?} vs {:?}",
+                    ca, cb
+                ))
+            } else {
+                None
+            }
+        }
+        // If we can't compute for one or both, skip this invariant.
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -134,5 +255,52 @@ mod tests {
         assert_eq!(gcd(7, 0), 7);
         assert_eq!(gcd(0, 5), 5);
         assert_eq!(gcd(0, 0), 0);
+    }
+
+    #[test]
+    fn test_eval_poly_identity() {
+        // p(x) = 1 (constant) should give the identity matrix
+        let a = SqMatrix::new([[3, 1], [2, 5]]);
+        let result = eval_poly_at_matrix_2x2(&[1], &a);
+        assert_eq!(result, [[1, 0], [0, 1]]);
+    }
+
+    #[test]
+    fn test_eval_poly_x_minus_1() {
+        // p(x) = x - 1 at A should give A - I
+        let a = SqMatrix::new([[3, 1], [2, 5]]);
+        let result = eval_poly_at_matrix_2x2(&[-1, 1], &a);
+        assert_eq!(result, [[2, 1], [2, 4]]);
+    }
+
+    #[test]
+    fn test_eval_poly_x_squared() {
+        // p(x) = x^2 at A should give A^2
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let result = eval_poly_at_matrix_2x2(&[0, 0, 1], &a);
+        // A^2 = [[5,3],[3,2]]
+        assert_eq!(result, [[5, 3], [3, 2]]);
+    }
+
+    #[test]
+    fn test_smith_normal_form_2x2() {
+        // [[2, 4], [6, 8]]: gcd=2, det=2*8-4*6=-8, d2=-8/2=-4
+        let m = [[2i64, 4], [6, 8]];
+        let (d1, d2) = smith_normal_form_2x2_i64(&m);
+        assert_eq!(d1, 2);
+        assert_eq!(d2, -4);
+    }
+
+    #[test]
+    fn test_generalized_bf_same_matrix() {
+        let a = SqMatrix::new([[5, 13], [6, 1]]);
+        assert_eq!(check_generalized_bowen_franks_2x2(&a, &a), None);
+    }
+
+    #[test]
+    fn test_generalized_bf_conjugate() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let b = SqMatrix::new([[1, 1], [1, 2]]);
+        assert_eq!(check_generalized_bowen_franks_2x2(&a, &b), None);
     }
 }

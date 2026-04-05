@@ -1,6 +1,7 @@
 pub mod factorisation;
 pub mod invariants;
 pub mod matrix;
+pub mod quadratic;
 pub mod search;
 pub mod types;
 pub mod wasm;

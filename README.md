@@ -83,122 +83,46 @@ Before attempting the expensive search for an SSE path, we can check necessary c
 
 ## Avenues for Exploration
 
-### Core tool: SSE path search
-
-A BFS/DFS over nonneg integer matrix factorisations. Given A and B:
-- Enumerate all ways to write A = UV where U ∈ ℤ₊^{n×m}, V ∈ ℤ₊^{m×n} for intermediate dimensions m = 1, 2, ..., m_max.
-- Compute C = VU.
-- If C = B, we found a lag-1 SSE.
-- Otherwise, add C to the search frontier (if not already visited).
-- Continue BFS up to a maximum lag.
-
-Key parameters to bound:
-- **max_lag**: maximum chain length
-- **max_dim**: maximum intermediate matrix dimension
-- **max_entry**: maximum entry value in intermediate matrices (needed to keep factorisation enumeration finite)
-
 ### Aligned shift equivalence
 
 Carlsen, Dor-On & Eilers showed that aligned shift equivalence characterises SSE and that fixed-lag aligned SE algorithms perform better. Implementing this reformulation alongside naive factorisation search would be a concrete contribution.
 
 ### Visualisation of SSE paths
 
-When a path is found, visualise the chain:
-```
-A = U₁V₁ → V₁U₁ = A₁ = U₂V₂ → V₂U₂ = A₂ → ... → B
-```
-Show the intermediate matrices, their dimensions, and the associated directed graphs. The graph perspective (in-splits, out-splits) could make the transformations more intuitive.
+When a path is found, visualise the chain as directed graphs at each step, highlighting the in-split / out-split structure of each elementary SSE.
 
 ### Database / catalogue
 
-Systematically enumerate SSE classes for small matrices (e.g. all 2×2 with entries ≤ N, then 3×3). Compare with Eilers & Kiming's results and extend them.
+Systematically enumerate SSE classes for small matrices (e.g. all irreducible 2×2 with entry sum ≤ 25, reproducing and extending Eilers & Kiming's experiment).
 
 ### Interactive web tool
 
-No public tool exists for exploring SSE. A web-based explorer where users input two matrices and get back either a proof (the path) or evidence against (which invariants fail) would be genuinely useful to the symbolic dynamics community.
+The WASM bindings exist but there is no frontend yet. A web-based explorer where users input two matrices and get back either a proof (the SSE path) or evidence against (which invariants fail) would be useful to the symbolic dynamics community.
+
+### Parallelism
+
+The BFS frontier expansion is embarrassingly parallel. Adding `rayon` to the factorisation enumeration loop would give near-linear speedup.
 
 ---
 
-## Implementation Approach
+## Implementation
 
-### Language: Rust
+Rust library crate (`sse-core`) with WASM bindings. No external dependencies beyond `wasm-bindgen` for the browser target.
 
-The core computation is backtracking search with integer arithmetic and early pruning — exactly where Rust excels. Representing small matrices as fixed-size arrays on the stack gives good cache locality. The factorisation enumeration is CPU-bound with no need for external libraries.
+**What it can do:**
 
-Python would work for 2×2 with small entries but is ~50-100x slower for the enumeration inner loop. Since the goal is to push the boundary of what's computationally reachable, Rust is the right choice.
+- BFS search for SSE paths between 2×2 matrices, including through 3×3 intermediate matrices (rectangular factorisations).
+- Disprove SSE via a chain of invariants: trace, determinant, Bowen-Franks group, generalised Bowen-Franks groups (18 polynomials from Eilers & Kiming 2008), and the Eilers-Kiming ideal class invariant.
+- Compile to WASM for in-browser use.
 
-### Architecture
+**Key source files:**
 
-```
-sse-explorer/
-├── crates/
-│   ├── sse-core/          # Matrix types, factorisation, invariants
-│   ├── sse-search/        # BFS/DFS path search engine
-│   └── sse-cli/           # CLI interface
-├── sse-web/               # Optional: WASM web frontend
-└── results/               # Computed SSE classes, counterexamples
-```
-
-### Core data structures
-
-```rust
-// Matrices with compile-time or runtime dimensions
-// For 2×2 exploration, fixed-size arrays are ideal
-struct Matrix<const N: usize> {
-    entries: [[u32; N]; N],
-}
-
-// For variable-dimension intermediaries
-struct DynMatrix {
-    rows: usize,
-    cols: usize,
-    entries: Vec<u32>,
-}
-
-// An elementary SSE step
-struct ESSEStep {
-    u: DynMatrix,
-    v: DynMatrix,
-    // u * v = source, v * u = target
-}
-
-// A complete SSE path
-struct SSEPath {
-    matrices: Vec<DynMatrix>,  // A₀, A₁, ..., Aₗ
-    steps: Vec<ESSEStep>,
-}
-```
-
-### Search strategy
-
-1. **Invariant pre-check**: Run cheap invariant checks first. Bail immediately if any mismatch.
-2. **Iterative deepening**: Search lag-1 first, then lag-2, etc. Within each lag, iterate over max intermediate dimension.
-3. **Canonical forms**: Use some canonical ordering on matrices to avoid revisiting equivalent states.
-4. **Parallelism**: The search at each frontier node is independent — this parallelises trivially with rayon.
-
-### Visualisation
-
-- CLI: Print the chain of matrices and factorisations.
-- Web (stretch goal): Interactive SVG/canvas showing the directed graphs at each step in the chain. Highlight the in-split / out-split structure of each elementary SSE. Use WASM to run the Rust search engine in-browser.
-
-### Testing
-
-Verify against known results:
-- Baker's example: A₃ is SSE to B₃ over ℤ₊ via a chain of 7 elementary SSEs (some through 4×4 matrices). See Lind & Marcus p. 238.
-- Kim & Roush counterexamples: matrices that are SE but not SSE.
-- Eilers & Kiming's 2×2 catalogue.
-
----
-
-## Getting Started
-
-1. Implement `Matrix` types and basic operations (multiply, trace, characteristic polynomial).
-2. Implement the factorisation enumerator for a given matrix and target intermediate dimension.
-3. Implement lag-1 SSE check between two matrices.
-4. Extend to BFS over chains.
-5. Add invariant checks as pre-filters.
-6. Run against known examples to validate.
-7. Systematically explore 2×2 matrices and build a catalogue.
+- [`src/search.rs`](src/search.rs) — BFS search engine. Entry point: `search_sse_2x2`.
+- [`src/invariants.rs`](src/invariants.rs) — All invariant checks, called as pre-filters before search. Entry point: `check_invariants_2x2`.
+- [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).
+- [`src/factorisation.rs`](src/factorisation.rs) — Exhaustive enumeration of nonneg integer factorisations A = UV (square and rectangular).
+- [`src/matrix.rs`](src/matrix.rs) — Fixed-size `SqMatrix<N>` and dynamic `DynMatrix` types.
+- [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse` as a JSON-returning function.
 
 ---
 
