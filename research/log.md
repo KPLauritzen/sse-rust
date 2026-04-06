@@ -1,0 +1,117 @@
+# Research Log
+
+## 2026-04-05
+
+- `7dea2f2` Baseline run.
+  Established the initial harness score and runtime floor for the autoresearch loop.
+
+- `7dea2f2` Allowed negative-determinant square `2x2` factors.
+  Failed. It widened the search without producing better target behavior and only slowed the baseline.
+
+- `7dea2f2` Deduplicated canonical successors within each frontier-node expansion.
+  Kept. This removed obvious duplicate work without changing search behavior.
+
+- `7dea2f2` Continued exploring after one bidirectional frontier emptied.
+  Failed. It spent more time in unproductive tail search and did not improve any hard case.
+
+- `7dea2f2` Combined deeper frontier exploration with negative-determinant square factors.
+  Failed. It stacked two widening ideas that both increased work without creating a target hit.
+
+- `7dea2f2` Revalidated the canonical-successor dedup on a fresh run.
+  Kept. Same score, slightly lower runtime.
+
+- `6d60073` Deduplicated canonical successors across the full frontier layer.
+  Kept. This cut duplicate cross-node work and improved warm runtime.
+
+- `e16edbf` Added bounded `3x3` same-size moves via cached identity splits.
+  Failed. It caused a large factorisation blow-up without opening new useful Brix-Ruiz states.
+
+- `e16edbf` Deduplicated factorisation outputs by `VU` in the dispatcher.
+  Failed. The extra checking cost outweighed the reduced duplicate outputs.
+
+- `1672ada` Specialized small permutation canonicalization in the hot loop.
+  Kept. Pure speedup with no change to search behavior.
+
+- `1672ada` Optimized small-matrix multiplication with row slicing and zero-skips.
+  Kept. Another small runtime win with unchanged results.
+
+- `c86b908` Added restricted `3x3` same-size shear factorizations.
+  Failed. It explored deeper but not in a way that improved targets, so runtime got worse.
+
+- `c86b908` Combined shear moves with explicit forward/backward depth budgeting.
+  Failed. Better exploration shape was not enough; it still missed the hard cases and slowed down.
+
+- `c86b908` Removed heap allocation from specialized canonicalization paths.
+  Kept. Small runtime win, no behavioral change.
+
+- `6070a45` Added explicit tiny-shape multiplication specializations.
+  Failed. The extra specialization overhead did not beat the current fast path.
+
+- `6070a45` Parallelized the expensive `2x3` rectangular factorisation enumerator.
+  Kept. Straight runtime win on native builds.
+
+- `1eb69df` Parallelized the `3x3 -> 2` rectangular factorisation enumerator.
+  Kept. Another runtime improvement with identical correctness.
+
+- `4e568d7` Parallelized the square `2x2` factorisation enumerator too.
+  Failed. The unit of work was too small, so parallel overhead dominated.
+
+- `4e568d7` Skipped outer rayon frontier scheduling for single-node layers.
+  Failed. It was neutral logically but slightly slower in practice.
+
+- `67f679a` Streamed factorisation visitation directly into BFS expansion.
+  Kept. Reduced intermediate allocation and improved runtime.
+
+## 2026-04-05 Sidecar Split Work
+
+- `763c18e` Added bounded balanced-elementary witness search as a sidecar.
+  Kept as evidence. It did not solve the hard cases, but it ruled out cheap direct balanced witnesses.
+
+- `1c83ead` Added explicit out-split sidecar probes.
+  Kept as evidence. No common one-step `3x3` refinement or simple bridge appeared for the Brix-Ruiz pairs.
+
+- `0e933f2` Generalized to two-step out-split refinements and bridge zig-zags.
+  Kept as evidence. The widened split universe still stayed disconnected across the two sides.
+
+- `563101a` Added bounded `3x3 -> 2x2 -> 3x3` zig-zag sidecar probes.
+  Kept as evidence. The canonical `3x3` start sets looked closed under this move, so it did not create a meeting path.
+
+- `f1268a3` Added dual in-split sidecar probes via transposition.
+  Kept as evidence. This genuinely enlarged the move family, but still found no common refinement.
+
+- `e8076c2` Added two-step mixed out/in split refinement probes.
+  Kept as evidence. Even the enlarged mixed split sets remained disjoint.
+
+## 2026-04-05 Structured `3x3` Moves
+
+- `80ac7ec` Added explicit diagonal `3x3` conjugation moves above the square-factorisation cap.
+  Failed. It stayed correct but pushed the search in a less informative direction and hurt focus telemetry.
+
+- `e1be8ea` Replaced smaller-frontier alternation with representative-sample factorisation-cost balancing.
+  Kept. It improved the search schedule on the wide Brix-Ruiz probe.
+
+- `abc9eb5` Added opposite-shear `3x3` conjugation moves.
+  Kept. This opened a slightly better `3x3` search surface and improved focus telemetry.
+
+- `20af1b7` Added paired-shear conjugation moves with a shared pivot.
+  Kept. It enlarged the useful `3x3` surface again and improved focus telemetry.
+
+- `20af1b7` Added the complementary shared-target paired-shear family.
+  Kept. This was the best `3x3` structured-move improvement in that sequence.
+
+## 2026-04-05 to 2026-04-06 Matrix-Level / Proposal Work
+
+- `857637a` Integrated concrete-shift fallback into the main search.
+  Kept. It made matrix-level concrete-shift available as a direct proof fallback, even though it did not fire on the benchmark targets.
+
+- `857637a` Added a bounded concrete-shift-guided successor ordering pass.
+  Failed. It only changed local ordering inside a layer-synchronous BFS, so it added cost without changing the hard frontier shape.
+
+- `857637a` Added exact `3x3 -> 2x2 -> 3x3` out-split zig-zag proposal edges to the main search.
+  Failed. It mostly repackaged paths the solver could already simulate, so telemetry stayed flat and runtime regressed.
+
+- `857637a` Added explicit same-future in-split proposals to the main search.
+  Kept. This was the first refined split family that produced a small but real telemetry improvement on the hard family.
+
+- `4879cff` Added the same-past dual as explicit out-split proposals.
+  Kept. Another small improvement, again mainly on the `k=4` family probe.
