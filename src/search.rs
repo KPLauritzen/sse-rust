@@ -4,7 +4,9 @@ use crate::aligned::{
     search_concrete_shift_equivalence_2x2, ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2,
     ConcreteShiftSearchResult2x2,
 };
-use crate::factorisation::visit_all_factorisations_with_family;
+use crate::factorisation::{
+    enumerate_factorisations_3x3_to_2, visit_all_factorisations_with_family,
+};
 use crate::graph_moves::{
     enumerate_same_future_insplits_2x2_to_3x3, enumerate_same_past_outsplits_2x2_to_3x3,
 };
@@ -36,6 +38,16 @@ struct FrontierExpansionStats {
     pruned_by_size: usize,
     pruned_by_spectrum: usize,
     move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
+}
+
+#[derive(Clone)]
+struct RectangularBridge {
+    meeting_canon: DynMatrix,
+    current_meeting: DynMatrix,
+    current_step: EsseStep,
+    other_canon: DynMatrix,
+    other_meeting: DynMatrix,
+    other_step: EsseStep,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -151,10 +163,10 @@ pub fn search_sse_2x2_with_telemetry(
     let mut bwd_cost_sample_nodes = 0usize;
     let mut fwd_overlap_signal = FrontierOverlapSignal::default();
     let mut bwd_overlap_signal = FrontierOverlapSignal::default();
-    let mut fwd_signatures = HashSet::new();
-    let mut bwd_signatures = HashSet::new();
-    fwd_signatures.insert(approx_signature(&a_canon));
-    bwd_signatures.insert(approx_signature(&b_canon));
+    let mut fwd_signatures: HashMap<ApproxSignature, Vec<DynMatrix>> = HashMap::new();
+    let mut bwd_signatures: HashMap<ApproxSignature, Vec<DynMatrix>> = HashMap::new();
+    fwd_signatures.insert(approx_signature(&a_canon), vec![a_canon.clone()]);
+    bwd_signatures.insert(approx_signature(&b_canon), vec![b_canon.clone()]);
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -197,26 +209,28 @@ pub fn search_sse_2x2_with_telemetry(
             SearchDirection::Backward
         };
 
-        let (frontier, parent, orig, signatures, other_parent, other_signatures) = if expand_forward
-        {
-            (
-                &mut fwd_frontier,
-                &mut fwd_parent,
-                &mut fwd_orig,
-                &mut fwd_signatures,
-                &bwd_parent as &HashMap<_, _>,
-                &bwd_signatures as &HashSet<_>,
-            )
-        } else {
-            (
-                &mut bwd_frontier,
-                &mut bwd_parent,
-                &mut bwd_orig,
-                &mut bwd_signatures,
-                &fwd_parent as &HashMap<_, _>,
-                &fwd_signatures as &HashSet<_>,
-            )
-        };
+        let (frontier, parent, orig, signatures, other_parent, other_signatures, other_orig) =
+            if expand_forward {
+                (
+                    &mut fwd_frontier,
+                    &mut fwd_parent,
+                    &mut fwd_orig,
+                    &mut fwd_signatures,
+                    &bwd_parent as &HashMap<_, _>,
+                    &bwd_signatures as &HashMap<ApproxSignature, Vec<DynMatrix>>,
+                    &bwd_orig as &HashMap<_, _>,
+                )
+            } else {
+                (
+                    &mut bwd_frontier,
+                    &mut bwd_parent,
+                    &mut bwd_orig,
+                    &mut bwd_signatures,
+                    &fwd_parent as &HashMap<_, _>,
+                    &fwd_signatures as &HashMap<ApproxSignature, Vec<DynMatrix>>,
+                    &fwd_orig as &HashMap<_, _>,
+                )
+            };
 
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
@@ -268,7 +282,10 @@ pub fn search_sse_2x2_with_telemetry(
                 Some((expansion.parent_canon.clone(), expansion.step)),
             );
             orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
-            signatures.insert(approx_signature(&expansion.next_canon));
+            signatures
+                .entry(approx_signature(&expansion.next_canon))
+                .or_default()
+                .push(expansion.next_canon.clone());
 
             // Check if the other side has already visited this node.
             if other_parent.contains_key(&expansion.next_canon) {
@@ -332,13 +349,123 @@ pub fn search_sse_2x2_with_telemetry(
                 );
             }
 
-            if other_signatures.contains(&approx_signature(&expansion.next_canon)) {
+            if let Some(other_candidates) =
+                other_signatures.get(&approx_signature(&expansion.next_canon))
+            {
                 approximate_other_side_hits += 1;
                 move_family_telemetry_mut(
                     &mut layer_move_family_telemetry,
                     expansion.move_family,
                 )
                 .approximate_other_side_hits += 1;
+
+                if let Some(bridge) = find_rectangular_bridge(
+                    &expansion.next_orig,
+                    other_candidates,
+                    other_orig,
+                    config.max_entry,
+                ) {
+                    let current_depth = parent_depth(&expansion.next_canon, parent);
+                    let other_depth = parent_depth(&bridge.other_canon, other_parent);
+                    if current_depth + other_depth + 2 <= config.max_lag {
+                        parents_with_progress.insert(expansion.parent_canon.clone());
+                        move_family_telemetry_mut(
+                            &mut layer_move_family_telemetry,
+                            expansion.move_family,
+                        )
+                        .exact_meets += 1;
+                        move_family_telemetry_mut(
+                            &mut layer_move_family_telemetry,
+                            expansion.move_family,
+                        )
+                        .discovered_nodes += 1;
+                        telemetry.collisions_with_seen += collisions_with_seen;
+                        telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
+                        telemetry.approximate_other_side_hits += approximate_other_side_hits;
+                        telemetry.discovered_nodes += discovered_nodes;
+                        let dead_end_nodes = current_frontier
+                            .len()
+                            .saturating_sub(parents_with_progress.len());
+                        telemetry.dead_end_nodes += dead_end_nodes;
+                        telemetry.enqueued_nodes += enqueued_nodes;
+                        accumulate_move_family_telemetry(
+                            &mut telemetry.move_family_telemetry,
+                            &layer_move_family_telemetry,
+                        );
+
+                        let mut fwd_parent_with_bridge = fwd_parent.clone();
+                        let mut fwd_orig_with_bridge = fwd_orig.clone();
+                        let mut bwd_parent_with_bridge = bwd_parent.clone();
+                        let mut bwd_orig_with_bridge = bwd_orig.clone();
+
+                        if expand_forward {
+                            fwd_parent_with_bridge.insert(
+                                bridge.meeting_canon.clone(),
+                                Some((expansion.next_canon.clone(), bridge.current_step.clone())),
+                            );
+                            fwd_orig_with_bridge.insert(
+                                bridge.meeting_canon.clone(),
+                                bridge.current_meeting.clone(),
+                            );
+                            bwd_parent_with_bridge.insert(
+                                bridge.meeting_canon.clone(),
+                                Some((bridge.other_canon.clone(), bridge.other_step.clone())),
+                            );
+                            bwd_orig_with_bridge
+                                .insert(bridge.meeting_canon.clone(), bridge.other_meeting.clone());
+                        } else {
+                            bwd_parent_with_bridge.insert(
+                                bridge.meeting_canon.clone(),
+                                Some((expansion.next_canon.clone(), bridge.current_step.clone())),
+                            );
+                            bwd_orig_with_bridge.insert(
+                                bridge.meeting_canon.clone(),
+                                bridge.current_meeting.clone(),
+                            );
+                            fwd_parent_with_bridge.insert(
+                                bridge.meeting_canon.clone(),
+                                Some((bridge.other_canon.clone(), bridge.other_step.clone())),
+                            );
+                            fwd_orig_with_bridge
+                                .insert(bridge.meeting_canon.clone(), bridge.other_meeting.clone());
+                        }
+
+                        telemetry.total_visited_nodes =
+                            visited_union_size(&fwd_parent_with_bridge, &bwd_parent_with_bridge);
+                        telemetry.layers.push(SearchLayerTelemetry {
+                            layer_index,
+                            direction: Some(direction),
+                            frontier_nodes: expansion_stats.frontier_nodes,
+                            factorisation_calls: expansion_stats.factorisation_calls,
+                            factorisations_enumerated: expansion_stats.factorisations_enumerated,
+                            candidates_generated: expansion_stats.candidates_generated,
+                            pruned_by_size: expansion_stats.pruned_by_size,
+                            pruned_by_spectrum: expansion_stats.pruned_by_spectrum,
+                            candidates_after_pruning,
+                            collisions_with_seen,
+                            collisions_with_other_frontier,
+                            approximate_other_side_hits,
+                            discovered_nodes,
+                            dead_end_nodes,
+                            enqueued_nodes,
+                            next_frontier_nodes: next_frontier.len(),
+                            total_visited_nodes: telemetry.total_visited_nodes,
+                            move_family_telemetry: layer_move_family_telemetry,
+                        });
+                        return (
+                            SseResult::Equivalent(reconstruct_bidirectional_path(
+                                a,
+                                b,
+                                &bridge.meeting_canon,
+                                &fwd_parent_with_bridge,
+                                &fwd_orig_with_bridge,
+                                &bwd_parent_with_bridge,
+                                &bwd_orig_with_bridge,
+                            )),
+                            telemetry,
+                        );
+                    }
+                }
             }
 
             parents_with_progress.insert(expansion.parent_canon.clone());
@@ -763,6 +890,69 @@ fn visited_union_size(
             .keys()
             .filter(|key| !fwd_parent.contains_key(*key))
             .count()
+}
+
+fn parent_depth(
+    node: &DynMatrix,
+    parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
+) -> usize {
+    let mut depth = 0usize;
+    let mut current = node;
+    while let Some(Some((prev, _))) = parent.get(current) {
+        depth += 1;
+        current = prev;
+    }
+    depth
+}
+
+fn find_rectangular_bridge(
+    current: &DynMatrix,
+    other_candidates: &[DynMatrix],
+    other_orig: &HashMap<DynMatrix, DynMatrix>,
+    max_entry: u32,
+) -> Option<RectangularBridge> {
+    if current.rows != 3 || current.cols != 3 {
+        return None;
+    }
+
+    let mut current_midpoints = HashMap::new();
+    for (u, v) in enumerate_factorisations_3x3_to_2(current, max_entry) {
+        let mid = v.mul(&u);
+        let mid_canon = mid.canonical_perm();
+        current_midpoints
+            .entry(mid_canon)
+            .or_insert_with(|| (mid, EsseStep { u, v }));
+    }
+
+    if current_midpoints.is_empty() {
+        return None;
+    }
+
+    for other_canon in other_candidates.iter().take(8) {
+        let Some(other) = other_orig.get(other_canon) else {
+            continue;
+        };
+        if other.rows != 3 || other.cols != 3 {
+            continue;
+        }
+
+        for (u, v) in enumerate_factorisations_3x3_to_2(other, max_entry) {
+            let other_mid = v.mul(&u);
+            let other_mid_canon = other_mid.canonical_perm();
+            if let Some((current_mid, current_step)) = current_midpoints.get(&other_mid_canon) {
+                return Some(RectangularBridge {
+                    meeting_canon: other_mid_canon,
+                    current_meeting: current_mid.clone(),
+                    current_step: current_step.clone(),
+                    other_canon: other_canon.clone(),
+                    other_meeting: other_mid,
+                    other_step: EsseStep { u, v },
+                });
+            }
+        }
+    }
+
+    None
 }
 
 /// Check whether a candidate intermediate matrix has a nonzero spectrum
