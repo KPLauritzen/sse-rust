@@ -91,9 +91,7 @@ pub fn enumerate_same_future_insplits(a: &DynMatrix) -> Vec<OutsplitWitness> {
 }
 
 /// Enumerate all one-step 2x2 -> 3x3 same-future in-splits.
-pub fn enumerate_same_future_insplits_2x2_to_3x3(
-    a: &SqMatrix<2>,
-) -> Vec<OutsplitWitness2x2To3x3> {
+pub fn enumerate_same_future_insplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2To3x3> {
     enumerate_same_future_insplits(&DynMatrix::from_sq(a))
 }
 
@@ -107,9 +105,7 @@ pub fn enumerate_same_past_outsplits(a: &DynMatrix) -> Vec<OutsplitWitness> {
 }
 
 /// Enumerate all one-step 2x2 -> 3x3 same-past out-splits.
-pub fn enumerate_same_past_outsplits_2x2_to_3x3(
-    a: &SqMatrix<2>,
-) -> Vec<OutsplitWitness2x2To3x3> {
+pub fn enumerate_same_past_outsplits_2x2_to_3x3(a: &SqMatrix<2>) -> Vec<OutsplitWitness2x2To3x3> {
     enumerate_same_past_outsplits(&DynMatrix::from_sq(a))
 }
 

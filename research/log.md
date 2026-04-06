@@ -121,3 +121,23 @@
 
 - `2c87aaa` Added a global factorisation-result cache keyed by matrix and bound.
   Failed. It reused exact enumerations but the synchronization and cloning cost regressed harness runtime without changing the hard cases.
+
+## 2026-04-06
+
+- `c2e8b68` Penalized dead-end-heavy frontier alternation.
+  Failed. It cut the hard-family search off a layer earlier, lowered focus telemetry, and still produced zero overlap hits.
+
+- `386fe26` Coarsened overlap signatures away from exact support masks.
+  Kept. It preserved the reach score while producing the first nonzero approximate overlaps on the `k=3` hard probes.
+
+- `74683df` Chased approximate overlaps from the opposite frontier.
+  Failed. It improved directed telemetry and runtime, but it exhausted the `k=3` probes a layer earlier and lost too much reach.
+
+- `e773b86` Probed `3x3 -> 2x2 <- 3x3` rectangular bridges after overlap hits.
+  Failed. None of the coarse-overlap pairs admitted the hoped-for bounded bridge, so behavior stayed flat and runtime ticked up.
+
+- `c87a786` Added scale-insensitive overlap signatures.
+  Failed. Normalizing the row and column profiles by scale did not produce any new hard-case continuity signal.
+
+- `071f236` Added histogram-based overlap signatures.
+  Failed. The signature was too coarse, produced misleading overlap pressure, and collapsed the hard probes a layer earlier.
