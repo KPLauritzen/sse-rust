@@ -115,3 +115,9 @@
 
 - `4879cff` Added the same-past dual as explicit out-split proposals.
   Kept. Another small improvement, again mainly on the `k=4` family probe.
+
+- `2c87aaa` Added a tightly bounded visible-coincidence `3x3 -> 3x3` refined split family.
+  Failed. It preserved correctness but mostly duplicated existing `3x3` successors, so the hard-case telemetry stayed flat.
+
+- `2c87aaa` Added a global factorisation-result cache keyed by matrix and bound.
+  Failed. It reused exact enumerations but the synchronization and cloning cost regressed harness runtime without changing the hard cases.

@@ -84,17 +84,18 @@ This writes `research/runs/<stamp>.json`.
 LOOP FOREVER
 
 1. Inspect git state.
-2. Identify the current kept commit.
-   This is the commit you should return to if the experiment does not help.
-3. Make one focused search improvement.
-4. Run `cargo test -q`.
-5. Run `just research-json-save <stamp>`.
+2. Make one focused search improvement.
+3. Run `cargo test -q`.
+4. Run `just research-json-save <stamp>`.
    The `<stamp>` should be stable and sortable, for example `2026-04-05-1530-k3-best-first`.
-6. If required cases regress, discard the change by resetting to the last kept commit.
-7. If required cases stay green, prefer changes that improve `target_hits`, then `total_points`, then `telemetry_focus_score`, then `total_ms`.
-8. Append one row to `research/results.tsv`, including the artifact path.
-9. If the experiment improved the score, keep the commit and advance the branch.
-10. If the experiment did not improve the score, reset back to the last kept commit.
+5. Commit the change with a descriptive message prefixed with `experiment:`.
+6. Evaluate the result:
+   - If required cases regress, explicitly revert the commit (`git revert --no-edit HEAD`).
+   - If required cases stay green, prefer changes that improve `target_hits`, then `total_points`, then `telemetry_focus_score`, then `total_ms`.
+   - If the experiment did not improve the score, explicitly revert the commit (`git revert --no-edit HEAD`).
+7. Append one row to `research/results.tsv`, including the artifact path.
+
+Every experiment — kept or rejected — stays in git history as a commit plus its revert. This gives full history for revisiting past attempts.
 
 When `brix_ruiz_k3` is still `unknown`, inspect the proxy telemetry from `just research` or `just research-json`.
 Use it to identify whether the current bottleneck is frontier growth, factorisation volume, pruning quality, or collision rate.
