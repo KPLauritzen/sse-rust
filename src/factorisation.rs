@@ -1012,80 +1012,6 @@ where
     }
 }
 
-/// Generate 3x3 -> 3x3 elementary SSE steps via chained shears on a directed
-/// length-two path:
-/// P = (I + a*e_i*e_j^T)(I + b*e_j*e_k^T) for distinct i, j, k.
-///
-/// This adds a structured family between the narrow shared-pivot/target
-/// shears and the too-broad diagonal sweep: the product can realize a larger
-/// induced `(i, k)` entry through the composite path while staying unimodular
-/// and cheaply enumerable.
-fn visit_chain_shear_conjugations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
-where
-    F: FnMut(DynMatrix, DynMatrix),
-{
-    assert_eq!(c.rows, 3);
-    assert_eq!(c.cols, 3);
-
-    let me = max_entry as i64;
-    let sq3_cap = max_entry.min(4) as i64;
-    let mut cm = [[0i64; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            cm[i][j] = c.get(i, j) as i64;
-        }
-    }
-
-    for i in 0..3 {
-        for j in 0..3 {
-            if i == j {
-                continue;
-            }
-            for k in 0..3 {
-                if i == k || j == k {
-                    continue;
-                }
-
-                for a in 1..=max_entry {
-                    for b in 1..=max_entry {
-                        let (a, b) = (a as i64, b as i64);
-
-                        let mut first = identity_mat3_i64();
-                        first[i][j] = a;
-
-                        let mut second = identity_mat3_i64();
-                        second[j][k] = b;
-
-                        let p = mul_mat3_i64(&first, &second);
-                        let p_max_entry = max_entry_mat3_i64(&p);
-                        if p_max_entry > me || p_max_entry <= sq3_cap {
-                            continue;
-                        }
-
-                        let mut first_inv = identity_mat3_i64();
-                        first_inv[i][j] = -a;
-
-                        let mut second_inv = identity_mat3_i64();
-                        second_inv[j][k] = -b;
-
-                        let pinv = mul_mat3_i64(&second_inv, &first_inv);
-
-                        let row_v = mul_mat3_i64(&pinv, &cm);
-                        if entries_fit_nonnegative_bound_mat3_i64(&row_v, me) {
-                            visit(mat3_i64_to_dyn(&p), mat3_i64_to_dyn(&row_v));
-                        }
-
-                        let col_u = mul_mat3_i64(&cm, &pinv);
-                        if entries_fit_nonnegative_bound_mat3_i64(&col_u, me) {
-                            visit(mat3_i64_to_dyn(&col_u), mat3_i64_to_dyn(&p));
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn identity_mat3_i64() -> [[i64; 3]; 3] {
     let mut m = [[0i64; 3]; 3];
     for idx in 0..3 {
@@ -1441,7 +1367,6 @@ pub fn visit_all_factorisations<F>(
             visit_opposite_shear_conjugations_3x3(a, max_entry, &mut visit);
             visit_parallel_shear_conjugations_3x3(a, max_entry, &mut visit);
             visit_convergent_shear_conjugations_3x3(a, max_entry, &mut visit);
-            visit_chain_shear_conjugations_3x3(a, max_entry, &mut visit);
         }
     }
 }
@@ -1656,22 +1581,6 @@ mod tests {
         });
 
         assert!(found, "expected convergent-shear conjugation factorisation");
-    }
-
-    #[test]
-    fn test_visit_all_factorisations_includes_chain_shear_conjugation() {
-        let u = DynMatrix::new(3, 3, vec![1, 2, 6, 0, 1, 3, 0, 0, 1]);
-        let v = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
-        let c = u.mul(&v);
-        let mut found = false;
-
-        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
-            if cand_u == u && cand_v == v {
-                found = true;
-            }
-        });
-
-        assert!(found, "expected chain-shear conjugation factorisation");
     }
 
     // --- Rectangular factorisation tests ---
