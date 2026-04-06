@@ -47,6 +47,65 @@ struct ApproxSignature {
     support_mask: u16,
 }
 
+#[derive(Clone, Copy, Default)]
+struct FrontierDirectionSignal {
+    frontier_nodes: usize,
+    discovered_nodes: usize,
+    dead_end_nodes: usize,
+    approximate_other_side_hits: usize,
+}
+
+impl FrontierDirectionSignal {
+    fn from_layer(
+        frontier_nodes: usize,
+        discovered_nodes: usize,
+        dead_end_nodes: usize,
+        approximate_other_side_hits: usize,
+    ) -> Self {
+        Self {
+            frontier_nodes,
+            discovered_nodes,
+            dead_end_nodes,
+            approximate_other_side_hits,
+        }
+    }
+
+    fn is_trained(self) -> bool {
+        self.frontier_nodes >= 8
+    }
+
+    fn dead_end_ratio(self) -> f64 {
+        self.dead_end_nodes as f64 / self.frontier_nodes.max(1) as f64
+    }
+
+    fn growth_ratio(self) -> f64 {
+        self.discovered_nodes as f64 / self.frontier_nodes.max(1) as f64
+    }
+
+    fn overlap_ratio(self) -> f64 {
+        self.approximate_other_side_hits as f64 / self.frontier_nodes.max(1) as f64
+    }
+
+    fn is_dead_end_heavy(self) -> bool {
+        self.is_trained()
+            && self.approximate_other_side_hits == 0
+            && self.dead_end_ratio() >= 0.75
+            && self.growth_ratio() <= 0.75
+    }
+
+    fn adjusted_work(self, base_work: f64) -> f64 {
+        if !self.is_trained() {
+            return base_work;
+        }
+
+        let dead_end_penalty = 1.0 + 3.0 * self.dead_end_ratio().min(1.0);
+        let growth_bonus = 1.0 + self.growth_ratio().ln_1p();
+        let overlap_bonus = 1.0 + 6.0 * self.overlap_ratio();
+
+        base_work * dead_end_penalty / (growth_bonus * overlap_bonus)
+    }
+}
+
 /// Search for a strong shift equivalence path between two 2x2 matrices.
 ///
 /// Uses bidirectional BFS over the graph where nodes are square matrices of
@@ -125,6 +184,8 @@ pub fn search_sse_2x2_with_telemetry(
     let mut bwd_factorisations_per_node = 1.0f64;
     let mut fwd_cost_sample_nodes = 0usize;
     let mut bwd_cost_sample_nodes = 0usize;
+    let mut fwd_direction_signal = FrontierDirectionSignal::default();
+    let mut bwd_direction_signal = FrontierDirectionSignal::default();
     let mut fwd_signatures = HashSet::new();
     let mut bwd_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
@@ -162,6 +223,8 @@ pub fn search_sse_2x2_with_telemetry(
             bwd_factorisations_per_node,
             fwd_cost_sample_nodes,
             bwd_cost_sample_nodes,
+            fwd_direction_signal,
+            bwd_direction_signal,
         );
         let direction = if expand_forward {
             SearchDirection::Forward
@@ -333,6 +396,17 @@ pub fn search_sse_2x2_with_telemetry(
         let dead_end_nodes = current_frontier
             .len()
             .saturating_sub(parents_with_progress.len());
+        let direction_signal = FrontierDirectionSignal::from_layer(
+            expansion_stats.frontier_nodes,
+            discovered_nodes,
+            dead_end_nodes,
+            approximate_other_side_hits,
+        );
+        if expand_forward {
+            fwd_direction_signal = direction_signal;
+        } else {
+            bwd_direction_signal = direction_signal;
+        }
         telemetry.dead_end_nodes += dead_end_nodes;
         telemetry.enqueued_nodes += enqueued_nodes;
         telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
@@ -424,17 +498,31 @@ fn should_expand_forward(
     bwd_factorisations_per_node: f64,
     fwd_cost_sample_nodes: usize,
     bwd_cost_sample_nodes: usize,
+    fwd_direction_signal: FrontierDirectionSignal,
+    bwd_direction_signal: FrontierDirectionSignal,
 ) -> bool {
     if fwd_frontier_len == 0 || bwd_frontier_len == 0 {
         return fwd_frontier_len <= bwd_frontier_len;
     }
-    if fwd_cost_sample_nodes < 8 || bwd_cost_sample_nodes < 8 {
+    if fwd_cost_sample_nodes < 8
+        || bwd_cost_sample_nodes < 8
+        || !fwd_direction_signal.is_trained()
+        || !bwd_direction_signal.is_trained()
+    {
         return fwd_frontier_len <= bwd_frontier_len;
+    }
+
+    if fwd_direction_signal.is_dead_end_heavy() && !bwd_direction_signal.is_dead_end_heavy() {
+        return false;
+    }
+    if bwd_direction_signal.is_dead_end_heavy() && !fwd_direction_signal.is_dead_end_heavy() {
+        return true;
     }
 
     let fwd_estimated_work = fwd_frontier_len as f64 * fwd_factorisations_per_node.max(1.0);
     let bwd_estimated_work = bwd_frontier_len as f64 * bwd_factorisations_per_node.max(1.0);
-    fwd_estimated_work <= bwd_estimated_work
+    fwd_direction_signal.adjusted_work(fwd_estimated_work)
+        <= bwd_direction_signal.adjusted_work(bwd_estimated_work)
 }
 
 fn expand_frontier_layer(
@@ -1111,13 +1199,47 @@ mod tests {
             103760.0 / 662.0,
             323,
             662,
+            FrontierDirectionSignal::from_layer(323, 1538, 154, 0),
+            FrontierDirectionSignal::from_layer(662, 3793, 318, 0),
         ));
     }
 
     #[test]
     fn test_should_expand_forward_falls_back_to_smaller_frontier_when_untrained() {
-        assert!(should_expand_forward(3, 5, 100.0, 1.0, 0, 0));
-        assert!(!should_expand_forward(7, 2, 1.0, 100.0, 0, 0));
+        assert!(should_expand_forward(
+            3,
+            5,
+            100.0,
+            1.0,
+            0,
+            0,
+            FrontierDirectionSignal::default(),
+            FrontierDirectionSignal::default(),
+        ));
+        assert!(!should_expand_forward(
+            7,
+            2,
+            1.0,
+            100.0,
+            0,
+            0,
+            FrontierDirectionSignal::default(),
+            FrontierDirectionSignal::default(),
+        ));
+    }
+
+    #[test]
+    fn test_should_expand_forward_penalizes_dead_end_heavy_side() {
+        assert!(should_expand_forward(
+            1192,
+            909,
+            148096.0 / 203.0,
+            77066.0 / 2249.0,
+            203,
+            2249,
+            FrontierDirectionSignal::from_layer(203, 1192, 94, 0),
+            FrontierDirectionSignal::from_layer(2249, 909, 1891, 0),
+        ));
     }
 
     // --- Literature examples ---
