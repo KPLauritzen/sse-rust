@@ -1,5 +1,6 @@
 use crate::aligned::ConcreteShiftWitness2x2;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::matrix::{DynMatrix, SqMatrix};
 
@@ -65,6 +66,16 @@ pub enum SearchDirection {
 
 /// Telemetry captured for one frontier expansion layer.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SearchMoveFamilyTelemetry {
+    pub candidates_generated: usize,
+    pub candidates_after_pruning: usize,
+    pub discovered_nodes: usize,
+    pub exact_meets: usize,
+    pub approximate_other_side_hits: usize,
+}
+
+/// Telemetry captured for one frontier expansion layer.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SearchLayerTelemetry {
     pub layer_index: usize,
     pub direction: Option<SearchDirection>,
@@ -77,10 +88,13 @@ pub struct SearchLayerTelemetry {
     pub candidates_after_pruning: usize,
     pub collisions_with_seen: usize,
     pub collisions_with_other_frontier: usize,
+    pub approximate_other_side_hits: usize,
     pub discovered_nodes: usize,
+    pub dead_end_nodes: usize,
     pub enqueued_nodes: usize,
     pub next_frontier_nodes: usize,
     pub total_visited_nodes: usize,
+    pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
 }
 
 /// Aggregate telemetry for a full `search_sse_2x2` invocation.
@@ -99,9 +113,12 @@ pub struct SearchTelemetry {
     pub candidates_after_pruning: usize,
     pub collisions_with_seen: usize,
     pub collisions_with_other_frontier: usize,
+    pub approximate_other_side_hits: usize,
     pub discovered_nodes: usize,
+    pub dead_end_nodes: usize,
     pub enqueued_nodes: usize,
     pub max_frontier_size: usize,
     pub total_visited_nodes: usize,
+    pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
     pub layers: Vec<SearchLayerTelemetry>,
 }

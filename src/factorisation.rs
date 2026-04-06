@@ -1339,34 +1339,63 @@ pub fn visit_all_factorisations<F>(
 ) where
     F: FnMut(DynMatrix, DynMatrix),
 {
+    visit_all_factorisations_with_family(a, max_intermediate_dim, max_entry, |_family, u, v| {
+        visit(u, v);
+    });
+}
+
+pub fn visit_all_factorisations_with_family<F>(
+    a: &DynMatrix,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    mut visit: F,
+) where
+    F: FnMut(&'static str, DynMatrix, DynMatrix),
+{
     assert!(a.is_square());
     let k = a.rows;
 
     if k == 2 {
         // Square factorisations (m=2).
         let sq: SqMatrix<2> = a.to_sq().unwrap();
-        visit_square_factorisations_2x2(&sq, max_entry, &mut visit);
+        visit_square_factorisations_2x2(&sq, max_entry, &mut |u, v| {
+            visit("square_factorisation_2x2", u, v);
+        });
 
         // Rectangular factorisations for m=3..=max_intermediate_dim.
         if max_intermediate_dim >= 3 {
-            visit_rect_factorisations_2x3(&sq, max_entry, &mut visit);
+            visit_rect_factorisations_2x3(&sq, max_entry, &mut |u, v| {
+                visit("rectangular_factorisation_2x3", u, v);
+            });
         }
     } else if k == 3 {
         // Rectangular 3×2 × 2×3 factorisations (the return trip to 2×2).
-        visit_factorisations_3x3_to_2(a, max_entry, &mut visit);
+        visit_factorisations_3x3_to_2(a, max_entry, &mut |u, v| {
+            visit("rectangular_factorisation_3x3_to_2", u, v);
+        });
         // Square 3×3 factorisations (allows chaining through 3×3 space).
         // Factor entry bound is capped to keep enumeration tractable: the cost
         // is O((cap+1)^6) per node, so cap=4 gives ~15K iterations per node.
         if max_intermediate_dim >= 3 {
             let sq3_cap = max_entry.min(4);
-            visit_square_factorisations_3x3(a, sq3_cap, &mut visit);
+            visit_square_factorisations_3x3(a, sq3_cap, &mut |u, v| {
+                visit("square_factorisation_3x3", u, v);
+            });
             // Elementary conjugation moves C = P·(P⁻¹C), where P = I ± k·eᵢeⱼᵀ.
             // These are O(1) per move and reach 3×3 nodes that the capped
             // square enumeration misses (factor entries > cap).
-            visit_elementary_conjugations_3x3(a, max_entry, &mut visit);
-            visit_opposite_shear_conjugations_3x3(a, max_entry, &mut visit);
-            visit_parallel_shear_conjugations_3x3(a, max_entry, &mut visit);
-            visit_convergent_shear_conjugations_3x3(a, max_entry, &mut visit);
+            visit_elementary_conjugations_3x3(a, max_entry, &mut |u, v| {
+                visit("elementary_conjugation_3x3", u, v);
+            });
+            visit_opposite_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
+                visit("opposite_shear_conjugation_3x3", u, v);
+            });
+            visit_parallel_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
+                visit("parallel_shear_conjugation_3x3", u, v);
+            });
+            visit_convergent_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
+                visit("convergent_shear_conjugation_3x3", u, v);
+            });
         }
     }
 }

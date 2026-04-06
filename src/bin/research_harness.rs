@@ -88,6 +88,8 @@ struct FitnessSummary {
     total_elapsed_ms: u128,
     telemetry_focus_cases: usize,
     telemetry_focus_score: u64,
+    telemetry_focus_reach_score: u64,
+    telemetry_focus_directed_score: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,11 +121,13 @@ struct DerivedTelemetrySummary {
     avg_factorisations_per_expanded_node: f64,
     avg_survivor_ratio: f64,
     avg_discovery_ratio: f64,
+    avg_dead_end_ratio: f64,
     last_layer_frontier_nodes: usize,
     last_layer_candidates_after_pruning: usize,
     last_layer_discovered_nodes: usize,
     last_layer_next_frontier_nodes: usize,
     focus_progress_score: u64,
+    directed_progress_score: i64,
 }
 
 fn main() -> ExitCode {
@@ -351,6 +355,7 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
     let mut total_elapsed_ms = 0u128;
     let mut telemetry_focus_cases = 0usize;
     let mut telemetry_focus_score = 0u64;
+    let mut telemetry_focus_directed_score = 0i64;
 
     for case in &corpus.cases {
         let executed = run_case_in_subprocess(&current_exe, cases_path, case)?;
@@ -381,6 +386,7 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
         if case.tags.iter().any(|tag| tag == "telemetry-focus") {
             telemetry_focus_cases += 1;
             telemetry_focus_score += telemetry_summary.focus_progress_score;
+            telemetry_focus_directed_score += telemetry_summary.directed_progress_score;
         }
 
         cases.push(CaseSummary {
@@ -413,6 +419,8 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
             total_elapsed_ms,
             telemetry_focus_cases,
             telemetry_focus_score,
+            telemetry_focus_reach_score: telemetry_focus_score,
+            telemetry_focus_directed_score,
         },
         cases,
     })
@@ -433,11 +441,13 @@ fn derive_telemetry_summary(
             avg_factorisations_per_expanded_node: 0.0,
             avg_survivor_ratio: 0.0,
             avg_discovery_ratio: 0.0,
+            avg_dead_end_ratio: 0.0,
             last_layer_frontier_nodes: 0,
             last_layer_candidates_after_pruning: 0,
             last_layer_discovered_nodes: 0,
             last_layer_next_frontier_nodes: 0,
             focus_progress_score: 0,
+            directed_progress_score: 0,
         };
     }
 
@@ -454,11 +464,13 @@ fn derive_telemetry_summary(
             avg_factorisations_per_expanded_node: 0.0,
             avg_survivor_ratio: 0.0,
             avg_discovery_ratio: 0.0,
+            avg_dead_end_ratio: 0.0,
             last_layer_frontier_nodes: 0,
             last_layer_candidates_after_pruning: 0,
             last_layer_discovered_nodes: 0,
             last_layer_next_frontier_nodes: 0,
             focus_progress_score: 0,
+            directed_progress_score: 0,
         };
     }
 
@@ -472,11 +484,13 @@ fn derive_telemetry_summary(
             avg_factorisations_per_expanded_node: 0.0,
             avg_survivor_ratio: 0.0,
             avg_discovery_ratio: 0.0,
+            avg_dead_end_ratio: 0.0,
             last_layer_frontier_nodes: 0,
             last_layer_candidates_after_pruning: 0,
             last_layer_discovered_nodes: 0,
             last_layer_next_frontier_nodes: 0,
             focus_progress_score: 0,
+            directed_progress_score: 0,
         };
     }
 
@@ -514,6 +528,7 @@ fn derive_telemetry_summary(
     } else {
         telemetry.discovered_nodes as f64 / telemetry.candidates_after_pruning as f64
     };
+    let avg_dead_end_ratio = telemetry.dead_end_nodes as f64 / expanded_nodes;
 
     let last_layer = telemetry
         .layers
@@ -525,7 +540,14 @@ fn derive_telemetry_summary(
 
     let terminal_bottleneck = classify_bottleneck(actual_outcome, telemetry, last_layer);
     let focus_progress_score =
-        compute_focus_progress_score(telemetry, productive_layers, deepest_productive_layer);
+        compute_reach_progress_score(telemetry, productive_layers, deepest_productive_layer);
+    let directed_progress_score = compute_directed_progress_score(
+        telemetry,
+        deepest_productive_layer,
+        avg_discovery_ratio,
+        avg_dead_end_ratio,
+        exhausted_before_max_lag,
+    );
 
     DerivedTelemetrySummary {
         productive_layers,
@@ -536,11 +558,13 @@ fn derive_telemetry_summary(
         avg_factorisations_per_expanded_node,
         avg_survivor_ratio,
         avg_discovery_ratio,
+        avg_dead_end_ratio,
         last_layer_frontier_nodes: last_layer.frontier_nodes,
         last_layer_candidates_after_pruning: last_layer.candidates_after_pruning,
         last_layer_discovered_nodes: last_layer.discovered_nodes,
         last_layer_next_frontier_nodes: last_layer.next_frontier_nodes,
         focus_progress_score,
+        directed_progress_score,
     }
 }
 
@@ -585,7 +609,7 @@ fn classify_bottleneck(
     "mixed".to_string()
 }
 
-fn compute_focus_progress_score(
+fn compute_reach_progress_score(
     telemetry: &SearchTelemetry,
     productive_layers: usize,
     deepest_productive_layer: Option<usize>,
@@ -595,6 +619,28 @@ fn compute_focus_progress_score(
     let meets = telemetry.collisions_with_other_frontier as u64;
     let visited = telemetry.total_visited_nodes.min(50_000) as u64;
     depth * 1_000_000 + productive * 100_000 + meets * 10_000 + visited
+}
+
+fn compute_directed_progress_score(
+    telemetry: &SearchTelemetry,
+    deepest_productive_layer: Option<usize>,
+    avg_discovery_ratio: f64,
+    avg_dead_end_ratio: f64,
+    exhausted_before_max_lag: bool,
+) -> i64 {
+    let depth = deepest_productive_layer.unwrap_or(0) as i64;
+    let exact_meets = telemetry.collisions_with_other_frontier as i64;
+    let approximate_hits = telemetry.approximate_other_side_hits as i64;
+    let discovery_per_mille = (avg_discovery_ratio * 1000.0).round() as i64;
+    let dead_end_per_mille = (avg_dead_end_ratio * 1000.0).round() as i64;
+    let exhaustion_penalty = if exhausted_before_max_lag { 10_000 } else { 0 };
+
+    exact_meets * 1_000_000
+        + approximate_hits * 100_000
+        + depth * 10_000
+        + discovery_per_mille * 1_000
+        - dead_end_per_mille * 1_000
+        - exhaustion_penalty
 }
 
 fn run_case_in_subprocess(
@@ -704,6 +750,10 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
         summary.fitness.telemetry_focus_score, summary.fitness.telemetry_focus_cases
     ));
     out.push_str(&format!(
+        "telemetry_focus_directed_score: {}\n",
+        summary.fitness.telemetry_focus_directed_score
+    ));
+    out.push_str(&format!(
         "total_elapsed_ms: {}\n\n",
         summary.fitness.total_elapsed_ms
     ));
@@ -722,7 +772,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             out.push_str(&format!("  reason: {}\n", reason));
         }
         out.push_str(&format!(
-            "  telemetry: layers={} expanded={} factorisations={} kept={} pruned_size={} pruned_spectrum={} discovered={} seen_collisions={} max_frontier={} visited={}\n",
+            "  telemetry: layers={} expanded={} factorisations={} kept={} pruned_size={} pruned_spectrum={} discovered={} approx_hits={} dead_ends={} seen_collisions={} max_frontier={} visited={}\n",
             case.telemetry.layers.len(),
             case.telemetry.frontier_nodes_expanded,
             case.telemetry.factorisations_enumerated,
@@ -730,29 +780,35 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             case.telemetry.pruned_by_size,
             case.telemetry.pruned_by_spectrum,
             case.telemetry.discovered_nodes,
+            case.telemetry.approximate_other_side_hits,
+            case.telemetry.dead_end_nodes,
             case.telemetry.collisions_with_seen,
             case.telemetry.max_frontier_size,
             case.telemetry.total_visited_nodes,
         ));
         out.push_str(&format!(
-            "  telemetry_summary: bottleneck={} productive_layers={} deepest_productive_layer={:?} stagnant_layer={:?} exhausted_early={} focus_progress_score={}\n",
+            "  telemetry_summary: bottleneck={} productive_layers={} deepest_productive_layer={:?} stagnant_layer={:?} exhausted_early={} focus_progress_score={} directed_progress_score={} dead_end_ratio={:.3}\n",
             case.telemetry_summary.terminal_bottleneck,
             case.telemetry_summary.productive_layers,
             case.telemetry_summary.deepest_productive_layer,
             case.telemetry_summary.first_stagnant_layer,
             case.telemetry_summary.exhausted_before_max_lag,
             case.telemetry_summary.focus_progress_score,
+            case.telemetry_summary.directed_progress_score,
+            case.telemetry_summary.avg_dead_end_ratio,
         ));
         if case.tags.iter().any(|tag| tag == "telemetry-focus") {
             for layer in &case.telemetry.layers {
                 out.push_str(&format!(
-                    "    layer {} {:?}: frontier={} factors={} kept={} discovered={} next={} meet={} seen_collisions={}\n",
+                    "    layer {} {:?}: frontier={} factors={} kept={} discovered={} approx_hits={} dead_ends={} next={} meet={} seen_collisions={}\n",
                     layer.layer_index,
                     layer.direction,
                     layer.frontier_nodes,
                     layer.factorisations_enumerated,
                     layer.candidates_after_pruning,
                     layer.discovered_nodes,
+                    layer.approximate_other_side_hits,
+                    layer.dead_end_nodes,
                     layer.next_frontier_nodes,
                     layer.collisions_with_other_frontier,
                     layer.collisions_with_seen,
