@@ -176,6 +176,72 @@
         "panic": -3000
       },
       "tags": ["hard-positive", "telemetry-focus", "family-probe"]
+    },
+    {
+      "id": "eilers_kiming_m1_m2",
+      "description": "Eilers-Kiming 2008 p.8 triple: m1=[[5,13],[6,1]] and m2=[[5,6],[13,1]] share trace=6, det=-73 and the same Bowen-Franks group but are NOT SSE — distinguished by the ideal class invariant in Q(sqrt(316)).",
+      "a": [[5, 13], [6, 1]],
+      "b": [[5, 6], [13, 1]],
+      "config": {
+        "max_lag": 3,
+        "max_intermediate_dim": 2,
+        "max_entry": 15
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["not_equivalent"],
+      "target_outcome": "not_equivalent",
+      "points": {
+        "equivalent": -1500,
+        "not_equivalent": 150,
+        "unknown": -1500,
+        "timeout": -2500,
+        "panic": -2500
+      },
+      "tags": ["correctness", "negative"]
+    },
+    {
+      "id": "eilers_kiming_m1_m3",
+      "description": "Eilers-Kiming 2008 p.8 triple: m1=[[5,13],[6,1]] and m3=[[4,9],[9,2]] share trace=6, det=-73 and the same Bowen-Franks group but are NOT SSE — distinguished by the ideal class invariant in Q(sqrt(316)).",
+      "a": [[5, 13], [6, 1]],
+      "b": [[4, 9], [9, 2]],
+      "config": {
+        "max_lag": 3,
+        "max_intermediate_dim": 2,
+        "max_entry": 15
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["not_equivalent"],
+      "target_outcome": "not_equivalent",
+      "points": {
+        "equivalent": -1500,
+        "not_equivalent": 150,
+        "unknown": -1500,
+        "timeout": -2500,
+        "panic": -2500
+      },
+      "tags": ["correctness", "negative"]
+    },
+    {
+      "id": "brix_ruiz_k5_probe",
+      "description": "Family probe for the open Brix-Ruiz k=5 pair A_5=[[1,5],[4,1]], B_5=[[1,20],[1,1]] (tr=2, det=-19). SE but SSE status unknown for k>=4. Extends the k=3,4 probe series.",
+      "a": [[1, 5], [4, 1]],
+      "b": [[1, 20], [1, 1]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": -2000,
+        "unknown": 0,
+        "timeout": -3000,
+        "panic": -3000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "family-probe"]
     }
   ]
 }
