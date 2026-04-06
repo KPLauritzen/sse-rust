@@ -475,12 +475,12 @@ fn should_expand_forward(
         if fwd_overlap_signal.approximate_other_side_hits > 0
             && bwd_overlap_signal.approximate_other_side_hits == 0
         {
-            return false;
+            return true;
         }
         if bwd_overlap_signal.approximate_other_side_hits > 0
             && fwd_overlap_signal.approximate_other_side_hits == 0
         {
-            return true;
+            return false;
         }
 
         let fwd_overlap_ratio = fwd_overlap_signal.overlap_ratio();
@@ -488,12 +488,12 @@ fn should_expand_forward(
         if fwd_overlap_signal.approximate_other_side_hits >= 2
             && fwd_overlap_ratio > bwd_overlap_ratio * 2.0
         {
-            return false;
+            return true;
         }
         if bwd_overlap_signal.approximate_other_side_hits >= 2
             && bwd_overlap_ratio > fwd_overlap_ratio * 2.0
         {
-            return true;
+            return false;
         }
     }
 
@@ -1211,7 +1211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_should_expand_forward_chases_recent_overlap_from_other_side() {
+    fn test_should_expand_forward_prefers_recent_overlap_signal() {
         assert!(should_expand_forward(
             1500,
             900,
@@ -1219,8 +1219,8 @@ mod tests {
             10.0,
             100,
             100,
-            FrontierOverlapSignal::from_layer(1500, 0),
-            FrontierOverlapSignal::from_layer(900, 4),
+            FrontierOverlapSignal::from_layer(1500, 4),
+            FrontierOverlapSignal::from_layer(900, 0),
         ));
     }
 
