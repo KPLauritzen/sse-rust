@@ -1051,12 +1051,15 @@ fn invert_path_bijection(
     name: &str,
 ) -> Result<(usize, usize), String> {
     let fiber = fiber_index(source, target);
-    let codomain_local = codomain.positions[fiber].get(&item).copied().ok_or_else(|| {
-        format!(
-            "{} codomain item {:?} missing from fiber {}",
-            name, item, fiber
-        )
-    })?;
+    let codomain_local = codomain.positions[fiber]
+        .get(&item)
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "{} codomain item {:?} missing from fiber {}",
+                name, item, fiber
+            )
+        })?;
     let domain_local = bijection.mapping[fiber]
         .iter()
         .position(|&mapped_local| mapped_local == codomain_local)
