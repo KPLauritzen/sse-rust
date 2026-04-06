@@ -48,6 +48,15 @@ struct ApproxSignature {
     col_supports: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ShapeSignature {
+    dim: usize,
+    row_profile: Vec<u32>,
+    col_profile: Vec<u32>,
+    row_supports: Vec<u8>,
+    col_supports: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Default)]
 struct FrontierOverlapSignal {
     frontier_nodes: usize,
@@ -153,8 +162,12 @@ pub fn search_sse_2x2_with_telemetry(
     let mut bwd_overlap_signal = FrontierOverlapSignal::default();
     let mut fwd_signatures = HashSet::new();
     let mut bwd_signatures = HashSet::new();
+    let mut fwd_shape_signatures = HashSet::new();
+    let mut bwd_shape_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
+    fwd_shape_signatures.insert(shape_signature(&a_canon));
+    bwd_shape_signatures.insert(shape_signature(&b_canon));
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -197,15 +210,25 @@ pub fn search_sse_2x2_with_telemetry(
             SearchDirection::Backward
         };
 
-        let (frontier, parent, orig, signatures, other_parent, other_signatures) = if expand_forward
-        {
+        let (
+            frontier,
+            parent,
+            orig,
+            signatures,
+            shape_signatures,
+            other_parent,
+            other_signatures,
+            other_shape_signatures,
+        ) = if expand_forward {
             (
                 &mut fwd_frontier,
                 &mut fwd_parent,
                 &mut fwd_orig,
                 &mut fwd_signatures,
+                &mut fwd_shape_signatures,
                 &bwd_parent as &HashMap<_, _>,
                 &bwd_signatures as &HashSet<_>,
+                &bwd_shape_signatures as &HashSet<_>,
             )
         } else {
             (
@@ -213,8 +236,10 @@ pub fn search_sse_2x2_with_telemetry(
                 &mut bwd_parent,
                 &mut bwd_orig,
                 &mut bwd_signatures,
+                &mut bwd_shape_signatures,
                 &fwd_parent as &HashMap<_, _>,
                 &fwd_signatures as &HashSet<_>,
+                &fwd_shape_signatures as &HashSet<_>,
             )
         };
 
@@ -269,6 +294,7 @@ pub fn search_sse_2x2_with_telemetry(
             );
             orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
             signatures.insert(approx_signature(&expansion.next_canon));
+            shape_signatures.insert(shape_signature(&expansion.next_canon));
 
             // Check if the other side has already visited this node.
             if other_parent.contains_key(&expansion.next_canon) {
@@ -332,7 +358,9 @@ pub fn search_sse_2x2_with_telemetry(
                 );
             }
 
-            if other_signatures.contains(&approx_signature(&expansion.next_canon)) {
+            if other_signatures.contains(&approx_signature(&expansion.next_canon))
+                || other_shape_signatures.contains(&shape_signature(&expansion.next_canon))
+            {
                 approximate_other_side_hits += 1;
                 move_family_telemetry_mut(
                     &mut layer_move_family_telemetry,
@@ -722,6 +750,41 @@ fn approx_signature(m: &DynMatrix) -> ApproxSignature {
         row_supports,
         col_supports,
     }
+}
+
+fn shape_signature(m: &DynMatrix) -> ShapeSignature {
+    let approx = approx_signature(m);
+    ShapeSignature {
+        dim: approx.dim,
+        row_profile: normalize_profile(approx.row_sums),
+        col_profile: normalize_profile(approx.col_sums),
+        row_supports: approx.row_supports,
+        col_supports: approx.col_supports,
+    }
+}
+
+fn normalize_profile(mut profile: Vec<u32>) -> Vec<u32> {
+    let divisor = profile
+        .iter()
+        .copied()
+        .filter(|&value| value > 0)
+        .reduce(gcd_u32)
+        .unwrap_or(1);
+    if divisor > 1 {
+        for value in &mut profile {
+            *value /= divisor;
+        }
+    }
+    profile
+}
+
+fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
 }
 
 fn move_family_telemetry_mut<'a>(
@@ -1229,6 +1292,14 @@ mod tests {
         let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 2, 1, 0, 1]);
         let b = DynMatrix::new(3, 3, vec![1, 0, 2, 0, 2, 1, 1, 1, 0]);
         assert_eq!(approx_signature(&a), approx_signature(&b));
+    }
+
+    #[test]
+    fn test_shape_signature_normalizes_scaled_profiles() {
+        let a = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 2, 0, 2, 2]);
+        let b = DynMatrix::new(3, 3, vec![2, 2, 0, 2, 2, 4, 0, 4, 4]);
+        assert_eq!(shape_signature(&a), shape_signature(&b));
+        assert_ne!(approx_signature(&a), approx_signature(&b));
     }
 
     // --- Literature examples ---
