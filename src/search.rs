@@ -44,7 +44,31 @@ struct ApproxSignature {
     entry_sum: u64,
     row_sums: Vec<u32>,
     col_sums: Vec<u32>,
-    support_mask: u16,
+    row_supports: Vec<u8>,
+    col_supports: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FrontierOverlapSignal {
+    frontier_nodes: usize,
+    approximate_other_side_hits: usize,
+}
+
+impl FrontierOverlapSignal {
+    fn from_layer(frontier_nodes: usize, approximate_other_side_hits: usize) -> Self {
+        Self {
+            frontier_nodes,
+            approximate_other_side_hits,
+        }
+    }
+
+    fn is_trained(self) -> bool {
+        self.frontier_nodes >= 8
+    }
+
+    fn overlap_ratio(self) -> f64 {
+        self.approximate_other_side_hits as f64 / self.frontier_nodes.max(1) as f64
+    }
 }
 
 /// Search for a strong shift equivalence path between two 2x2 matrices.
@@ -125,6 +149,8 @@ pub fn search_sse_2x2_with_telemetry(
     let mut bwd_factorisations_per_node = 1.0f64;
     let mut fwd_cost_sample_nodes = 0usize;
     let mut bwd_cost_sample_nodes = 0usize;
+    let mut fwd_overlap_signal = FrontierOverlapSignal::default();
+    let mut bwd_overlap_signal = FrontierOverlapSignal::default();
     let mut fwd_signatures = HashSet::new();
     let mut bwd_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
@@ -162,6 +188,8 @@ pub fn search_sse_2x2_with_telemetry(
             bwd_factorisations_per_node,
             fwd_cost_sample_nodes,
             bwd_cost_sample_nodes,
+            fwd_overlap_signal,
+            bwd_overlap_signal,
         );
         let direction = if expand_forward {
             SearchDirection::Forward
@@ -329,6 +357,15 @@ pub fn search_sse_2x2_with_telemetry(
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
+        let overlap_signal = FrontierOverlapSignal::from_layer(
+            expansion_stats.frontier_nodes,
+            approximate_other_side_hits,
+        );
+        if expand_forward {
+            fwd_overlap_signal = overlap_signal;
+        } else {
+            bwd_overlap_signal = overlap_signal;
+        }
         telemetry.discovered_nodes += discovered_nodes;
         let dead_end_nodes = current_frontier
             .len()
@@ -424,12 +461,40 @@ fn should_expand_forward(
     bwd_factorisations_per_node: f64,
     fwd_cost_sample_nodes: usize,
     bwd_cost_sample_nodes: usize,
+    fwd_overlap_signal: FrontierOverlapSignal,
+    bwd_overlap_signal: FrontierOverlapSignal,
 ) -> bool {
     if fwd_frontier_len == 0 || bwd_frontier_len == 0 {
         return fwd_frontier_len <= bwd_frontier_len;
     }
     if fwd_cost_sample_nodes < 8 || bwd_cost_sample_nodes < 8 {
         return fwd_frontier_len <= bwd_frontier_len;
+    }
+
+    if fwd_overlap_signal.is_trained() && bwd_overlap_signal.is_trained() {
+        if fwd_overlap_signal.approximate_other_side_hits > 0
+            && bwd_overlap_signal.approximate_other_side_hits == 0
+        {
+            return true;
+        }
+        if bwd_overlap_signal.approximate_other_side_hits > 0
+            && fwd_overlap_signal.approximate_other_side_hits == 0
+        {
+            return false;
+        }
+
+        let fwd_overlap_ratio = fwd_overlap_signal.overlap_ratio();
+        let bwd_overlap_ratio = bwd_overlap_signal.overlap_ratio();
+        if fwd_overlap_signal.approximate_other_side_hits >= 2
+            && fwd_overlap_ratio > bwd_overlap_ratio * 2.0
+        {
+            return true;
+        }
+        if bwd_overlap_signal.approximate_other_side_hits >= 2
+            && bwd_overlap_ratio > fwd_overlap_ratio * 2.0
+        {
+            return false;
+        }
     }
 
     let fwd_estimated_work = fwd_frontier_len as f64 * fwd_factorisations_per_node.max(1.0);
@@ -627,8 +692,9 @@ fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &Frontie
 fn approx_signature(m: &DynMatrix) -> ApproxSignature {
     let mut row_sums = vec![0u32; m.rows];
     let mut col_sums = vec![0u32; m.cols];
+    let mut row_supports = vec![0u8; m.rows];
+    let mut col_supports = vec![0u8; m.cols];
     let mut entry_sum = 0u64;
-    let mut support_mask = 0u16;
 
     for row in 0..m.rows {
         for col in 0..m.cols {
@@ -637,20 +703,24 @@ fn approx_signature(m: &DynMatrix) -> ApproxSignature {
             col_sums[col] += value;
             entry_sum += value as u64;
             if value > 0 {
-                support_mask |= 1 << (row * m.cols + col);
+                row_supports[row] += 1;
+                col_supports[col] += 1;
             }
         }
     }
 
     row_sums.sort_unstable();
     col_sums.sort_unstable();
+    row_supports.sort_unstable();
+    col_supports.sort_unstable();
 
     ApproxSignature {
         dim: m.rows,
         entry_sum,
         row_sums,
         col_sums,
-        support_mask,
+        row_supports,
+        col_supports,
     }
 }
 
@@ -1111,13 +1181,54 @@ mod tests {
             103760.0 / 662.0,
             323,
             662,
+            FrontierOverlapSignal::default(),
+            FrontierOverlapSignal::default(),
         ));
     }
 
     #[test]
     fn test_should_expand_forward_falls_back_to_smaller_frontier_when_untrained() {
-        assert!(should_expand_forward(3, 5, 100.0, 1.0, 0, 0));
-        assert!(!should_expand_forward(7, 2, 1.0, 100.0, 0, 0));
+        assert!(should_expand_forward(
+            3,
+            5,
+            100.0,
+            1.0,
+            0,
+            0,
+            FrontierOverlapSignal::default(),
+            FrontierOverlapSignal::default(),
+        ));
+        assert!(!should_expand_forward(
+            7,
+            2,
+            1.0,
+            100.0,
+            0,
+            0,
+            FrontierOverlapSignal::default(),
+            FrontierOverlapSignal::default(),
+        ));
+    }
+
+    #[test]
+    fn test_should_expand_forward_prefers_recent_overlap_signal() {
+        assert!(should_expand_forward(
+            1500,
+            900,
+            200.0,
+            10.0,
+            100,
+            100,
+            FrontierOverlapSignal::from_layer(1500, 4),
+            FrontierOverlapSignal::from_layer(900, 0),
+        ));
+    }
+
+    #[test]
+    fn test_approx_signature_ignores_exact_support_layout() {
+        let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 2, 1, 0, 1]);
+        let b = DynMatrix::new(3, 3, vec![1, 0, 2, 0, 2, 1, 1, 1, 0]);
+        assert_eq!(approx_signature(&a), approx_signature(&b));
     }
 
     // --- Literature examples ---
