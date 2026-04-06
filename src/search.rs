@@ -48,14 +48,6 @@ struct ApproxSignature {
     col_supports: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct HistogramSignature {
-    dim: usize,
-    row_supports: Vec<u8>,
-    col_supports: Vec<u8>,
-    positive_histogram: [u8; 4],
-}
-
 #[derive(Clone, Copy, Default)]
 struct FrontierOverlapSignal {
     frontier_nodes: usize,
@@ -161,12 +153,8 @@ pub fn search_sse_2x2_with_telemetry(
     let mut bwd_overlap_signal = FrontierOverlapSignal::default();
     let mut fwd_signatures = HashSet::new();
     let mut bwd_signatures = HashSet::new();
-    let mut fwd_histogram_signatures = HashSet::new();
-    let mut bwd_histogram_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
-    fwd_histogram_signatures.insert(histogram_signature(&a_canon));
-    bwd_histogram_signatures.insert(histogram_signature(&b_canon));
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -209,25 +197,15 @@ pub fn search_sse_2x2_with_telemetry(
             SearchDirection::Backward
         };
 
-        let (
-            frontier,
-            parent,
-            orig,
-            signatures,
-            histogram_signatures,
-            other_parent,
-            other_signatures,
-            other_histogram_signatures,
-        ) = if expand_forward {
+        let (frontier, parent, orig, signatures, other_parent, other_signatures) = if expand_forward
+        {
             (
                 &mut fwd_frontier,
                 &mut fwd_parent,
                 &mut fwd_orig,
                 &mut fwd_signatures,
-                &mut fwd_histogram_signatures,
                 &bwd_parent as &HashMap<_, _>,
                 &bwd_signatures as &HashSet<_>,
-                &bwd_histogram_signatures as &HashSet<_>,
             )
         } else {
             (
@@ -235,10 +213,8 @@ pub fn search_sse_2x2_with_telemetry(
                 &mut bwd_parent,
                 &mut bwd_orig,
                 &mut bwd_signatures,
-                &mut bwd_histogram_signatures,
                 &fwd_parent as &HashMap<_, _>,
                 &fwd_signatures as &HashSet<_>,
-                &fwd_histogram_signatures as &HashSet<_>,
             )
         };
 
@@ -293,7 +269,6 @@ pub fn search_sse_2x2_with_telemetry(
             );
             orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
             signatures.insert(approx_signature(&expansion.next_canon));
-            histogram_signatures.insert(histogram_signature(&expansion.next_canon));
 
             // Check if the other side has already visited this node.
             if other_parent.contains_key(&expansion.next_canon) {
@@ -357,9 +332,7 @@ pub fn search_sse_2x2_with_telemetry(
                 );
             }
 
-            if other_signatures.contains(&approx_signature(&expansion.next_canon))
-                || other_histogram_signatures.contains(&histogram_signature(&expansion.next_canon))
-            {
+            if other_signatures.contains(&approx_signature(&expansion.next_canon)) {
                 approximate_other_side_hits += 1;
                 move_family_telemetry_mut(
                     &mut layer_move_family_telemetry,
@@ -748,33 +721,6 @@ fn approx_signature(m: &DynMatrix) -> ApproxSignature {
         col_sums,
         row_supports,
         col_supports,
-    }
-}
-
-fn histogram_signature(m: &DynMatrix) -> HistogramSignature {
-    let approx = approx_signature(m);
-    let mut positive_histogram = [0u8; 4];
-    for row in 0..m.rows {
-        for col in 0..m.cols {
-            let value = m.get(row, col);
-            if value == 0 {
-                continue;
-            }
-            let bucket = match value {
-                1 => 0,
-                2 => 1,
-                3 => 2,
-                _ => 3,
-            };
-            positive_histogram[bucket] = positive_histogram[bucket].saturating_add(1);
-        }
-    }
-
-    HistogramSignature {
-        dim: approx.dim,
-        row_supports: approx.row_supports,
-        col_supports: approx.col_supports,
-        positive_histogram,
     }
 }
 
@@ -1283,14 +1229,6 @@ mod tests {
         let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 2, 1, 0, 1]);
         let b = DynMatrix::new(3, 3, vec![1, 0, 2, 0, 2, 1, 1, 1, 0]);
         assert_eq!(approx_signature(&a), approx_signature(&b));
-    }
-
-    #[test]
-    fn test_histogram_signature_ignores_exact_row_col_totals() {
-        let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 3, 4, 2, 0, 0]);
-        let b = DynMatrix::new(3, 3, vec![4, 0, 1, 0, 2, 0, 2, 0, 3]);
-        assert_eq!(histogram_signature(&a), histogram_signature(&b));
-        assert_ne!(approx_signature(&a), approx_signature(&b));
     }
 
     // --- Literature examples ---
