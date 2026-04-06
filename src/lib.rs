@@ -1,6 +1,5 @@
 pub mod aligned;
 pub mod balanced;
-pub mod balanced_search;
 pub mod conjugacy;
 pub mod factorisation;
 pub mod graph_moves;

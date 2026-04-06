@@ -141,6 +141,3 @@
 
 - `071f236` Added histogram-based overlap signatures.
   Failed. The signature was too coarse, produced misleading overlap pressure, and collapsed the hard probes a layer earlier.
-
-- Added bidirectional balanced SSE BFS (outsplits, insplits, amalgamations) with full path reconstruction.
-  Kept as infrastructure. Exhaustive search at dimension ≤ 4 confirms no balanced SSE meeting point exists at that dimension for brix_ruiz_k3. The dim-4 graph has 320 canonical 4x4 nodes from A-side and closes under amalgamation+re-outsplit in ~3s. Dim 5+ is computationally infeasible within the 4s harness timeout. Not integrated as a fallback to avoid runtime regression.
