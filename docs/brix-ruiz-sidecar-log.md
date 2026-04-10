@@ -196,3 +196,90 @@ Next reasonable experiments:
 - add a graph-only search mode that disables generic factorisation and conjugation moves, then try iterative bounds such as `max_dim = 5`, lag `8..12`
 - if the goal is to reproduce Baker's displayed lag-7 witness rather than a graph-only proof, add targeted factorisation families for the missing dimensions instead of general bounded `4x4` factorisation
 - avoid naive full `4x4` factorisation: enumerating all `4x4` factor candidates with entries `0..=5` is about `6^16`, which is not a viable BFS move family
+
+## Graph-only waypoint search
+
+Follow-up:
+
+- added [`src/bin/find_lind_marcus_graph_waypoints.rs`](../src/bin/find_lind_marcus_graph_waypoints.rs), a bounded bidirectional graph-only waypoint search
+- the move set is only one-step out-splits, one-step in-splits, out-amalgamations, and in-amalgamations
+- the first version targeted only the three Baker waypoint transitions that were missing from the main one-step generator, rather than widening the full `A -> B` search
+- the current version searches all seven consecutive Baker waypoints and prints the reconstructed graph-only subpaths
+
+Outcome with `max_dim = 5`, `max_states = 1_000_000`:
+
+- `A1 -> A2` is found at graph-only depth `5`
+- `A4 -> A5` is found at graph-only depth `6`
+- `A5 -> A6` is found at graph-only depth `3`
+- when all seven Baker waypoint transitions are required to use only graph moves, the tool prints a full path of `22` graph moves, up to permutation of vertices
+
+This is the key result: the missing Baker elementary SSE steps are not one-step graph moves, but they are reachable by short graph-only paths if the waypoint search is allowed to pass through `5x5` matrices.
+
+The first estimate of `18` graph moves only replaced the three missing Baker elementary steps and kept the other covered steps as one-step non-graph moves. Requiring every step to be an in/out split or amalgamation gives the printed `22`-move path:
+
+- Baker step `1` becomes `1` graph move
+- replace Baker step `2` by `5` graph moves
+- Baker step `3` becomes `2` graph moves
+- Baker step `4` becomes `2` graph moves
+- Baker step `5` becomes `6` graph moves
+- Baker step `6` becomes `3` graph moves
+- Baker step `7` becomes `3` graph moves
+
+Printed path from `cargo run --release --bin find_lind_marcus_graph_waypoints -- --max-depth 6 --max-dim 5 --max-states 1000000`:
+
+```text
+1. outsplit: 2x2 [1, 2, 3, 1] -> 3x3 [0, 0, 1, 1, 1, 2, 2, 2, 1]
+2. insplit: 3x3 [0, 0, 1, 1, 1, 2, 2, 2, 1] -> 4x4 [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 2, 1, 1, 2, 1]
+3. insplit: 4x4 [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 2, 1, 1, 2, 1] -> 5x5 [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 2, 1, 0, 1, 1, 2, 1, 0]
+4. out_amalgamation: 5x5 [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 2, 1, 0, 1, 1, 2, 1, 0] -> 4x4 [0, 0, 0, 1, 0, 1, 1, 1, 1, 2, 1, 1, 1, 2, 1, 0]
+5. insplit: 4x4 [0, 0, 0, 1, 0, 1, 1, 1, 1, 2, 1, 1, 1, 2, 1, 0] -> 5x5 [0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 2, 1, 0, 1, 1, 2, 1, 0, 1, 1, 2, 1, 0, 0]
+6. out_amalgamation: 5x5 [0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 2, 1, 0, 1, 1, 2, 1, 0, 1, 1, 2, 1, 0, 0] -> 4x4 [0, 0, 1, 2, 1, 0, 1, 2, 2, 0, 1, 2, 1, 1, 0, 1]
+7. insplit: 4x4 [0, 0, 1, 2, 1, 0, 1, 2, 2, 0, 1, 2, 1, 1, 0, 1] -> 5x5 [0, 0, 0, 1, 2, 1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 2, 0, 2, 1, 0, 1, 1, 1, 0, 0]
+8. out_amalgamation: 5x5 [0, 0, 0, 1, 2, 1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 2, 0, 2, 1, 0, 1, 1, 1, 0, 0] -> 4x4 [0, 0, 1, 1, 0, 1, 0, 2, 1, 1, 0, 1, 2, 1, 1, 1]
+9. outsplit: 4x4 [0, 0, 1, 1, 0, 1, 0, 2, 1, 1, 0, 1, 2, 1, 1, 1] -> 5x5 [0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 2, 2, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0]
+10. in_amalgamation: 5x5 [0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 2, 2, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0] -> 4x4 [0, 0, 1, 1, 2, 1, 0, 2, 1, 0, 0, 2, 1, 1, 1, 1]
+11. insplit: 4x4 [0, 0, 1, 1, 2, 1, 0, 2, 1, 0, 0, 2, 1, 1, 1, 1] -> 5x5 [0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 2, 2, 1, 0, 0, 1, 0, 1, 1, 1, 1, 2, 0, 0, 0]
+12. out_amalgamation: 5x5 [0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 2, 2, 1, 0, 0, 1, 0, 1, 1, 1, 1, 2, 0, 0, 0] -> 4x4 [0, 0, 0, 1, 1, 0, 1, 1, 2, 2, 1, 0, 2, 2, 1, 1]
+13. insplit: 4x4 [0, 0, 0, 1, 1, 0, 1, 1, 2, 2, 1, 0, 2, 2, 1, 1] -> 5x5 [0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 2, 1, 1, 1, 0, 2, 1, 1, 1, 1]
+14. out_amalgamation: 5x5 [0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 2, 1, 1, 1, 0, 2, 1, 1, 1, 1] -> 4x4 [0, 0, 0, 1, 2, 0, 2, 2, 2, 1, 1, 0, 2, 1, 1, 1]
+15. insplit: 4x4 [0, 0, 0, 1, 2, 0, 2, 2, 2, 1, 1, 0, 2, 1, 1, 1] -> 5x5 [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 2, 2, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1]
+16. out_amalgamation: 5x5 [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 2, 2, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1] -> 4x4 [0, 0, 0, 1, 1, 1, 1, 0, 2, 2, 0, 3, 1, 1, 1, 1]
+17. outsplit: 4x4 [0, 0, 0, 1, 1, 1, 1, 0, 2, 2, 0, 3, 1, 1, 1, 1] -> 5x5 [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 2, 2, 0, 3, 3, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0]
+18. in_amalgamation: 5x5 [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 2, 2, 0, 3, 3, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0] -> 4x4 [0, 0, 1, 1, 2, 0, 3, 5, 0, 0, 1, 1, 1, 1, 0, 1]
+19. in_amalgamation: 4x4 [0, 0, 1, 1, 2, 0, 3, 5, 0, 0, 1, 1, 1, 1, 0, 1] -> 3x3 [0, 5, 5, 0, 1, 1, 1, 1, 1]
+20. out_amalgamation: 3x3 [0, 5, 5, 0, 1, 1, 1, 1, 1] -> 2x2 [0, 5, 1, 2]
+21. insplit: 2x2 [0, 5, 1, 2] -> 3x3 [0, 0, 5, 1, 1, 1, 1, 1, 1]
+22. out_amalgamation: 3x3 [0, 0, 5, 1, 1, 1, 1, 1, 1] -> 2x2 [1, 1, 6, 1]
+```
+
+This does not mean full graph-only BFS with `max_dim = 5`, `max_lag = 22` is immediately practical. The waypoint searches are much smaller because their targets are fixed. The practical next step is to expose waypoint/proposal guidance or reconstruct the graph-only subpaths inside the main solver, not to blindly widen the global frontier.
+
+## Blind graph-only endpoint search
+
+Follow-up:
+
+- added [`src/bin/find_brix_ruiz_graph_path.rs`](../src/bin/find_brix_ruiz_graph_path.rs), a blind bidirectional graph-only endpoint search from Brix-Ruiz `k = 3` `A` to `B`
+- extracted the canonical graph successor move set into [`src/graph_moves.rs`](../src/graph_moves.rs), so the blind endpoint search and Lind-Marcus waypoint search use the same graph moves
+- the blind search uses all one-step out-splits, one-step in-splits, out-amalgamations, and in-amalgamations, including from `2x2` endpoints
+- added runtime guardrails: `--max-states`, `--max-candidates`, and `--max-seconds`; external shell timeouts are still useful because a single large successor enumeration cannot be interrupted until it returns
+
+Probe:
+
+```text
+timeout 35s target/release/find_brix_ruiz_graph_path \
+  --max-depth 22 --max-dim 5 --max-entry 6 \
+  --max-states 100000 --max-candidates 2000000 --max-seconds 30
+```
+
+Outcome:
+
+- no endpoint meet before the candidate cap
+- candidate cap hit at `2,012,826` generated candidates
+- visited states: `11,950`
+- elapsed time: `19.893s`
+- the cap hit during backward depth `2`; forward depth `2` alone generated `1,852,176` candidates and discovered `10,489` new canonical states
+
+Interpretation:
+
+- this confirms that the waypoint result is not representative of blind endpoint BFS cost
+- `max_dim = 5` graph-only search is viable as a capped diagnostic, but a full blind `max_depth = 22` run is not the next sensible step without stronger proposal guidance or additional pruning

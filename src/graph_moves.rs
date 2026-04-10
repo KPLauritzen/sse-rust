@@ -15,6 +15,18 @@ pub struct OutsplitWitness {
 
 pub type OutsplitWitness2x2To3x3 = OutsplitWitness;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphMoveSuccessor {
+    pub family: &'static str,
+    pub matrix: DynMatrix,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphMoveSuccessors {
+    pub candidates: usize,
+    pub nodes: Vec<GraphMoveSuccessor>,
+}
+
 /// Two successive out-splits starting from a 2x2 matrix.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TwoStepOutsplitChain2x2 {
@@ -125,6 +137,64 @@ pub fn enumerate_one_step_split_refinements(a: &DynMatrix) -> Vec<DynMatrix> {
     }
 
     refinements
+}
+
+/// Enumerate canonical successors reached by one graph split or amalgamation.
+pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> GraphMoveSuccessors {
+    assert!(current.is_square());
+
+    let mut candidates = 0usize;
+    let mut seen = HashSet::new();
+    let mut nodes = Vec::new();
+
+    if current.rows < max_dim {
+        for witness in enumerate_one_step_outsplits(current) {
+            candidates += 1;
+            push_canonical_graph_successor("outsplit", witness.outsplit, &mut seen, &mut nodes);
+        }
+        for witness in enumerate_one_step_insplits(current) {
+            candidates += 1;
+            push_canonical_graph_successor("insplit", witness.outsplit, &mut seen, &mut nodes);
+        }
+    }
+
+    if current.rows > 2 {
+        for witness in enumerate_out_amalgamations(current) {
+            candidates += 1;
+            push_canonical_graph_successor(
+                "out_amalgamation",
+                witness.outsplit,
+                &mut seen,
+                &mut nodes,
+            );
+        }
+        for witness in enumerate_in_amalgamations(current) {
+            candidates += 1;
+            push_canonical_graph_successor(
+                "in_amalgamation",
+                witness.outsplit,
+                &mut seen,
+                &mut nodes,
+            );
+        }
+    }
+
+    GraphMoveSuccessors { candidates, nodes }
+}
+
+fn push_canonical_graph_successor(
+    family: &'static str,
+    matrix: DynMatrix,
+    seen: &mut HashSet<DynMatrix>,
+    nodes: &mut Vec<GraphMoveSuccessor>,
+) {
+    let canon = matrix.canonical_perm();
+    if seen.insert(canon.clone()) {
+        nodes.push(GraphMoveSuccessor {
+            family,
+            matrix: canon,
+        });
+    }
 }
 
 /// Search for a common one-step 3x3 out-split refinement up to permutation.
