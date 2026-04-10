@@ -391,6 +391,96 @@ fn recurse_outsplit_rows(
     }
 }
 
+/// Enumerate all one-step out-amalgamations of a square matrix.
+///
+/// An out-amalgamation merges two states whose columns are identical
+/// ("same past"). This is the reverse of an out-split. For each pair of
+/// identical columns (p, q), the merged matrix has dimension m-1.
+///
+/// The SSE step satisfies C = E·D and result = D·E, where D is a 0-1
+/// division matrix.
+pub fn enumerate_out_amalgamations(c: &DynMatrix) -> Vec<OutsplitWitness> {
+    assert!(c.is_square());
+    let m = c.rows;
+    if m <= 1 {
+        return vec![];
+    }
+
+    let mut witnesses = Vec::new();
+
+    for p in 0..m {
+        for q in (p + 1)..m {
+            // Check if columns p and q are identical.
+            let cols_equal = (0..m).all(|row| c.get(row, p) == c.get(row, q));
+            if !cols_equal {
+                continue;
+            }
+
+            let n = m - 1;
+
+            // Build mapping: old state k -> new state f[k].
+            // State q merges into state p; states after q shift down by 1.
+            let f: Vec<usize> = (0..m)
+                .map(|k| {
+                    if k < q {
+                        k
+                    } else if k == q {
+                        p
+                    } else {
+                        k - 1
+                    }
+                })
+                .collect();
+
+            // D (n×m): division matrix, D[f[k], k] = 1.
+            let mut d_data = vec![0u32; n * m];
+            for k in 0..m {
+                d_data[f[k] * m + k] = 1;
+            }
+            let division = DynMatrix::new(n, m, d_data);
+
+            // E (m×n): E[i, g] = C[i, representative(g)].
+            // Representative: for group g, pick the first old state mapping to g.
+            let mut e_data = vec![0u32; m * n];
+            for i in 0..m {
+                for g in 0..n {
+                    let repr = if g < q { g } else { g + 1 };
+                    e_data[i * n + g] = c.get(i, repr);
+                }
+            }
+            let edge = DynMatrix::new(m, n, e_data);
+
+            debug_assert_eq!(edge.mul(&division), *c);
+
+            let result = division.mul(&edge);
+
+            witnesses.push(OutsplitWitness {
+                division,
+                edge,
+                outsplit: result,
+            });
+        }
+    }
+
+    witnesses
+}
+
+/// Enumerate all one-step in-amalgamations of a square matrix.
+///
+/// An in-amalgamation merges two states whose rows are identical
+/// ("same future"). This is the reverse of an in-split.
+/// Implemented by transposing, out-amalgamating, and transposing back.
+pub fn enumerate_in_amalgamations(c: &DynMatrix) -> Vec<OutsplitWitness> {
+    enumerate_out_amalgamations(&c.transpose())
+        .into_iter()
+        .map(|witness| OutsplitWitness {
+            division: witness.division.transpose(),
+            edge: witness.edge.transpose(),
+            outsplit: witness.outsplit.transpose(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,5 +576,100 @@ mod tests {
         let neighbors = enumerate_3x3_outsplit_zigzag_neighbors(&first[0].outsplit, 8);
         assert!(!neighbors.is_empty());
         assert!(neighbors.iter().all(|m| m.rows == 3 && m.cols == 3));
+    }
+
+    #[test]
+    fn test_out_amalgamation_roundtrips_same_past_outsplit() {
+        // A same-past outsplit produces duplicate columns, so its output
+        // should be out-amalgamable back to the original matrix.
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let outsplits = enumerate_same_past_outsplits_2x2_to_3x3(&a);
+        assert!(!outsplits.is_empty());
+
+        for outsplit_witness in &outsplits {
+            let c = &outsplit_witness.outsplit;
+            assert!(has_duplicate_columns(c));
+
+            let amalgamations = enumerate_out_amalgamations(c);
+            assert!(
+                !amalgamations.is_empty(),
+                "Same-past outsplit should be out-amalgamable"
+            );
+
+            // At least one amalgamation should recover the original matrix
+            // (up to permutation).
+            let a_dyn = DynMatrix::from_sq(&a);
+            let a_canon = a_dyn.canonical_perm();
+            let recovered = amalgamations
+                .iter()
+                .any(|w| w.outsplit.canonical_perm() == a_canon);
+            assert!(recovered, "Out-amalgamation should recover original matrix");
+        }
+    }
+
+    #[test]
+    fn test_in_amalgamation_roundtrips_same_future_insplit() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let insplits = enumerate_same_future_insplits_2x2_to_3x3(&a);
+        assert!(!insplits.is_empty());
+
+        for insplit_witness in &insplits {
+            let c = &insplit_witness.outsplit;
+            assert!(has_duplicate_rows(c));
+
+            let amalgamations = enumerate_in_amalgamations(c);
+            assert!(
+                !amalgamations.is_empty(),
+                "Same-future insplit should be in-amalgamable"
+            );
+
+            let a_dyn = DynMatrix::from_sq(&a);
+            let a_canon = a_dyn.canonical_perm();
+            let recovered = amalgamations
+                .iter()
+                .any(|w| w.outsplit.canonical_perm() == a_canon);
+            assert!(recovered, "In-amalgamation should recover original matrix");
+        }
+    }
+
+    #[test]
+    fn test_out_amalgamation_of_4x4_outsplit() {
+        // Out-split a 3x3 to 4x4, then out-amalgamate back.
+        let a3 = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
+        let outsplits = enumerate_same_past_outsplits(&a3);
+        if outsplits.is_empty() {
+            return; // skip if no same-past outsplits
+        }
+
+        for witness in &outsplits {
+            let c4 = &witness.outsplit;
+            assert_eq!(c4.rows, 4);
+            let amalgamations = enumerate_out_amalgamations(c4);
+            assert!(!amalgamations.is_empty());
+
+            let a3_canon = a3.canonical_perm();
+            let recovered = amalgamations
+                .iter()
+                .any(|w| w.outsplit.canonical_perm() == a3_canon);
+            assert!(recovered, "4x4 out-amalgamation should recover the 3x3");
+        }
+    }
+
+    #[test]
+    fn test_amalgamation_sse_step_valid() {
+        // Verify the SSE step: C = E·D and result = D·E.
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let outsplits = enumerate_same_past_outsplits_2x2_to_3x3(&a);
+        for outsplit_w in &outsplits {
+            let c = &outsplit_w.outsplit;
+            for amal_w in &enumerate_out_amalgamations(c) {
+                assert_eq!(amal_w.edge.mul(&amal_w.division), *c, "C should equal E·D");
+                assert_eq!(
+                    amal_w.division.mul(&amal_w.edge),
+                    amal_w.outsplit,
+                    "result should equal D·E"
+                );
+            }
+        }
     }
 }

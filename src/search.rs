@@ -6,7 +6,9 @@ use crate::aligned::{
 };
 use crate::factorisation::visit_all_factorisations_with_family;
 use crate::graph_moves::{
-    enumerate_same_future_insplits_2x2_to_3x3, enumerate_same_past_outsplits_2x2_to_3x3,
+    enumerate_in_amalgamations, enumerate_out_amalgamations, enumerate_same_future_insplits,
+    enumerate_same_future_insplits_2x2_to_3x3, enumerate_same_past_outsplits,
+    enumerate_same_past_outsplits_2x2_to_3x3,
 };
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
@@ -594,6 +596,129 @@ fn expand_frontier_layer(
             }
         }
 
+        let dim = current.rows;
+
+        // Dimension-generic outsplits (dim -> dim+1) for nodes that can expand.
+        // For 2×2 nodes, the same-past/same-future splits above already handle
+        // the restricted variants; here we add ALL outsplits/insplits for dim >= 3.
+        if dim >= 3 && dim < max_intermediate_dim {
+            for witness in enumerate_one_step_outsplits(current) {
+                let family = "outsplit";
+                move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
+                    .candidates_generated += 1;
+                stats.candidates_generated += 1;
+                let next = witness.outsplit;
+                if next.rows > max_intermediate_dim {
+                    stats.pruned_by_size += 1;
+                    continue;
+                }
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step: EsseStep {
+                        u: witness.division,
+                        v: witness.edge,
+                    },
+                    move_family: family,
+                });
+            }
+            for witness in enumerate_one_step_insplits(current) {
+                let family = "insplit";
+                move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
+                    .candidates_generated += 1;
+                stats.candidates_generated += 1;
+                let next = witness.outsplit;
+                if next.rows > max_intermediate_dim {
+                    stats.pruned_by_size += 1;
+                    continue;
+                }
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step: EsseStep {
+                        u: witness.edge,
+                        v: witness.division,
+                    },
+                    move_family: family,
+                });
+            }
+        }
+
+        // Dimension-generic amalgamations (dim -> dim-1) for nodes that can contract.
+        if dim > 2 {
+            for witness in enumerate_out_amalgamations(current) {
+                let family = "out_amalgamation";
+                move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
+                    .candidates_generated += 1;
+                stats.candidates_generated += 1;
+                let next = witness.outsplit.clone();
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                // SSE step: C = E·D, result = D·E. So U = E, V = D.
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step: EsseStep {
+                        u: witness.edge,
+                        v: witness.division,
+                    },
+                    move_family: family,
+                });
+            }
+            for witness in enumerate_in_amalgamations(current) {
+                let family = "in_amalgamation";
+                move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
+                    .candidates_generated += 1;
+                stats.candidates_generated += 1;
+                let next = witness.outsplit.clone();
+                if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    stats.pruned_by_spectrum += 1;
+                    continue;
+                }
+                let next_canon = next.canonical_perm();
+                if !seen_successors.insert(next_canon.clone()) {
+                    continue;
+                }
+                // In-amalgamation: C = D^T · E^T, result = E^T · D^T.
+                // So U = D (transposed division), V = E (transposed edge).
+                expansions.push(FrontierExpansion {
+                    parent_canon: current_canon.clone(),
+                    next_canon,
+                    next_orig: next,
+                    step: EsseStep {
+                        u: witness.division,
+                        v: witness.edge,
+                    },
+                    move_family: family,
+                });
+            }
+        }
+
         visit_all_factorisations_with_family(
             current,
             max_intermediate_dim,
@@ -787,8 +912,13 @@ fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) 
             vu.det_3x3() == 0 && vu.principal_minor_sum_3x3() == source_det
         }
         _ => {
-            // For larger matrices, trace check only (still useful).
-            true
+            // For k×k intermediates from a 2×2 source, eigenvalues are
+            // {λ₁, λ₂, 0, ..., 0}. Use the power-trace identity:
+            // tr(M²) = λ₁² + λ₂² = trace² - 2·det.
+            let expected_tr2 = (source_trace as i64) * (source_trace as i64) - 2 * source_det;
+            let m2 = vu.mul(vu);
+            let actual_tr2 = m2.trace() as i64;
+            actual_tr2 == expected_tr2
         }
     }
 }

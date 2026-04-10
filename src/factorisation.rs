@@ -1317,6 +1317,143 @@ fn enumerate_sq3_from_row0(
 /// For k×k input:
 ///   - k=2, m=2: square factorisations
 ///   - k=2, m=3: rectangular 2×3 × 3×2
+// --- Dimension-generic elementary conjugations ---
+
+/// Dimension-generic elementary conjugations: P = I + k·e_i·e_j^T.
+///
+/// Works for any n×n DynMatrix. For each ordered pair (i,j) with i≠j,
+/// tries both row-operation (U=P, V=P⁻¹C) and column-operation (U=CP⁻¹, V=P)
+/// directions.
+fn visit_elementary_conjugations_generic<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert!(c.is_square());
+    let n = c.rows;
+    let me = max_entry as i64;
+
+    // Load matrix into i64 vec-of-vecs for arithmetic.
+    let cm: Vec<Vec<i64>> = (0..n)
+        .map(|i| (0..n).map(|j| c.get(i, j) as i64).collect())
+        .collect();
+
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+
+            // --- Row-operation direction: U = P = I + k*e_i*e_j^T ---
+            // V = P^{-1}*C = C with row_i -= k*row_j.
+            // Nonneg iff row_i(C) >= k*row_j(C) entrywise.
+            let max_k_row = if cm[j].iter().all(|&v| v == 0) {
+                0
+            } else {
+                let mut mk = i64::MAX;
+                for col in 0..n {
+                    if cm[j][col] > 0 {
+                        mk = mk.min(cm[i][col] / cm[j][col]);
+                    }
+                }
+                mk.min(me)
+            };
+
+            for k in 1..=max_k_row {
+                if k > me {
+                    break;
+                }
+                // V = C with row_i -= k*row_j
+                let mut v_data = Vec::with_capacity(n * n);
+                for r in 0..n {
+                    for col in 0..n {
+                        let val = if r == i {
+                            cm[i][col] - k * cm[j][col]
+                        } else {
+                            cm[r][col]
+                        };
+                        if val < 0 || val > me {
+                            v_data.clear();
+                            break;
+                        }
+                        v_data.push(val as u32);
+                    }
+                    if v_data.len() != (r + 1) * n {
+                        break;
+                    }
+                }
+                if v_data.len() != n * n {
+                    continue;
+                }
+
+                // U = P = I + k*e_i*e_j^T
+                let mut u_data = vec![0u32; n * n];
+                for d in 0..n {
+                    u_data[d * n + d] = 1;
+                }
+                u_data[i * n + j] = k as u32;
+
+                visit(DynMatrix::new(n, n, u_data), DynMatrix::new(n, n, v_data));
+            }
+
+            // --- Column-operation direction: V = P = I + k*e_i*e_j^T ---
+            // U = C*P^{-1} = C with col_j -= k*col_i.
+            // Nonneg iff col_j(C) >= k*col_i(C) entrywise.
+            let max_k_col = {
+                let mut mk = i64::MAX;
+                let mut any_pos = false;
+                for row in 0..n {
+                    if cm[row][i] > 0 {
+                        any_pos = true;
+                        mk = mk.min(cm[row][j] / cm[row][i]);
+                    }
+                }
+                if !any_pos {
+                    0
+                } else {
+                    mk.min(me)
+                }
+            };
+
+            for k in 1..=max_k_col {
+                if k > me {
+                    break;
+                }
+                // U = C with col_j -= k*col_i
+                let mut u_data = Vec::with_capacity(n * n);
+                for row in 0..n {
+                    for col in 0..n {
+                        let val = if col == j {
+                            cm[row][j] - k * cm[row][i]
+                        } else {
+                            cm[row][col]
+                        };
+                        if val < 0 || val > me {
+                            u_data.clear();
+                            break;
+                        }
+                        u_data.push(val as u32);
+                    }
+                    if u_data.len() != (row + 1) * n {
+                        break;
+                    }
+                }
+                if u_data.len() != n * n {
+                    continue;
+                }
+
+                // V = P = I + k*e_i*e_j^T
+                let mut v_data = vec![0u32; n * n];
+                for d in 0..n {
+                    v_data[d * n + d] = 1;
+                }
+                v_data[i * n + j] = k as u32;
+
+                visit(DynMatrix::new(n, n, u_data), DynMatrix::new(n, n, v_data));
+            }
+        }
+    }
+}
+
 ///   - k=3, m=2: rectangular 3×2 × 2×3 (the return trip)
 ///   - k=3, m=3: square 3×3 factorisations
 pub fn enumerate_all_factorisations(
@@ -1395,6 +1532,14 @@ pub fn visit_all_factorisations_with_family<F>(
             });
             visit_convergent_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
                 visit("convergent_shear_conjugation_3x3", u, v);
+            });
+        }
+    } else if k >= 4 {
+        // For dimensions ≥ 4: elementary conjugations (same-dimension moves).
+        // These use the dimension-generic implementation.
+        if max_intermediate_dim >= k {
+            visit_elementary_conjugations_generic(a, max_entry, &mut |u, v| {
+                visit("elementary_conjugation", u, v);
             });
         }
     }
