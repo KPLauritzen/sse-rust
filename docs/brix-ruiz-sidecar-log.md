@@ -147,3 +147,52 @@ The sidecar evidence is now consistent across every small structured move family
 - two-step mixed out/in refinements fail
 
 That is enough reason to stop widening the split-sidecar graph blindly for now and move back to the main solver, using this structure as guidance for a search heuristic or pruning signal.
+
+## Lind-Marcus/Baker lag-7 witness
+
+New reference:
+
+- [references/Lind-Marcus2021.pdf](../references/Lind-Marcus2021.pdf), Example 7.3.12, gives K. Baker's explicit strong shift equivalence of lag `7` between
+  `A = [[1, 3], [2, 1]]` and `B = [[1, 6], [1, 1]]`.
+
+Useful bounds from the displayed witness:
+
+- the largest factor entry is `5`, occurring in the final `3x3 -> 2x2` step
+- the largest intermediate matrix size is `4x4`
+- therefore `max_lag = 7`, `max_intermediate_dim = 4`, `max_entry = 5` is already enough to contain the displayed elementary SSE witness if the move generator can generate the relevant factorisations
+
+Main-solver probes with `max_intermediate_dim = 4`:
+
+- `max_lag = 5`, `max_entry = 6`: `unknown`, elapsed `10.939s`
+- `max_lag = 6`, `max_entry = 6`: `unknown`, elapsed `21.129s`
+- `max_lag = 7`, `max_entry = 6`: `unknown`, elapsed `50.812s`
+- `max_lag = 7`, `max_entry = 5`: `unknown`, elapsed `19.630s`
+
+The `max_entry = 5` failure is the important result: the search is not missing the path because the entry bound is too small.
+
+A diagnostic binary now exists at [`src/bin/check_lind_marcus_path.rs`](../src/bin/check_lind_marcus_path.rs). It encodes the seven displayed `(U, V)` factors, checks each `UV -> VU` transition, and asks whether the current one-step generator can produce each transition up to permutation with `max_intermediate_dim = 4`, `max_entry = 5`.
+
+Diagnostic output:
+
+- step `1`, `2x2 -> 3x3`: covered by `rectangular_factorisation_2x3` and `same_past_outsplit_2x2_to_3x3`
+- step `2`, `3x3 -> 4x4`: missing
+- step `3`, `4x4 -> 4x4`: covered by `elementary_conjugation`
+- step `4`, `4x4 -> 4x4`: covered by `elementary_conjugation`
+- step `5`, `4x4 -> 4x4`: missing
+- step `6`, `4x4 -> 3x3`: missing
+- step `7`, `3x3 -> 2x2`: covered by `rectangular_factorisation_3x3_to_2`
+
+Interpretation:
+
+- the missing steps are elementary SSE factorisations in the Baker witness, but they are not one-step graph state splits or one-step graph state amalgamations in the matrix sense currently implemented
+- step `2` is not a one-step in/out split: the target `4x4` matrix has no duplicate row or duplicate column pair, even up to permutation
+- step `5` is same-size, so it is not a one-step state split or amalgamation
+- step `6` contracts from `4x4` to `3x3`, but the displayed factor is not a division/amalgamation matrix; one row has two `1`s
+- this does not contradict the Decomposition Theorem: an elementary SSE factorisation can require a longer decomposition into graph splitting and amalgamation codes
+
+Next reasonable experiments:
+
+- search for graph-only paths between the missing waypoints `A1 -> A2`, `A4 -> A5`, and `A5 -> A6`, allowing `max_intermediate_dim = 5` before widening the full `A -> B` search
+- add a graph-only search mode that disables generic factorisation and conjugation moves, then try iterative bounds such as `max_dim = 5`, lag `8..12`
+- if the goal is to reproduce Baker's displayed lag-7 witness rather than a graph-only proof, add targeted factorisation families for the missing dimensions instead of general bounded `4x4` factorisation
+- avoid naive full `4x4` factorisation: enumerating all `4x4` factor candidates with entries `0..=5` is about `6^16`, which is not a viable BFS move family

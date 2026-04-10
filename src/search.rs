@@ -6,8 +6,8 @@ use crate::aligned::{
 };
 use crate::factorisation::visit_all_factorisations_with_family;
 use crate::graph_moves::{
-    enumerate_in_amalgamations, enumerate_out_amalgamations, enumerate_same_future_insplits,
-    enumerate_same_future_insplits_2x2_to_3x3, enumerate_same_past_outsplits,
+    enumerate_in_amalgamations, enumerate_one_step_insplits, enumerate_one_step_outsplits,
+    enumerate_out_amalgamations, enumerate_same_future_insplits_2x2_to_3x3,
     enumerate_same_past_outsplits_2x2_to_3x3,
 };
 use crate::invariants::check_invariants_2x2;
