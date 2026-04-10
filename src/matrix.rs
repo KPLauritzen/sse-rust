@@ -328,6 +328,7 @@ impl DynMatrix {
             3 => self.canonical_perm_3x3(),
             4 => self.canonical_perm_4x4(),
             5 => self.canonical_perm_5x5(),
+            6 => self.canonical_perm_6x6(),
             n => {
                 let mut perm: Vec<usize> = (0..n).collect();
                 let mut best = self.clone();
@@ -485,6 +486,68 @@ impl DynMatrix {
         DynMatrix::new(5, 5, best.to_vec())
     }
 
+    fn canonical_perm_6x6(&self) -> Self {
+        debug_assert_eq!(self.rows, 6);
+        debug_assert_eq!(self.cols, 6);
+
+        let d = &self.data;
+
+        let mut inv: [(u32, u32, u32, usize); 6] = [(0, 0, 0, 0); 6];
+        for i in 0..6 {
+            let diag = d[i * 6 + i];
+            let rsum: u32 = d[i * 6..i * 6 + 6].iter().sum();
+            let csum: u32 = (0..6).map(|r| d[r * 6 + i]).sum();
+            inv[i] = (diag, rsum, csum, i);
+        }
+        inv.sort();
+
+        let base = [inv[0].3, inv[1].3, inv[2].3, inv[3].3, inv[4].3, inv[5].3];
+
+        let mut best = [0u32; 36];
+        for i in 0..6 {
+            for j in 0..6 {
+                best[i * 6 + j] = d[base[i] * 6 + base[j]];
+            }
+        }
+
+        let key = [
+            (inv[0].0, inv[0].1, inv[0].2),
+            (inv[1].0, inv[1].1, inv[1].2),
+            (inv[2].0, inv[2].1, inv[2].2),
+            (inv[3].0, inv[3].1, inv[3].2),
+            (inv[4].0, inv[4].1, inv[4].2),
+            (inv[5].0, inv[5].1, inv[5].2),
+        ];
+        let mut group_of = [0u8; 6];
+        let mut gid = 0u8;
+        for i in 1..6 {
+            if key[i] != key[i - 1] {
+                gid += 1;
+            }
+            group_of[i] = gid;
+        }
+
+        let base_conj = best;
+        let mut perm = [0usize, 1, 2, 3, 4, 5];
+        while next_permutation(&mut perm) {
+            if !perm_respects_groups_6(&perm, &group_of) {
+                continue;
+            }
+            let mut c = [0u32; 36];
+            for i in 0..6 {
+                let pi = perm[i] * 6;
+                let ci = i * 6;
+                for j in 0..6 {
+                    c[ci + j] = base_conj[pi + perm[j]];
+                }
+            }
+            if c < best {
+                best = c;
+            }
+        }
+        DynMatrix::new(6, 6, best.to_vec())
+    }
+
     /// Conjugate by a permutation: result[i][j] = self[perm[i]][perm[j]].
     pub fn conjugate_by_perm(&self, perm: &[usize]) -> Self {
         let n = self.rows;
@@ -520,6 +583,16 @@ fn perm_respects_groups(perm: &[usize; 5], group_of: &[u8; 5]) -> bool {
         && group_of[perm[2]] == group_of[2]
         && group_of[perm[3]] == group_of[3]
         && group_of[perm[4]] == group_of[4]
+}
+
+/// Check whether a permutation only swaps within invariant-equivalent groups.
+fn perm_respects_groups_6(perm: &[usize; 6], group_of: &[u8; 6]) -> bool {
+    group_of[perm[0]] == group_of[0]
+        && group_of[perm[1]] == group_of[1]
+        && group_of[perm[2]] == group_of[2]
+        && group_of[perm[3]] == group_of[3]
+        && group_of[perm[4]] == group_of[4]
+        && group_of[perm[5]] == group_of[5]
 }
 
 /// Generate next lexicographic permutation in-place. Returns false if wrapped around.
@@ -722,6 +795,26 @@ mod tests {
             [3, 1, 4, 0, 2],
         ] {
             assert_eq!(m.conjugate_by_perm(perm).canonical_perm(), canon);
+        }
+    }
+
+    #[test]
+    fn test_dyn_canonical_6x6() {
+        let m = DynMatrix::new(
+            6,
+            6,
+            vec![
+                0, 1, 0, 2, 1, 0, 1, 0, 1, 0, 2, 1, 0, 1, 0, 1, 1, 2, 2, 0, 1, 0, 1, 1, 1, 2, 1, 1,
+                0, 0, 0, 1, 2, 1, 0, 1,
+            ],
+        );
+        let canon = m.canonical_perm();
+        let mut perm = [0usize, 1, 2, 3, 4, 5];
+        loop {
+            assert_eq!(m.conjugate_by_perm(&perm).canonical_perm(), canon);
+            if !next_permutation(&mut perm) {
+                break;
+            }
         }
     }
 

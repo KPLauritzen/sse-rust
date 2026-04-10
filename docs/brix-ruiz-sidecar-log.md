@@ -367,3 +367,41 @@ Interpretation:
 - this changes the status of the graph-move sidecar: a blind endpoint search can now find a graph-only proof for `brix_ruiz_k3` within the same `max_dim = 5` universe as the waypoint-expanded Baker witness
 - the endpoint path is shorter than the waypoint-expanded Baker graph path (`16` graph moves instead of `22`)
 - the search still uses bounds informed by the prior Lind-Marcus/Baker investigation, especially `max_dim = 5` and depth `22`; the important difference is that it no longer uses the displayed literature waypoints as targets
+
+## Blind endpoint search with `max_dim = 6`
+
+Follow-up:
+
+- tried widening the blind endpoint search from `max_dim = 5` to `max_dim = 6`
+- added a 6x6 dynamic canonical representative fast path in [`src/matrix.rs`](../src/matrix.rs), using the same invariant-partition strategy as the 5x5 path
+
+Probes:
+
+```text
+target/release/find_brix_ruiz_graph_path \
+  --max-depth 16 --max-dim 6 --max-entry 6 \
+  --max-states 2000000 --max-candidates 10000000 --max-seconds 60
+```
+
+- before the 6x6 canonical fast path: state cap at `2,000,001` visited states, `3,512,611` candidates, `33.699s`
+- after the 6x6 canonical fast path: same state/candidate counts, but elapsed time dropped to `7.772s`
+
+Larger capped probe:
+
+```text
+target/release/find_brix_ruiz_graph_path \
+  --max-depth 16 --max-dim 6 --max-entry 6 \
+  --max-states 8000000 --max-candidates 30000000 --max-seconds 100
+```
+
+Outcome:
+
+- no endpoint meet before the state cap
+- visited states: `8,000,001`
+- candidates generated: `16,940,740`
+- elapsed time: `34.480s`
+
+Interpretation:
+
+- allowing 6x6 states is now computationally viable per successor, but the state-space blow-up is the new bottleneck
+- raising caps blindly is unlikely to be the right next move; a useful `max_dim = 6` search probably needs dimension-aware scheduling, delayed 6x6 expansion, or a search mode for paths that genuinely require dimension `6`
