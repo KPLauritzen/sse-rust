@@ -318,3 +318,52 @@ Interpretation:
 
 - parallel expansion lets the capped run process further into the same blind search, but the improvement is not as dramatic as the representative split generation
 - the next likely bottleneck is still canonicalization and large-frontier bookkeeping; caching becomes more interesting if we persist successors across repeated runs rather than only within one fresh run
+
+Third optimization follow-up:
+
+- profiling showed that visited-union accounting and 5x5 canonicalization were now hot enough to matter
+- [`src/bin/find_brix_ruiz_graph_path.rs`](../src/bin/find_brix_ruiz_graph_path.rs) now tracks the union of forward/backward visited states incrementally instead of recomputing it from the two hash maps during expansion
+- [`src/matrix.rs`](../src/matrix.rs) now has specialized 4x4 and 5x5 dynamic canonical representatives; the 5x5 fast path partitions vertices by `(diagonal, row_sum, col_sum)` and minimizes within invariant-equivalent groups, which is enough for a stable permutation-invariant representative in this bounded graph search
+- [`src/bin/profile_graph_moves.rs`](../src/bin/profile_graph_moves.rs) records the profiling probe that motivated this change
+
+Endpoint-only result:
+
+```text
+target/release/find_brix_ruiz_graph_path \
+  --max-depth 22 --max-dim 5 --max-entry 6 \
+  --max-states 5000000 --max-candidates 50000000 --max-seconds 60
+```
+
+- found a graph-only path at depth `16`
+- no Lind-Marcus/Baker waypoints are encoded in this endpoint search; the only fixed endpoints are the Brix-Ruiz `k = 3` matrices
+- meeting state: `4x4 [0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 1, 2, 1, 1]`
+- visited states: `1,404,317`
+- candidates generated: `3,200,150`
+- elapsed time: `4.794s`
+
+Printed path:
+
+```text
+1. outsplit: 2x2 [1, 2, 3, 1] -> 3x3 [0, 0, 2, 1, 1, 1, 2, 2, 1]
+2. insplit: 3x3 [0, 0, 2, 1, 1, 1, 2, 2, 1] -> 4x4 [0, 0, 1, 1, 1, 1, 0, 1, 2, 2, 0, 1, 2, 2, 0, 1]
+3. outsplit: 4x4 [0, 0, 1, 1, 1, 1, 0, 1, 2, 2, 0, 1, 2, 2, 0, 1] -> 5x5 [0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 2, 2, 1]
+4. in_amalgamation: 5x5 [0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 2, 2, 1] -> 4x4 [0, 0, 1, 1, 0, 1, 2, 2, 0, 1, 1, 1, 1, 1, 1, 0]
+5. outsplit: 4x4 [0, 0, 1, 1, 0, 1, 2, 2, 0, 1, 1, 1, 1, 1, 1, 0] -> 5x5 [0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 2, 0, 2, 2, 1]
+6. in_amalgamation: 5x5 [0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 2, 0, 2, 2, 1] -> 4x4 [0, 0, 0, 1, 1, 0, 2, 1, 1, 1, 1, 0, 2, 2, 2, 1]
+7. outsplit: 4x4 [0, 0, 0, 1, 1, 0, 2, 1, 1, 1, 1, 0, 2, 2, 2, 1] -> 5x5 [0, 1, 0, 0, 1, 1, 0, 2, 0, 0, 1, 1, 0, 2, 1, 1, 0, 1, 1, 0, 1, 1, 0, 2, 1]
+8. in_amalgamation: 5x5 [0, 1, 0, 0, 1, 1, 0, 2, 0, 0, 1, 1, 0, 2, 1, 1, 0, 1, 1, 0, 1, 1, 0, 2, 1] -> 4x4 [0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 1, 2, 1, 1]
+9. insplit: 4x4 [0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 1, 2, 1, 1] -> 5x5 [0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 2, 1, 1, 0, 0, 1, 1, 1, 1, 0, 2, 1]
+10. out_amalgamation: 5x5 [0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 2, 1, 1, 0, 0, 1, 1, 1, 1, 0, 2, 1] -> 4x4 [0, 0, 1, 1, 0, 1, 0, 1, 1, 2, 0, 1, 2, 2, 1, 1]
+11. insplit: 4x4 [0, 0, 1, 1, 0, 1, 0, 1, 1, 2, 0, 1, 2, 2, 1, 1] -> 5x5 [0, 1, 0, 0, 1, 1, 0, 1, 2, 0, 2, 1, 0, 2, 1, 0, 0, 1, 1, 0, 2, 1, 0, 2, 1]
+12. out_amalgamation: 5x5 [0, 1, 0, 0, 1, 1, 0, 1, 2, 0, 2, 1, 0, 2, 1, 0, 0, 1, 1, 0, 2, 1, 0, 2, 1] -> 4x4 [0, 0, 0, 1, 0, 1, 1, 0, 2, 2, 0, 1, 3, 4, 1, 1]
+13. outsplit: 4x4 [0, 0, 0, 1, 0, 1, 1, 0, 2, 2, 0, 1, 3, 4, 1, 1] -> 5x5 [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 2, 0, 1, 0, 1, 1, 0, 1, 3, 1, 4, 1]
+14. in_amalgamation: 5x5 [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 2, 0, 1, 0, 1, 1, 0, 1, 3, 1, 4, 1] -> 4x4 [0, 0, 0, 1, 1, 1, 1, 0, 2, 2, 0, 0, 4, 4, 1, 1]
+15. out_amalgamation: 4x4 [0, 0, 0, 1, 1, 1, 1, 0, 2, 2, 0, 0, 4, 4, 1, 1] -> 3x3 [0, 0, 2, 1, 1, 4, 1, 1, 1]
+16. out_amalgamation: 3x3 [0, 0, 2, 1, 1, 4, 1, 1, 1] -> 2x2 [1, 1, 6, 1]
+```
+
+Interpretation:
+
+- this changes the status of the graph-move sidecar: a blind endpoint search can now find a graph-only proof for `brix_ruiz_k3` within the same `max_dim = 5` universe as the waypoint-expanded Baker witness
+- the endpoint path is shorter than the waypoint-expanded Baker graph path (`16` graph moves instead of `22`)
+- the search still uses bounds informed by the prior Lind-Marcus/Baker investigation, especially `max_dim = 5` and depth `22`; the important difference is that it no longer uses the displayed literature waypoints as targets

@@ -228,6 +228,8 @@ fn search_graph_path(
     bwd_seen.insert(target.clone(), 0);
     fwd_frontier.push_back(start);
     bwd_frontier.push_back(target);
+    // Track the union size incrementally to avoid O(|seen| * |other_seen|) per new state.
+    let mut total_visited = 2usize;
 
     loop {
         let next_fwd_depth = fwd_frontier.front().and_then(|m| fwd_seen.get(m)).copied();
@@ -243,7 +245,7 @@ fn search_graph_path(
             bwd_cost_sample_nodes,
         ) else {
             return GraphSearchResult::NotFound {
-                visited: visited_union_size(&fwd_seen, &bwd_seen),
+                visited: total_visited,
                 candidates: total_candidates,
                 elapsed: started.elapsed(),
             };
@@ -251,7 +253,7 @@ fn search_graph_path(
 
         if layer_depth >= max_depth {
             return GraphSearchResult::NotFound {
-                visited: visited_union_size(&fwd_seen, &bwd_seen),
+                visited: total_visited,
                 candidates: total_candidates,
                 elapsed: started.elapsed(),
             };
@@ -275,6 +277,7 @@ fn search_graph_path(
                 max_runtime,
                 started,
                 &mut total_candidates,
+                &mut total_visited,
             )
         } else {
             expand_layer(
@@ -294,6 +297,7 @@ fn search_graph_path(
                 max_runtime,
                 started,
                 &mut total_candidates,
+                &mut total_visited,
             )
         };
 
@@ -335,7 +339,9 @@ fn expand_layer(
     max_runtime: Duration,
     started: Instant,
     total_candidates: &mut usize,
+    total_visited: &mut usize,
 ) -> LayerOutcome {
+    let layer_start = Instant::now();
     let current_layer_len = frontier
         .iter()
         .take_while(|node| seen.get(*node).copied() == Some(layer_depth))
@@ -355,18 +361,20 @@ fn expand_layer(
             layer_depth,
             current_layer_len,
             &stats,
-            visited_union_size(seen, other_seen),
+            *total_visited,
         );
         return LayerOutcome {
             terminal: Some(GraphSearchResult::Capped {
                 reason: "Time cap hit",
-                visited: visited_union_size(seen, other_seen),
+                visited: *total_visited,
                 candidates: *total_candidates,
                 elapsed: started.elapsed(),
             }),
             stats,
         };
     }
+
+    let phase_prep = layer_start.elapsed();
 
     let mut successors_by_node = Vec::with_capacity(current_layer_len);
     let mut missing = Vec::new();
@@ -381,6 +389,9 @@ fn expand_layer(
         }
     }
 
+    let phase_cache_check = layer_start.elapsed() - phase_prep;
+    let compute_start = Instant::now();
+
     let computed_successors: Vec<(usize, DynMatrix, GraphMoveSuccessors)> = missing
         .into_par_iter()
         .map(|(idx, current)| {
@@ -389,11 +400,16 @@ fn expand_layer(
         })
         .collect();
 
+    let phase_compute = compute_start.elapsed();
+
     for (idx, current, successors) in computed_successors {
         let successors = Arc::new(successors);
         successor_cache.insert(current, Arc::clone(&successors));
         successors_by_node[idx] = Some(successors);
     }
+
+    let phase_cache_insert = Instant::now();
+    let seq_start = phase_cache_insert;
 
     for (current, successors) in current_layer
         .into_iter()
@@ -405,12 +421,12 @@ fn expand_layer(
                 layer_depth,
                 current_layer_len,
                 &stats,
-                visited_union_size(seen, other_seen),
+                *total_visited,
             );
             return LayerOutcome {
                 terminal: Some(GraphSearchResult::Capped {
                     reason: "Time cap hit",
-                    visited: visited_union_size(seen, other_seen),
+                    visited: *total_visited,
                     candidates: *total_candidates,
                     elapsed: started.elapsed(),
                 }),
@@ -429,12 +445,12 @@ fn expand_layer(
                 layer_depth,
                 current_layer_len,
                 &stats,
-                visited_union_size(seen, other_seen),
+                *total_visited,
             );
             return LayerOutcome {
                 terminal: Some(GraphSearchResult::Capped {
                     reason: "Candidate cap hit",
-                    visited: visited_union_size(seen, other_seen),
+                    visited: *total_visited,
                     candidates: *total_candidates,
                     elapsed: started.elapsed(),
                 }),
@@ -463,7 +479,8 @@ fn expand_layer(
                 },
             );
 
-            if let Some(&other_depth) = other_seen.get(&successor.matrix) {
+            let in_other_seen = other_seen.get(&successor.matrix);
+            if let Some(&other_depth) = in_other_seen {
                 let depth = next_depth + other_depth;
                 if depth <= max_depth {
                     print_layer_summary(
@@ -471,7 +488,7 @@ fn expand_layer(
                         layer_depth,
                         current_layer_len,
                         &stats,
-                        visited_union_size(seen, other_seen),
+                        *total_visited,
                     );
                     let path = if expand_forward {
                         reconstruct_path(&successor.matrix, parent, other_parent)
@@ -483,7 +500,7 @@ fn expand_layer(
                             depth,
                             meeting: successor.matrix.clone(),
                             path,
-                            visited: visited_union_size(seen, other_seen),
+                            visited: *total_visited,
                             candidates: *total_candidates,
                             elapsed: started.elapsed(),
                         }),
@@ -495,12 +512,15 @@ fn expand_layer(
             seen.insert(successor.matrix.clone(), next_depth);
             next_frontier.push(successor.matrix.clone());
             stats.discovered += 1;
+            if in_other_seen.is_none() {
+                *total_visited += 1;
+            }
 
-            if visited_union_size(seen, other_seen) > max_states {
+            if *total_visited > max_states {
                 return LayerOutcome {
                     terminal: Some(GraphSearchResult::Capped {
                         reason: "State cap hit",
-                        visited: visited_union_size(seen, other_seen),
+                        visited: *total_visited,
                         candidates: *total_candidates,
                         elapsed: started.elapsed(),
                     }),
@@ -510,12 +530,23 @@ fn expand_layer(
         }
     }
 
+    let phase_seq = seq_start.elapsed();
+    let layer_total = layer_start.elapsed();
+
     print_layer_summary(
         side_name,
         layer_depth,
         current_layer_len,
         &stats,
-        visited_union_size(seen, other_seen),
+        *total_visited,
+    );
+    println!(
+        "  timing: total={:.3}s, prep={:.3}ms, cache_check={:.3}ms, compute={:.3}s, seq={:.3}s",
+        layer_total.as_secs_f64(),
+        phase_prep.as_secs_f64() * 1000.0,
+        phase_cache_check.as_secs_f64() * 1000.0,
+        phase_compute.as_secs_f64(),
+        phase_seq.as_secs_f64(),
     );
 
     frontier.extend(next_frontier);
@@ -652,15 +683,4 @@ fn print_path(path: &[PathStep]) {
             step.to.data
         );
     }
-}
-
-fn visited_union_size(
-    left: &HashMap<DynMatrix, usize>,
-    right: &HashMap<DynMatrix, usize>,
-) -> usize {
-    left.len()
-        + right
-            .keys()
-            .filter(|node| !left.contains_key(*node))
-            .count()
 }

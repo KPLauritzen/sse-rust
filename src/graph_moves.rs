@@ -615,6 +615,13 @@ pub fn enumerate_in_amalgamations(c: &DynMatrix) -> Vec<OutsplitWitness> {
         .collect()
 }
 
+#[doc(hidden)]
+pub mod profiling_helpers {
+    pub fn split_row_into_children(row: &[u32], children: usize) -> Vec<Vec<Vec<u32>>> {
+        super::split_row_into_children(row, children)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

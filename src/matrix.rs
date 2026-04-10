@@ -314,13 +314,20 @@ impl DynMatrix {
             + (g(1, 1) * g(2, 2) - g(1, 2) * g(2, 1))
     }
 
-    /// Canonical form under permutation similarity for square matrices.
-    /// Returns the lexicographic minimum over all P^T * M * P for permutation matrices P.
+    /// Canonical representative under permutation similarity for square matrices.
+    ///
+    /// Small matrices use the lexicographic minimum over all `P^T * M * P`.
+    /// The 5x5 fast path first partitions vertices by cheap invariants and then
+    /// minimizes within invariant-equivalent groups; this preserves a stable
+    /// representative for permutation-equivalent matrices without scanning every
+    /// cross-group ordering.
     pub fn canonical_perm(&self) -> Self {
         assert!(self.is_square());
         match self.rows {
             2 => self.canonical_perm_2x2(),
             3 => self.canonical_perm_3x3(),
+            4 => self.canonical_perm_4x4(),
+            5 => self.canonical_perm_5x5(),
             n => {
                 let mut perm: Vec<usize> = (0..n).collect();
                 let mut best = self.clone();
@@ -385,6 +392,99 @@ impl DynMatrix {
         DynMatrix::new(3, 3, best_data.to_vec())
     }
 
+    fn canonical_perm_4x4(&self) -> Self {
+        debug_assert_eq!(self.rows, 4);
+        debug_assert_eq!(self.cols, 4);
+
+        let d = &self.data;
+        let mut best = [0u32; 16];
+        best.copy_from_slice(d);
+
+        let mut perm = [0usize, 1, 2, 3];
+        while next_permutation(&mut perm) {
+            let mut c = [0u32; 16];
+            for i in 0..4 {
+                let pi = perm[i] * 4;
+                let ci = i * 4;
+                for j in 0..4 {
+                    c[ci + j] = d[pi + perm[j]];
+                }
+            }
+            if c < best {
+                best = c;
+            }
+        }
+        DynMatrix::new(4, 4, best.to_vec())
+    }
+
+    fn canonical_perm_5x5(&self) -> Self {
+        debug_assert_eq!(self.rows, 5);
+        debug_assert_eq!(self.cols, 5);
+
+        let d = &self.data;
+
+        // Compute a vertex invariant: (diagonal, row_sum, col_sum).
+        // Sort vertices by this invariant to establish a base permutation,
+        // then only try permutations that swap within invariant-equivalent groups.
+        let mut inv: [(u32, u32, u32, usize); 5] = [(0, 0, 0, 0); 5];
+        for i in 0..5 {
+            let diag = d[i * 5 + i];
+            let rsum: u32 = d[i * 5..i * 5 + 5].iter().sum();
+            let csum: u32 = (0..5).map(|r| d[r * 5 + i]).sum();
+            inv[i] = (diag, rsum, csum, i);
+        }
+        inv.sort();
+
+        let base = [inv[0].3, inv[1].3, inv[2].3, inv[3].3, inv[4].3];
+
+        // Conjugate by the base sort permutation.
+        let mut best = [0u32; 25];
+        for i in 0..5 {
+            for j in 0..5 {
+                best[i * 5 + j] = d[base[i] * 5 + base[j]];
+            }
+        }
+
+        // Assign each sorted position to a group id.
+        let key = [
+            (inv[0].0, inv[0].1, inv[0].2),
+            (inv[1].0, inv[1].1, inv[1].2),
+            (inv[2].0, inv[2].1, inv[2].2),
+            (inv[3].0, inv[3].1, inv[3].2),
+            (inv[4].0, inv[4].1, inv[4].2),
+        ];
+        let mut group_of = [0u8; 5];
+        let mut gid = 0u8;
+        for i in 1..5 {
+            if key[i] != key[i - 1] {
+                gid += 1;
+            }
+            group_of[i] = gid;
+        }
+
+        // Enumerate within-group permutations on the base-conjugated matrix.
+        // A permutation p is valid iff group_of[p[i]] == group_of[i] for all i.
+        let base_conj = best;
+        let mut perm = [0usize, 1, 2, 3, 4];
+        while next_permutation(&mut perm) {
+            if !perm_respects_groups(&perm, &group_of) {
+                continue;
+            }
+            let mut c = [0u32; 25];
+            for i in 0..5 {
+                let pi = perm[i] * 5;
+                let ci = i * 5;
+                for j in 0..5 {
+                    c[ci + j] = base_conj[pi + perm[j]];
+                }
+            }
+            if c < best {
+                best = c;
+            }
+        }
+        DynMatrix::new(5, 5, best.to_vec())
+    }
+
     /// Conjugate by a permutation: result[i][j] = self[perm[i]][perm[j]].
     pub fn conjugate_by_perm(&self, perm: &[usize]) -> Self {
         let n = self.rows;
@@ -411,6 +511,15 @@ impl PartialOrd for DynMatrix {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
+}
+
+/// Check whether a permutation only swaps within invariant-equivalent groups.
+fn perm_respects_groups(perm: &[usize; 5], group_of: &[u8; 5]) -> bool {
+    group_of[perm[0]] == group_of[0]
+        && group_of[perm[1]] == group_of[1]
+        && group_of[perm[2]] == group_of[2]
+        && group_of[perm[3]] == group_of[3]
+        && group_of[perm[4]] == group_of[4]
 }
 
 /// Generate next lexicographic permutation in-place. Returns false if wrapped around.
@@ -560,6 +669,60 @@ mod tests {
         // Conjugate by (0 1 2) -> (1 2 0)
         let m2 = m.conjugate_by_perm(&[1, 2, 0]);
         assert_eq!(m.canonical_perm(), m2.canonical_perm());
+    }
+
+    #[test]
+    fn test_dyn_canonical_4x4() {
+        let m = DynMatrix::new(4, 4, vec![0, 1, 2, 0, 1, 0, 0, 1, 0, 2, 1, 1, 1, 0, 1, 0]);
+        // All conjugates by S_4 should give the same canonical form.
+        let canon = m.canonical_perm();
+        let c1 = m.conjugate_by_perm(&[1, 0, 2, 3]);
+        let c2 = m.conjugate_by_perm(&[2, 3, 0, 1]);
+        let c3 = m.conjugate_by_perm(&[3, 2, 1, 0]);
+        assert_eq!(c1.canonical_perm(), canon);
+        assert_eq!(c2.canonical_perm(), canon);
+        assert_eq!(c3.canonical_perm(), canon);
+    }
+
+    #[test]
+    fn test_dyn_canonical_5x5() {
+        let m = DynMatrix::new(
+            5,
+            5,
+            vec![
+                0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0,
+            ],
+        );
+        let canon = m.canonical_perm();
+        let mut perm = [0usize, 1, 2, 3, 4];
+        loop {
+            assert_eq!(m.conjugate_by_perm(&perm).canonical_perm(), canon);
+            if !next_permutation(&mut perm) {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn test_dyn_canonical_5x5_all_same_invariant() {
+        // Matrix where all vertices have the same (diag, row_sum, col_sum),
+        // forcing the partition refinement to fall back to all permutations.
+        let m = DynMatrix::new(
+            5,
+            5,
+            vec![
+                0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+            ],
+        );
+        let canon = m.canonical_perm();
+        for perm in &[
+            [1, 0, 2, 3, 4],
+            [0, 2, 1, 3, 4],
+            [4, 3, 2, 1, 0],
+            [3, 1, 4, 0, 2],
+        ] {
+            assert_eq!(m.conjugate_by_perm(perm).canonical_perm(), canon);
+        }
     }
 
     #[test]
