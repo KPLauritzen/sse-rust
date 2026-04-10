@@ -148,14 +148,23 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
     let mut nodes = Vec::new();
 
     if current.rows < max_dim {
-        for witness in enumerate_one_step_outsplits(current) {
-            candidates += 1;
-            push_canonical_graph_successor("outsplit", witness.outsplit, &mut seen, &mut nodes);
-        }
-        for witness in enumerate_one_step_insplits(current) {
-            candidates += 1;
-            push_canonical_graph_successor("insplit", witness.outsplit, &mut seen, &mut nodes);
-        }
+        append_representative_outsplit_successors(
+            current,
+            "outsplit",
+            false,
+            &mut candidates,
+            &mut seen,
+            &mut nodes,
+        );
+
+        append_representative_outsplit_successors(
+            &current.transpose(),
+            "insplit",
+            true,
+            &mut candidates,
+            &mut seen,
+            &mut nodes,
+        );
     }
 
     if current.rows > 2 {
@@ -180,6 +189,61 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
     }
 
     GraphMoveSuccessors { candidates, nodes }
+}
+
+fn append_representative_outsplit_successors(
+    a: &DynMatrix,
+    family: &'static str,
+    transpose_result: bool,
+    candidates: &mut usize,
+    seen: &mut HashSet<DynMatrix>,
+    nodes: &mut Vec<GraphMoveSuccessor>,
+) {
+    debug_assert!(a.is_square());
+
+    let parent_count = a.rows;
+    let child_count = parent_count + 1;
+    let parent_rows: Vec<Vec<u32>> = (0..parent_count)
+        .map(|row| (0..parent_count).map(|col| a.get(row, col)).collect())
+        .collect();
+
+    for split_parent in 0..parent_count {
+        let assignment: Vec<usize> = (0..child_count)
+            .map(|child| {
+                if child < parent_count {
+                    child
+                } else {
+                    split_parent
+                }
+            })
+            .collect();
+
+        for split in split_row_into_children(&parent_rows[split_parent], 2) {
+            // The two split children are interchangeable up to permutation.
+            if split[1] < split[0] {
+                continue;
+            }
+
+            *candidates += 1;
+
+            let mut child_rows = parent_rows.clone();
+            child_rows[split_parent] = split[0].clone();
+            child_rows.push(split[1].clone());
+
+            let mut data = Vec::with_capacity(child_count * child_count);
+            for row in &child_rows {
+                for &parent in &assignment {
+                    data.push(row[parent]);
+                }
+            }
+
+            let mut outsplit = DynMatrix::new(child_count, child_count, data);
+            if transpose_result {
+                outsplit = outsplit.transpose();
+            }
+            push_canonical_graph_successor(family, outsplit, seen, nodes);
+        }
+    }
 }
 
 fn push_canonical_graph_successor(
@@ -600,6 +664,38 @@ mod tests {
             assert_eq!(witness.outsplit.rows, 4);
             assert_eq!(witness.outsplit.cols, 4);
             assert_eq!(witness.edge.mul(&witness.division), a);
+        }
+    }
+
+    #[test]
+    fn test_representative_outsplit_successors_match_full_enumeration() {
+        let matrices = [
+            DynMatrix::from_sq(&SqMatrix::new([[1, 3], [2, 1]])),
+            DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 3, 2, 0, 1]),
+        ];
+
+        for a in matrices {
+            let expected = enumerate_one_step_outsplits(&a)
+                .into_iter()
+                .map(|witness| witness.outsplit.canonical_perm())
+                .collect::<HashSet<_>>();
+            let mut seen = HashSet::new();
+            let mut nodes = Vec::new();
+            let mut candidates = 0;
+            append_representative_outsplit_successors(
+                &a,
+                "outsplit",
+                false,
+                &mut candidates,
+                &mut seen,
+                &mut nodes,
+            );
+            let actual = nodes
+                .into_iter()
+                .map(|node| node.matrix)
+                .collect::<HashSet<_>>();
+            assert_eq!(actual, expected);
+            assert!(candidates <= expected.len() * 2);
         }
     }
 

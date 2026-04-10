@@ -283,3 +283,20 @@ Interpretation:
 
 - this confirms that the waypoint result is not representative of blind endpoint BFS cost
 - `max_dim = 5` graph-only search is viable as a capped diagnostic, but a full blind `max_depth = 22` run is not the next sensible step without stronger proposal guidance or additional pruning
+
+Optimization follow-up:
+
+- the first endpoint search enumerated every child-label assignment for one-step splits, even though the sidecar canonicalizes states up to vertex permutation
+- [`src/graph_moves.rs`](../src/graph_moves.rs) now has a representative-only graph successor path for canonical graph search: for a one-step split, it chooses one child-label assignment for each split parent and orders the two split child rows
+- the full witness enumerator remains available for callers that need explicit division/edge matrices
+
+Same bounded probe after representative split generation:
+
+- forward depth `2` dropped from `1,852,176` raw split candidates to `16,054` representative candidates while discovering the same `10,489` new canonical states
+- a `60s` run with `--max-candidates 1000000` reached forward depth `4`, visited `47,636` states, and generated `131,503` representative candidates before the time cap
+- no endpoint meet yet under that cap
+
+Interpretation:
+
+- the largest avoidable duplication was child-label redundancy inside split witnesses, and eliminating it is a real speedup
+- the remaining cost now looks more like canonicalization and large-frontier bookkeeping than raw child-label witness explosion
