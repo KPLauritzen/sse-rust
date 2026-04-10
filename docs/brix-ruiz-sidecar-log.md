@@ -300,3 +300,21 @@ Interpretation:
 
 - the largest avoidable duplication was child-label redundancy inside split witnesses, and eliminating it is a real speedup
 - the remaining cost now looks more like canonicalization and large-frontier bookkeeping than raw child-label witness explosion
+
+Second optimization follow-up:
+
+- [`src/bin/find_brix_ruiz_graph_path.rs`](../src/bin/find_brix_ruiz_graph_path.rs) now computes missing layer successors in parallel with Rayon, stores successor lists in an in-memory cache, and uses recent candidate-per-node cost when choosing between equal-depth forward/backward layers
+- the in-memory successor cache showed `0` hits on a single fresh blind BFS run, because each side expands newly discovered canonical states and an overlap would terminate the search; this cache is still useful groundwork for iterative schedules or future persistent successor caches
+
+Probe with `--max-seconds 45`, `--max-candidates 1000000`:
+
+- no endpoint meet before the time cap
+- reached forward depth `4`
+- visited states: `43,225`
+- generated representative candidates: `125,397`
+- elapsed time: `45.195s`
+
+Interpretation:
+
+- parallel expansion lets the capped run process further into the same blind search, but the improvement is not as dramatic as the representative split generation
+- the next likely bottleneck is still canonicalization and large-frontier bookkeeping; caching becomes more interesting if we persist successors across repeated runs rather than only within one fresh run

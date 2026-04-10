@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sse_core::graph_moves::enumerate_graph_move_successors;
+use rayon::prelude::*;
+use sse_core::graph_moves::{enumerate_graph_move_successors, GraphMoveSuccessors};
 use sse_core::matrix::{DynMatrix, SqMatrix};
 
 fn main() {
@@ -175,7 +177,14 @@ struct LayerStats {
     pruned_by_entry: usize,
     collisions_with_seen: usize,
     discovered: usize,
+    successor_cache_hits: usize,
+    successor_cache_misses: usize,
     family_counts: BTreeMap<&'static str, usize>,
+}
+
+struct LayerOutcome {
+    terminal: Option<GraphSearchResult>,
+    stats: LayerStats,
 }
 
 fn search_graph_path(
@@ -209,6 +218,11 @@ fn search_graph_path(
     let mut bwd_parent = HashMap::<DynMatrix, ParentStep>::new();
     let mut fwd_frontier = VecDeque::<DynMatrix>::new();
     let mut bwd_frontier = VecDeque::<DynMatrix>::new();
+    let mut successor_cache = HashMap::<DynMatrix, Arc<GraphMoveSuccessors>>::new();
+    let mut fwd_candidates_per_node = 1.0f64;
+    let mut bwd_candidates_per_node = 1.0f64;
+    let mut fwd_cost_sample_nodes = 0usize;
+    let mut bwd_cost_sample_nodes = 0usize;
 
     fwd_seen.insert(start.clone(), 0);
     bwd_seen.insert(target.clone(), 0);
@@ -223,6 +237,10 @@ fn search_graph_path(
             next_bwd_depth,
             fwd_frontier.len(),
             bwd_frontier.len(),
+            fwd_candidates_per_node,
+            bwd_candidates_per_node,
+            fwd_cost_sample_nodes,
+            bwd_cost_sample_nodes,
         ) else {
             return GraphSearchResult::NotFound {
                 visited: visited_union_size(&fwd_seen, &bwd_seen),
@@ -248,6 +266,7 @@ fn search_graph_path(
                 &mut fwd_parent,
                 &bwd_seen,
                 &bwd_parent,
+                &mut successor_cache,
                 max_depth,
                 max_dim,
                 max_entry,
@@ -266,6 +285,7 @@ fn search_graph_path(
                 &mut bwd_parent,
                 &fwd_seen,
                 &fwd_parent,
+                &mut successor_cache,
                 max_depth,
                 max_dim,
                 max_entry,
@@ -277,7 +297,21 @@ fn search_graph_path(
             )
         };
 
-        if let Some(result) = result {
+        if result.stats.successor_cache_hits + result.stats.successor_cache_misses > 0 {
+            let candidates_per_node = result.stats.candidates.max(1) as f64
+                / (result.stats.successor_cache_hits + result.stats.successor_cache_misses) as f64;
+            if expand_forward {
+                fwd_candidates_per_node = candidates_per_node;
+                fwd_cost_sample_nodes =
+                    result.stats.successor_cache_hits + result.stats.successor_cache_misses;
+            } else {
+                bwd_candidates_per_node = candidates_per_node;
+                bwd_cost_sample_nodes =
+                    result.stats.successor_cache_hits + result.stats.successor_cache_misses;
+            }
+        }
+
+        if let Some(result) = result.terminal {
             return result;
         }
     }
@@ -292,6 +326,7 @@ fn expand_layer(
     parent: &mut HashMap<DynMatrix, ParentStep>,
     other_seen: &HashMap<DynMatrix, usize>,
     other_parent: &HashMap<DynMatrix, ParentStep>,
+    successor_cache: &mut HashMap<DynMatrix, Arc<GraphMoveSuccessors>>,
     max_depth: usize,
     max_dim: usize,
     max_entry: u32,
@@ -300,7 +335,7 @@ fn expand_layer(
     max_runtime: Duration,
     started: Instant,
     total_candidates: &mut usize,
-) -> Option<GraphSearchResult> {
+) -> LayerOutcome {
     let current_layer_len = frontier
         .iter()
         .take_while(|node| seen.get(*node).copied() == Some(layer_depth))
@@ -309,8 +344,61 @@ fn expand_layer(
     let expand_forward = side_name == "forward";
     let mut stats = LayerStats::default();
     let mut next_frontier = Vec::new();
-
+    let mut current_layer = Vec::with_capacity(current_layer_len);
     for _ in 0..current_layer_len {
+        current_layer.push(frontier.pop_front().expect("frontier length should match"));
+    }
+
+    if started.elapsed() >= max_runtime {
+        print_layer_summary(
+            side_name,
+            layer_depth,
+            current_layer_len,
+            &stats,
+            visited_union_size(seen, other_seen),
+        );
+        return LayerOutcome {
+            terminal: Some(GraphSearchResult::Capped {
+                reason: "Time cap hit",
+                visited: visited_union_size(seen, other_seen),
+                candidates: *total_candidates,
+                elapsed: started.elapsed(),
+            }),
+            stats,
+        };
+    }
+
+    let mut successors_by_node = Vec::with_capacity(current_layer_len);
+    let mut missing = Vec::new();
+    for (idx, current) in current_layer.iter().enumerate() {
+        if let Some(successors) = successor_cache.get(current) {
+            stats.successor_cache_hits += 1;
+            successors_by_node.push(Some(Arc::clone(successors)));
+        } else {
+            stats.successor_cache_misses += 1;
+            successors_by_node.push(None);
+            missing.push((idx, current.clone()));
+        }
+    }
+
+    let computed_successors: Vec<(usize, DynMatrix, GraphMoveSuccessors)> = missing
+        .into_par_iter()
+        .map(|(idx, current)| {
+            let successors = enumerate_graph_move_successors(&current, max_dim);
+            (idx, current, successors)
+        })
+        .collect();
+
+    for (idx, current, successors) in computed_successors {
+        let successors = Arc::new(successors);
+        successor_cache.insert(current, Arc::clone(&successors));
+        successors_by_node[idx] = Some(successors);
+    }
+
+    for (current, successors) in current_layer
+        .into_iter()
+        .zip(successors_by_node.into_iter())
+    {
         if started.elapsed() >= max_runtime {
             print_layer_summary(
                 side_name,
@@ -319,16 +407,18 @@ fn expand_layer(
                 &stats,
                 visited_union_size(seen, other_seen),
             );
-            return Some(GraphSearchResult::Capped {
-                reason: "Time cap hit",
-                visited: visited_union_size(seen, other_seen),
-                candidates: *total_candidates,
-                elapsed: started.elapsed(),
-            });
+            return LayerOutcome {
+                terminal: Some(GraphSearchResult::Capped {
+                    reason: "Time cap hit",
+                    visited: visited_union_size(seen, other_seen),
+                    candidates: *total_candidates,
+                    elapsed: started.elapsed(),
+                }),
+                stats,
+            };
         }
 
-        let current = frontier.pop_front().expect("frontier length should match");
-        let successors = enumerate_graph_move_successors(&current, max_dim);
+        let successors = successors.expect("successors should be cached or computed");
         stats.candidates += successors.candidates;
         stats.deduped_candidates += successors.nodes.len();
         *total_candidates += successors.candidates;
@@ -341,15 +431,18 @@ fn expand_layer(
                 &stats,
                 visited_union_size(seen, other_seen),
             );
-            return Some(GraphSearchResult::Capped {
-                reason: "Candidate cap hit",
-                visited: visited_union_size(seen, other_seen),
-                candidates: *total_candidates,
-                elapsed: started.elapsed(),
-            });
+            return LayerOutcome {
+                terminal: Some(GraphSearchResult::Capped {
+                    reason: "Candidate cap hit",
+                    visited: visited_union_size(seen, other_seen),
+                    candidates: *total_candidates,
+                    elapsed: started.elapsed(),
+                }),
+                stats,
+            };
         }
 
-        for successor in successors.nodes {
+        for successor in &successors.nodes {
             *stats.family_counts.entry(successor.family).or_default() += 1;
 
             if successor.matrix.max_entry() > max_entry {
@@ -385,28 +478,34 @@ fn expand_layer(
                     } else {
                         reconstruct_path(&successor.matrix, other_parent, parent)
                     };
-                    return Some(GraphSearchResult::Found {
-                        depth,
-                        meeting: successor.matrix,
-                        path,
-                        visited: visited_union_size(seen, other_seen),
-                        candidates: *total_candidates,
-                        elapsed: started.elapsed(),
-                    });
+                    return LayerOutcome {
+                        terminal: Some(GraphSearchResult::Found {
+                            depth,
+                            meeting: successor.matrix.clone(),
+                            path,
+                            visited: visited_union_size(seen, other_seen),
+                            candidates: *total_candidates,
+                            elapsed: started.elapsed(),
+                        }),
+                        stats,
+                    };
                 }
             }
 
             seen.insert(successor.matrix.clone(), next_depth);
-            next_frontier.push(successor.matrix);
+            next_frontier.push(successor.matrix.clone());
             stats.discovered += 1;
 
             if visited_union_size(seen, other_seen) > max_states {
-                return Some(GraphSearchResult::Capped {
-                    reason: "State cap hit",
-                    visited: visited_union_size(seen, other_seen),
-                    candidates: *total_candidates,
-                    elapsed: started.elapsed(),
-                });
+                return LayerOutcome {
+                    terminal: Some(GraphSearchResult::Capped {
+                        reason: "State cap hit",
+                        visited: visited_union_size(seen, other_seen),
+                        candidates: *total_candidates,
+                        elapsed: started.elapsed(),
+                    }),
+                    stats,
+                };
             }
         }
     }
@@ -420,7 +519,10 @@ fn expand_layer(
     );
 
     frontier.extend(next_frontier);
-    None
+    LayerOutcome {
+        terminal: None,
+        stats,
+    }
 }
 
 fn print_layer_summary(
@@ -431,12 +533,14 @@ fn print_layer_summary(
     visited: usize,
 ) {
     println!(
-        "{side_name} depth {layer_depth}: frontier={frontier}, candidates={}, deduped={}, pruned_by_entry={}, collisions={}, discovered={}, visited={}",
+        "{side_name} depth {layer_depth}: frontier={frontier}, candidates={}, deduped={}, pruned_by_entry={}, collisions={}, discovered={}, cache_hits={}, cache_misses={}, visited={}",
         stats.candidates,
         stats.deduped_candidates,
         stats.pruned_by_entry,
         stats.collisions_with_seen,
         stats.discovered,
+        stats.successor_cache_hits,
+        stats.successor_cache_misses,
         visited,
     );
 
@@ -456,6 +560,10 @@ fn choose_next_layer(
     bwd_depth: Option<usize>,
     fwd_frontier_len: usize,
     bwd_frontier_len: usize,
+    fwd_candidates_per_node: f64,
+    bwd_candidates_per_node: f64,
+    fwd_cost_sample_nodes: usize,
+    bwd_cost_sample_nodes: usize,
 ) -> Option<(bool, usize)> {
     match (fwd_depth, bwd_depth) {
         (Some(fwd), Some(bwd)) => {
@@ -464,7 +572,17 @@ fn choose_next_layer(
             } else if bwd < fwd {
                 Some((false, bwd))
             } else {
-                Some((fwd_frontier_len <= bwd_frontier_len, fwd))
+                let fwd_cost_ready = fwd_cost_sample_nodes >= 8;
+                let bwd_cost_ready = bwd_cost_sample_nodes >= 8;
+                if fwd_cost_ready && bwd_cost_ready {
+                    let fwd_estimated_work =
+                        fwd_frontier_len as f64 * fwd_candidates_per_node.max(1.0);
+                    let bwd_estimated_work =
+                        bwd_frontier_len as f64 * bwd_candidates_per_node.max(1.0);
+                    Some((fwd_estimated_work <= bwd_estimated_work, fwd))
+                } else {
+                    Some((fwd_frontier_len <= bwd_frontier_len, fwd))
+                }
             }
         }
         (Some(fwd), None) => Some((true, fwd)),
