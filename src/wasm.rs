@@ -6,7 +6,7 @@ use crate::aligned::{
 };
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search::search_sse_2x2;
-use crate::types::SearchConfig;
+use crate::types::{SearchConfig, SearchMode};
 
 #[derive(serde::Serialize)]
 struct WasmSseResult {
@@ -86,6 +86,7 @@ pub fn search_sse(
         max_lag,
         max_intermediate_dim,
         max_entry,
+        search_mode: SearchMode::Mixed,
     };
 
     let result = search_sse_2x2(&a, &b, &config);

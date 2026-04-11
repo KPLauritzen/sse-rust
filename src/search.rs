@@ -13,8 +13,8 @@ use crate::graph_moves::{
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
-    EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry, SearchMoveFamilyTelemetry,
-    SearchTelemetry, SsePath, SseResult,
+    EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry, SearchMode,
+    SearchMoveFamilyTelemetry, SearchTelemetry, SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -227,6 +227,7 @@ pub fn search_sse_2x2_with_telemetry(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
+            config.search_mode,
             source_trace,
             source_det,
         );
@@ -411,7 +412,7 @@ pub fn search_sse_2x2_with_telemetry(
 
     // If bounded ESSE search exhausts on a finite essential pair, try the
     // aligned concrete-shift substrate before reporting `Unknown`.
-    if should_try_concrete_shift_fallback(a, b, config) {
+    if config.search_mode == SearchMode::Mixed && should_try_concrete_shift_fallback(a, b, config) {
         let concrete_config = ConcreteShiftSearchConfig2x2 {
             relation: ConcreteShiftRelation2x2::Aligned,
             max_lag: config.max_lag as u32,
@@ -509,6 +510,7 @@ fn expand_frontier_layer(
     orig: &HashMap<DynMatrix, DynMatrix>,
     max_intermediate_dim: usize,
     max_entry: u32,
+    search_mode: SearchMode,
     source_trace: u64,
     source_det: i64,
 ) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
@@ -719,44 +721,46 @@ fn expand_frontier_layer(
             }
         }
 
-        visit_all_factorisations_with_family(
-            current,
-            max_intermediate_dim,
-            max_entry,
-            |move_family, u, v| {
-                move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
-                    .candidates_generated += 1;
-                stats.factorisations_enumerated += 1;
-                stats.candidates_generated += 1;
-                let next = v.mul(&u);
+        if search_mode == SearchMode::Mixed {
+            visit_all_factorisations_with_family(
+                current,
+                max_intermediate_dim,
+                max_entry,
+                |move_family, u, v| {
+                    move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
+                        .candidates_generated += 1;
+                    stats.factorisations_enumerated += 1;
+                    stats.candidates_generated += 1;
+                    let next = v.mul(&u);
 
-                // Size bound: don't explore matrices larger than max_intermediate_dim.
-                if next.rows > max_intermediate_dim {
-                    stats.pruned_by_size += 1;
-                    return;
-                }
+                    // Size bound: don't explore matrices larger than max_intermediate_dim.
+                    if next.rows > max_intermediate_dim {
+                        stats.pruned_by_size += 1;
+                        return;
+                    }
 
-                // Spectral pruning: nonzero eigenvalues are preserved by SSE,
-                // so every intermediate must have the same nonzero spectrum.
-                if !is_spectrally_consistent(&next, source_trace, source_det) {
-                    stats.pruned_by_spectrum += 1;
-                    return;
-                }
+                    // Spectral pruning: nonzero eigenvalues are preserved by SSE,
+                    // so every intermediate must have the same nonzero spectrum.
+                    if !is_spectrally_consistent(&next, source_trace, source_det) {
+                        stats.pruned_by_spectrum += 1;
+                        return;
+                    }
 
-                let next_canon = next.canonical_perm();
-                if !seen_successors.insert(next_canon.clone()) {
-                    return;
-                }
-                let step = EsseStep { u, v };
-                expansions.push(FrontierExpansion {
-                    parent_canon: current_canon.clone(),
-                    next_canon,
-                    next_orig: next,
-                    step,
-                    move_family,
-                });
-            },
-        );
+                    let next_canon = next.canonical_perm();
+                    if !seen_successors.insert(next_canon.clone()) {
+                        return;
+                    }
+                    let step = EsseStep { u, v };
+                    expansions.push(FrontierExpansion {
+                        parent_canon: current_canon.clone(),
+                        next_canon,
+                        next_orig: next,
+                        step,
+                        move_family,
+                    });
+                },
+            );
+        }
 
         (expansions, stats)
     };
@@ -1110,6 +1114,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 10,
+            search_mode: SearchMode::Mixed,
         }
     }
 
@@ -1233,6 +1238,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 6,
+            search_mode: SearchMode::Mixed,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match result {
@@ -1250,6 +1256,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 4,
+            search_mode: SearchMode::Mixed,
         };
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
         assert!(!telemetry.invariant_filtered);
@@ -1267,8 +1274,15 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (expansions, stats) =
-            expand_frontier_layer(&[a_canon], &orig, 2, 10, a.trace(), a.det());
+        let (expansions, stats) = expand_frontier_layer(
+            &[a_canon],
+            &orig,
+            2,
+            10,
+            SearchMode::Mixed,
+            a.trace(),
+            a.det(),
+        );
 
         assert!(!expansions.is_empty());
         assert!(stats.factorisations_enumerated > expansions.len());
@@ -1287,6 +1301,7 @@ mod tests {
             &orig,
             2,
             10,
+            SearchMode::Mixed,
             a.trace(),
             a.det(),
         );
@@ -1295,6 +1310,7 @@ mod tests {
             &orig,
             2,
             10,
+            SearchMode::Mixed,
             a.trace(),
             a.det(),
         );
@@ -1419,6 +1435,7 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
+            search_mode: SearchMode::Mixed,
         };
         let result = search_sse_2x2(&m1, &m2, &config);
         assert!(
@@ -1435,6 +1452,7 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
+            search_mode: SearchMode::Mixed,
         };
         let result = search_sse_2x2(&m1, &m3, &config);
         assert!(
@@ -1463,6 +1481,7 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
+            search_mode: SearchMode::Mixed,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -1496,6 +1515,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 4,
+            search_mode: SearchMode::Mixed,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -1539,6 +1559,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 5,
+            search_mode: SearchMode::Mixed,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match &result {

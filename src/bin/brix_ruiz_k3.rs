@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SseResult};
+use sse_core::types::{SearchConfig, SearchMode, SseResult};
 
 fn main() {
     let a = SqMatrix::new([[1, 3], [2, 1]]);
@@ -11,6 +11,7 @@ fn main() {
     let mut max_lag = 7usize;
     let mut max_intermediate_dim = 4usize;
     let mut max_entry = 10u32;
+    let mut search_mode = SearchMode::Mixed;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -36,8 +37,21 @@ fn main() {
                     .parse()
                     .expect("invalid max entry");
             }
+            "--graph-only" => {
+                search_mode = SearchMode::GraphOnly;
+            }
+            "--search-mode" => {
+                let mode = args.next().expect("--search-mode requires a value");
+                search_mode = match mode.as_str() {
+                    "mixed" => SearchMode::Mixed,
+                    "graph-only" => SearchMode::GraphOnly,
+                    _ => panic!("invalid --search-mode value: {mode}"),
+                };
+            }
             "--help" | "-h" => {
-                println!("usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N]");
+                println!(
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--graph-only] [--search-mode mixed|graph-only]"
+                );
                 return;
             }
             _ => panic!("unknown argument: {arg}"),
@@ -48,12 +62,13 @@ fn main() {
         max_lag,
         max_intermediate_dim,
         max_entry,
+        search_mode,
     };
 
     println!("Brix-Ruiz k=3: A = {:?}, B = {:?}", a, b);
     println!(
-        "Config: max_lag={}, max_intermediate_dim={}, max_entry={}",
-        config.max_lag, config.max_intermediate_dim, config.max_entry
+        "Config: max_lag={}, max_intermediate_dim={}, max_entry={}, search_mode={:?}",
+        config.max_lag, config.max_intermediate_dim, config.max_entry, config.search_mode
     );
     println!();
 

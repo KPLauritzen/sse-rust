@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sse_core::matrix::DynMatrix;
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SearchTelemetry, SsePath, SseResult};
+use sse_core::types::{SearchConfig, SearchMode, SearchTelemetry, SsePath, SseResult};
 
 #[derive(Debug)]
 struct Cli {
@@ -50,6 +50,12 @@ struct JsonSearchConfig {
     max_lag: usize,
     max_intermediate_dim: usize,
     max_entry: u32,
+    #[serde(default = "default_search_mode")]
+    search_mode: SearchMode,
+}
+
+fn default_search_mode() -> SearchMode {
+    SearchMode::Mixed
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -238,6 +244,7 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
         max_lag: case.config.max_lag,
         max_intermediate_dim: case.config.max_intermediate_dim,
         max_entry: case.config.max_entry,
+        search_mode: case.config.search_mode,
     };
 
     let started = Instant::now();

@@ -4,6 +4,19 @@ use std::collections::BTreeMap;
 
 use crate::matrix::{DynMatrix, SqMatrix};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    Mixed,
+    GraphOnly,
+}
+
+impl Default for SearchMode {
+    fn default() -> Self {
+        Self::Mixed
+    }
+}
+
 /// Configuration for the SSE search.
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -14,6 +27,8 @@ pub struct SearchConfig {
     pub max_intermediate_dim: usize,
     /// Maximum entry value in intermediate matrices U, V.
     pub max_entry: u32,
+    /// Search move mode.
+    pub search_mode: SearchMode,
 }
 
 impl Default for SearchConfig {
@@ -22,6 +37,7 @@ impl Default for SearchConfig {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 25,
+            search_mode: SearchMode::Mixed,
         }
     }
 }

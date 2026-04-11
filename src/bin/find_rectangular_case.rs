@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use sse_core::factorisation::enumerate_all_factorisations;
 use sse_core::matrix::{DynMatrix, SqMatrix};
 use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SseResult};
+use sse_core::types::{SearchConfig, SearchMode, SseResult};
 
 fn main() {
     let mut generate_max_entry = 3u32;
@@ -48,11 +48,13 @@ fn main() {
         max_lag,
         max_intermediate_dim: 2,
         max_entry: search_max_entry,
+        search_mode: SearchMode::Mixed,
     };
     let dim3_config = SearchConfig {
         max_lag,
         max_intermediate_dim: 3,
         max_entry: search_max_entry,
+        search_mode: SearchMode::Mixed,
     };
 
     let mut rectangular_buckets: HashMap<DynMatrix, HashSet<SqMatrix<2>>> = HashMap::new();
