@@ -13,10 +13,30 @@ fn main() {
     let mut max_states = 1_000_000usize;
     let mut max_candidates = 10_000_000usize;
     let mut max_seconds = 30u64;
+    let mut k = 3u32;
+    let mut use_cache = false;
+    let mut seed_depth = 0usize;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--k" => {
+                k = args
+                    .next()
+                    .expect("--k requires a value")
+                    .parse()
+                    .expect("invalid k");
+            }
+            "--use-cache" => {
+                use_cache = true;
+            }
+            "--seed-depth" => {
+                seed_depth = args
+                    .next()
+                    .expect("--seed-depth requires a value")
+                    .parse()
+                    .expect("invalid seed depth");
+            }
             "--max-depth" => {
                 max_depth = args
                     .next()
@@ -61,7 +81,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_brix_ruiz_graph_path [--max-depth N] [--max-dim N] [--max-entry N] [--max-states N] [--max-candidates N] [--max-seconds N]"
+                    "usage: find_brix_ruiz_graph_path [--k N] [--max-depth N] [--max-dim N] [--max-entry N] [--max-states N] [--max-candidates N] [--max-seconds N] [--use-cache] [--seed-depth N]"
                 );
                 return;
             }
@@ -69,12 +89,13 @@ fn main() {
         }
     }
 
-    let start = DynMatrix::from_sq(&SqMatrix::new([[1, 3], [2, 1]]));
-    let target = DynMatrix::from_sq(&SqMatrix::new([[1, 6], [1, 1]]));
+    assert!(k >= 2, "Brix-Ruiz family requires k >= 2");
+    let start = DynMatrix::from_sq(&SqMatrix::new([[1, k], [k - 1, 1]]));
+    let target = DynMatrix::from_sq(&SqMatrix::new([[1, k * (k - 1)], [1, 1]]));
 
-    println!("Blind graph-only Brix-Ruiz k=3 search");
+    println!("Blind graph-only Brix-Ruiz k={k} search");
     println!(
-        "Config: max_depth={max_depth}, max_dim={max_dim}, max_entry={max_entry}, max_states={max_states}, max_candidates={max_candidates}, max_seconds={max_seconds}"
+        "Config: max_depth={max_depth}, max_dim={max_dim}, max_entry={max_entry}, max_states={max_states}, max_candidates={max_candidates}, max_seconds={max_seconds}, use_cache={use_cache}, seed_depth={seed_depth}"
     );
     println!("Moves: outsplit, insplit, out_amalgamation, in_amalgamation");
     println!("States are canonicalized up to vertex permutation.");
@@ -89,6 +110,8 @@ fn main() {
         max_states,
         max_candidates,
         Duration::from_secs(max_seconds),
+        use_cache,
+        seed_depth,
     );
     match result {
         GraphSearchResult::Found {
@@ -187,6 +210,7 @@ struct LayerOutcome {
     stats: LayerStats,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn search_graph_path(
     start: &DynMatrix,
     target: &DynMatrix,
@@ -196,6 +220,8 @@ fn search_graph_path(
     max_states: usize,
     max_candidates: usize,
     max_runtime: Duration,
+    use_cache: bool,
+    seed_depth: usize,
 ) -> GraphSearchResult {
     let started = Instant::now();
     let mut total_candidates = 0usize;
@@ -230,6 +256,25 @@ fn search_graph_path(
     bwd_frontier.push_back(target);
     // Track the union size incrementally to avoid O(|seen| * |other_seen|) per new state.
     let mut total_visited = 2usize;
+
+    // Optionally pre-expand the backward side without max_entry pruning so that
+    // a target with large entries (e.g. brix_ruiz_k4 has B = [[1,12],[1,1]]) can
+    // be reached from a low-entry universe via a small unbounded neighborhood.
+    if seed_depth > 0 {
+        seed_backward_neighborhood(
+            seed_depth,
+            max_dim,
+            &mut bwd_seen,
+            &mut bwd_parent,
+            &mut bwd_frontier,
+            &mut total_visited,
+        );
+        println!(
+            "Backward seed expansion to depth {seed_depth}: bwd_seen={}, bwd_frontier={}",
+            bwd_seen.len(),
+            bwd_frontier.len(),
+        );
+    }
 
     loop {
         let next_fwd_depth = fwd_frontier.front().and_then(|m| fwd_seen.get(m)).copied();
@@ -269,6 +314,7 @@ fn search_graph_path(
                 &bwd_seen,
                 &bwd_parent,
                 &mut successor_cache,
+                use_cache,
                 max_depth,
                 max_dim,
                 max_entry,
@@ -289,6 +335,7 @@ fn search_graph_path(
                 &fwd_seen,
                 &fwd_parent,
                 &mut successor_cache,
+                use_cache,
                 max_depth,
                 max_dim,
                 max_entry,
@@ -331,6 +378,7 @@ fn expand_layer(
     other_seen: &HashMap<DynMatrix, usize>,
     other_parent: &HashMap<DynMatrix, ParentStep>,
     successor_cache: &mut HashMap<DynMatrix, Arc<GraphMoveSuccessors>>,
+    use_cache: bool,
     max_depth: usize,
     max_dim: usize,
     max_entry: u32,
@@ -379,7 +427,12 @@ fn expand_layer(
     let mut successors_by_node = Vec::with_capacity(current_layer_len);
     let mut missing = Vec::new();
     for (idx, current) in current_layer.iter().enumerate() {
-        if let Some(successors) = successor_cache.get(current) {
+        let cached = if use_cache {
+            successor_cache.get(current)
+        } else {
+            None
+        };
+        if let Some(successors) = cached {
             stats.successor_cache_hits += 1;
             successors_by_node.push(Some(Arc::clone(successors)));
         } else {
@@ -404,7 +457,9 @@ fn expand_layer(
 
     for (idx, current, successors) in computed_successors {
         let successors = Arc::new(successors);
-        successor_cache.insert(current, Arc::clone(&successors));
+        if use_cache {
+            successor_cache.insert(current, Arc::clone(&successors));
+        }
         successors_by_node[idx] = Some(successors);
     }
 
@@ -554,6 +609,55 @@ fn expand_layer(
         terminal: None,
         stats,
     }
+}
+
+/// Pre-expand the backward side by `seed_depth` graph-move steps without any
+/// `max_entry` filtering. This lets the main bounded search use a small
+/// `max_entry` even when the literal target has large entries: the seed
+/// neighborhood absorbs the high-entry transitions near the target, and the
+/// main loop continues from a frontier of states that may already satisfy the
+/// bound.
+fn seed_backward_neighborhood(
+    seed_depth: usize,
+    max_dim: usize,
+    bwd_seen: &mut HashMap<DynMatrix, usize>,
+    bwd_parent: &mut HashMap<DynMatrix, ParentStep>,
+    bwd_frontier: &mut VecDeque<DynMatrix>,
+    total_visited: &mut usize,
+) {
+    // bwd_frontier currently holds [target] at depth 0. Expand it BFS-style up
+    // to seed_depth without entry pruning, leaving bwd_frontier holding the
+    // states at the deepest expanded level.
+    let mut current_layer: Vec<DynMatrix> = bwd_frontier.drain(..).collect();
+    for layer_depth in 0..seed_depth {
+        if current_layer.is_empty() {
+            break;
+        }
+        let computed: Vec<(DynMatrix, GraphMoveSuccessors)> = current_layer
+            .par_iter()
+            .map(|m| (m.clone(), enumerate_graph_move_successors(m, max_dim)))
+            .collect();
+        let mut next_layer: Vec<DynMatrix> = Vec::new();
+        for (current, successors) in computed {
+            for successor in &successors.nodes {
+                if bwd_seen.contains_key(&successor.matrix) {
+                    continue;
+                }
+                bwd_parent.insert(
+                    successor.matrix.clone(),
+                    ParentStep {
+                        parent: current.clone(),
+                        family: successor.family,
+                    },
+                );
+                bwd_seen.insert(successor.matrix.clone(), layer_depth + 1);
+                *total_visited += 1;
+                next_layer.push(successor.matrix.clone());
+            }
+        }
+        current_layer = next_layer;
+    }
+    bwd_frontier.extend(current_layer);
 }
 
 fn print_layer_summary(

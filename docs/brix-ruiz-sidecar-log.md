@@ -321,10 +321,13 @@ Interpretation:
 
 Third optimization follow-up:
 
-- profiling showed that visited-union accounting and 5x5 canonicalization were now hot enough to matter
-- [`src/bin/find_brix_ruiz_graph_path.rs`](../src/bin/find_brix_ruiz_graph_path.rs) now tracks the union of forward/backward visited states incrementally instead of recomputing it from the two hash maps during expansion
-- [`src/matrix.rs`](../src/matrix.rs) now has specialized 4x4 and 5x5 dynamic canonical representatives; the 5x5 fast path partitions vertices by `(diagonal, row_sum, col_sum)` and minimizes within invariant-equivalent groups, which is enough for a stable permutation-invariant representative in this bounded graph search
-- [`src/bin/profile_graph_moves.rs`](../src/bin/profile_graph_moves.rs) records the profiling probe that motivated this change
+- first attempt was misdirected: specialized 4x4 and 5x5 `canonical_perm` fast paths in [`src/matrix.rs`](../src/matrix.rs) (stack arrays for 4x4, and partition-by-`(diag, row_sum, col_sum)` refinement for 5x5 so only invariant-preserving permutations are tried) moved the 60-second run from `60.476s` to `60.094s` — basically no change, meaning canonicalization was not the real bottleneck
+- adding per-phase timing to `expand_layer` (`prep`, `cache_check`, `compute`, `seq`) made the real hot spot obvious: at backward depth `2`, `total = 24.423s` of which `compute = 0.106s` and `seq = 24.317s`. Forward depth `2` over comparable work spent only `0.340s` in `seq`. Per discovered state, backward `seq` was about `992μs` versus forward `32μs` — a ~`31x` asymmetry that pointed at a structure-dependent cost inside the successor-insertion loop, not at successor enumeration itself
+- root cause: `visited_union_size(seen, other_seen)` iterated one of the two hash maps and probed the other for each key — `O(min(|seen|, |other_seen|))` per call — and it was called inside the inner loop for every newly discovered successor (to evaluate the `max_states` cap, as well as at every summary and early return). At backward depth `2` that was roughly `24,521` new states × `10,824` forward-seen entries ≈ `265M` hash probes per layer, which matches the observed `~24s`. The asymmetry came from `seen` being the smaller map on the backward side, so the cheaper `.len()` branch was rarely the one chosen
+- fix: [`src/bin/find_brix_ruiz_graph_path.rs`](../src/bin/find_brix_ruiz_graph_path.rs) now maintains an incremental `total_visited` counter updated in `O(1)` per insertion. The `other_seen.get(&successor.matrix)` lookup already computed for meeting-point detection is reused to decide whether the new state is a fresh contribution to the union, so there is no extra hashing
+- result on the hot layer: backward depth `2` `seq` phase went from `24.317s` to `0.033s` (~`737x`), and the blind BFS that previously hit the time cap at forward depth `4` with `~46k` visited states now reaches `500k` states in about `1.7s` and finds a graph-only endpoint path for `brix_ruiz_k3` in about `5s`
+- the 5x5 canonical fast path and [`src/bin/profile_graph_moves.rs`](../src/bin/profile_graph_moves.rs) were kept; they become relevant once the quadratic visited-union cost is out of the way
+- generalisable lesson: "hot enough to matter" in bookkeeping is dominated by `O(|seen|)`-per-state operations, not by per-successor work; before optimising a canonical form, check whether any frontier bookkeeping inside the inner loop is non-constant in the size of the already-visited set
 
 Endpoint-only result:
 
@@ -405,3 +408,46 @@ Interpretation:
 
 - allowing 6x6 states is now computationally viable per successor, but the state-space blow-up is the new bottleneck
 - raising caps blindly is unlikely to be the right next move; a useful `max_dim = 6` search probably needs dimension-aware scheduling, delayed 6x6 expansion, or a search mode for paths that genuinely require dimension `6`
+
+## Follow-up experiments
+
+Three follow-up questions are open after the depth-`16` `brix_ruiz_k3` result:
+
+1. **Is the blind path actually different from Baker's?** Both are graph-only and stay inside `max_dim = 5`, but the blind one is `16` moves and Baker's is `22`. They could still share intermediates.
+2. **Does a larger `max_entry` shorten the `k = 3` path?** The blind run used `max_entry = 6`, the smallest that contains both endpoints. If raising it lets the search visit higher-entry waypoints, maybe a shorter path exists. Also: how high can `max_entry` go inside a `60s` budget?
+3. **Does a graph-only path exist for `brix_ruiz_k4`?** SSE for `k = 4` is **not** confirmed in the literature, so a hit here would be a real new result, and absence is also informative.
+
+Outcomes 1 and 2:
+
+- new diagnostic [`src/bin/compare_brix_ruiz_graph_paths.rs`](../src/bin/compare_brix_ruiz_graph_paths.rs) canonicalises every intermediate matrix from both paths and reports overlap. The two paths share **only the start `[1, 2, 3, 1]` and the target `[1, 1, 6, 1]`**: all `21` Baker intermediates and all `15` blind intermediates are canonically distinct. The blind search found a genuinely independent witness, not a subpath of Baker's path
+- the `max_entry` sweep on `k = 3` (`max_dim = 5`, `60s` cap, all six values rerun blind):
+
+  | `max_entry` | path depth | visited     | elapsed |
+  | ----------- | ---------- | ----------- | ------- |
+  | `6`         | `16`       | `1,404,317` | `~5s`   |
+  | `7`         | `16`       | `1,686,748` | `7.0s`  |
+  | `8`         | `16`       | `1,884,139` | `8.2s`  |
+  | `10`        | `16`       | `2,195,632` | `9.1s`  |
+  | `12`        | `16`       | `2,644,022` | `11.9s` |
+  | `16`        | `16`       | `2,858,621` | `12.6s` |
+  | `24`        | `16`       | `3,025,339` | `13.2s` |
+  | `50`        | `16`       | `3,027,021` | `13.4s` |
+  | `200`       | `16`       | `3,027,021` | `13.4s` |
+
+- the visited count saturates at `~3.03M` for `max_entry >= 24`, so the entire reachable `max_dim = 5` graph-move universe within `~7` layers of either side is bounded by entry `24` and the search has effectively explored all of it. **Depth `16` is the global minimum graph-only path length on `max_dim = 5`**, and it is unaffected by `max_entry`. The `60s` budget is far from binding (largest run finishes in `13.4s`), so `max_entry` is not the constraint to relax
+
+Plan for outcome 3 (the `k = 4` search):
+
+- the literal target `B_4 = [[1, 12], [1, 1]]` has entry `12`, so any straightforward search needs `max_entry >= 12`. A first probe with `--k 4 --max-dim 5 --max-entry 12 --max-states 30000000 --max-seconds 60` hit the time cap at `63s` with `13,530,828` visited states and no meeting; backward depth `6` exploded from a `42,919`-node frontier to `9,452,297` discovered states, which is the dominant cost
+- two ideas to make the search actually finish within budget:
+  1. **Drop the dead in-run successor cache**. Profiling on `k = 4` shows the cache is `~500–700` bytes per visited state on top of the `~540` bytes of `seen + parent`, roughly doubling per-state memory. The cache provably never hits during a fresh bidirectional run (each side dedupes on insert and a meet terminates the search), so it is pure overhead. A `--use-cache` flag is now wired in, defaulted off; this should roughly double the state cap that fits in `~31 GB` RAM
+  2. **Pre-expand the target without entry pruning**. Instead of seeding the backward side with just `B_4`, run an unbounded BFS from `B_4` for a few graph-move steps, accept whatever entries appear, and use those states as the backward frontier. The main bidirectional loop then runs the rest of the search at a small `max_entry` (e.g. `6`, the same bound that worked for `k = 3`). The reconstructed path's first few backward steps will have entries `> max_entry`, but the bulk of the search lives inside the same low-entry universe that `k = 3` could traverse in `~5s`. A `--seed-depth N` flag is now wired in
+- both flags are off by default and should not affect the existing `k = 3` results when unused
+- intended runs:
+  - sanity check: `--k 3` with default flags reproduces the `5–7s` depth-`16` result
+  - cache off vs on, `--k 4 --max-dim 5 --max-entry 12`, same caps as the previous probe — measure RSS and visited-state count at the time cap
+  - `--k 4 --max-dim 5 --max-entry 6 --seed-depth {1, 2, 3}`, `60s` cap each, looking for a meet
+- predictions:
+  - the `--use-cache off` run should let `k = 4 / max_entry = 12` reach roughly twice the visited-state count in the same time budget but probably still not meet, because the explosion at backward depth `6+` is structural, not bookkeeping
+  - `--seed-depth 1` is unlikely to reach into the `max_entry = 6` universe at all because `[1, 12]` only splits cleanly (max child entry `<= 6`) into a small number of configurations, all close to `B_4`. **`seed-depth >= 2` is the more likely value to actually start producing low-entry seeds**
+  - if no `seed-depth` value finds a meet within `60s` at `max_entry = 6`, that is itself evidence that the `max_dim = 5 / max_entry = 6` universe does not connect `A_4` to even a small neighborhood of `B_4` — a non-trivial structural result, even though it is still consistent with `k = 4` SSE
