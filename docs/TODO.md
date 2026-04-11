@@ -11,6 +11,45 @@ The current solver stack is:
 
 The hard benchmark remains the Brix-Ruiz family, especially `k=3` and above.
 
+## Integration Plan: graph-only moves in the main search
+
+Simple version of the proposal:
+
+1. Add a real mode switch so callers can choose search behavior directly.
+2. Start with a strict `graph-only` mode (no generic factorisation moves).
+3. Keep today's behavior as `mixed`/default.
+4. Keep rollout minimal until graph-only mode is validated on target cases.
+
+### What this would look like to a caller
+
+Add a search-mode option that can be exposed by binaries as a CLI flag:
+
+- `--search-mode mixed` (default, current behavior)
+- `--search-mode graph-only` (only split/amalgamation graph moves)
+
+If we prefer a boolean first step, this can start as `--graph-only` and be upgraded to `--search-mode` afterward.
+
+### Concrete implementation sketch
+
+- extend `SearchConfig` with a mode field (enum)
+- in `expand_frontier_layer`, gate move families by mode:
+  - `graph-only`: allow graph split/amalgamation families only (`outsplit`, `insplit`, `out_amalgamation`, `in_amalgamation`)
+  - implementation note: today's `2x2 -> 3x3` graph expansions are wired through the specialized same-past/same-future generators, so those remain an internal implementation detail of graph-only mode until we unify the generator surface
+  - `mixed`: keep current graph + factorisation families
+- keep canonicalization + spectral pruning unchanged in every mode
+
+### Rollout plan (minimal)
+
+- Step A: add config + CLI plumbing and land `graph-only` mode
+- Step B: verify Lind-Marcus waypoint reproduction in `graph-only` mode at known bounds
+- Step C: run Brix-Ruiz `k=3` harness comparisons for `mixed` vs `graph-only`
+
+### Success criteria
+
+- we can explicitly run the main search in graph-only mode from the command line
+- graph-only mode reproduces the known sidecar waypoint behavior at bounded settings
+- mixed mode remains unchanged unless the flag/mode requests otherwise
+
 ## Current Priority Order
 
 ### 1. Implement matrix-level aligned or compatible search

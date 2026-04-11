@@ -4,7 +4,7 @@ use sse_core::aligned::{
 };
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2;
-use sse_core::types::SearchConfig;
+use sse_core::types::{SearchConfig, SearchMode};
 
 /// Elementary SSE pair: [[2,1],[1,1]] <-> [[1,1],[1,2]].
 /// Should be found in 1 step with small bounds.
@@ -15,6 +15,7 @@ fn bench_elementary_pair(c: &mut Criterion) {
         max_lag: 4,
         max_intermediate_dim: 2,
         max_entry: 10,
+        search_mode: SearchMode::Mixed,
     };
     c.bench_function("elementary_pair", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
@@ -29,6 +30,7 @@ fn bench_rectangular_pair(c: &mut Criterion) {
         max_lag: 4,
         max_intermediate_dim: 3,
         max_entry: 5,
+        search_mode: SearchMode::Mixed,
     };
     c.bench_function("rectangular_pair", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
@@ -44,6 +46,7 @@ fn bench_not_equivalent_invariant(c: &mut Criterion) {
         max_lag: 3,
         max_intermediate_dim: 2,
         max_entry: 15,
+        search_mode: SearchMode::Mixed,
     };
     c.bench_function("not_equivalent_invariant", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
@@ -59,6 +62,7 @@ fn bench_brix_ruiz_k3(c: &mut Criterion) {
         max_lag: 6,
         max_intermediate_dim: 3,
         max_entry: 6,
+        search_mode: SearchMode::Mixed,
     };
     let mut group = c.benchmark_group("brix_ruiz_k3");
     group.sample_size(20);
@@ -76,6 +80,7 @@ fn bench_large_entry_bound(c: &mut Criterion) {
         max_lag: 4,
         max_intermediate_dim: 2,
         max_entry: 25,
+        search_mode: SearchMode::Mixed,
     };
     c.bench_function("large_entry_bound", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
@@ -90,6 +95,7 @@ fn bench_elementary_pair_compare(c: &mut Criterion) {
         max_lag: 4,
         max_intermediate_dim: 2,
         max_entry: 10,
+        search_mode: SearchMode::Mixed,
     };
     let aligned = AlignedModuleSearchConfig2x2 {
         max_lag: 1,
@@ -115,6 +121,7 @@ fn bench_brix_ruiz_k3_compare(c: &mut Criterion) {
         max_lag: 6,
         max_intermediate_dim: 3,
         max_entry: 6,
+        search_mode: SearchMode::Mixed,
     };
     let aligned = AlignedModuleSearchConfig2x2 {
         max_lag: 3,

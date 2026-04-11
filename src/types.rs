@@ -4,6 +4,20 @@ use std::collections::BTreeMap;
 
 use crate::matrix::{DynMatrix, SqMatrix};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    Mixed,
+    #[serde(alias = "graph-only")]
+    GraphOnly,
+}
+
+impl Default for SearchMode {
+    fn default() -> Self {
+        Self::Mixed
+    }
+}
+
 /// Configuration for the SSE search.
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -14,6 +28,8 @@ pub struct SearchConfig {
     pub max_intermediate_dim: usize,
     /// Maximum entry value in intermediate matrices U, V.
     pub max_entry: u32,
+    /// Search move mode.
+    pub search_mode: SearchMode,
 }
 
 impl Default for SearchConfig {
@@ -22,12 +38,13 @@ impl Default for SearchConfig {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 25,
+            search_mode: SearchMode::Mixed,
         }
     }
 }
 
 /// One elementary SSE step: A = UV, B = VU.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EsseStep {
     pub u: DynMatrix,
     pub v: DynMatrix,
@@ -121,4 +138,18 @@ pub struct SearchTelemetry {
     pub total_visited_nodes: usize,
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
     pub layers: Vec<SearchLayerTelemetry>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SearchMode;
+
+    #[test]
+    fn test_search_mode_deserializes_snake_and_kebab_case_graph_only() {
+        let snake: SearchMode = serde_json::from_str("\"graph_only\"").unwrap();
+        let kebab: SearchMode = serde_json::from_str("\"graph-only\"").unwrap();
+
+        assert_eq!(snake, SearchMode::GraphOnly);
+        assert_eq!(kebab, SearchMode::GraphOnly);
+    }
 }
