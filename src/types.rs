@@ -43,7 +43,7 @@ impl Default for SearchConfig {
 }
 
 /// One elementary SSE step: A = UV, B = VU.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EsseStep {
     pub u: DynMatrix,
     pub v: DynMatrix,

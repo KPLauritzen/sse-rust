@@ -1,7 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::factorisation::enumerate_factorisations_3x3_to_2;
 use crate::matrix::{DynMatrix, SqMatrix};
+use crate::types::EsseStep;
 
 /// One explicit one-step out-split witness.
 ///
@@ -19,11 +20,14 @@ pub type OutsplitWitness2x2To3x3 = OutsplitWitness;
 pub struct GraphMoveSuccessor {
     pub family: &'static str,
     pub matrix: DynMatrix,
+    pub orig_matrix: DynMatrix,
+    pub step: EsseStep,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GraphMoveSuccessors {
     pub candidates: usize,
+    pub family_candidates: BTreeMap<&'static str, usize>,
     pub nodes: Vec<GraphMoveSuccessor>,
 }
 
@@ -144,6 +148,7 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
     assert!(current.is_square());
 
     let mut candidates = 0usize;
+    let mut family_candidates = BTreeMap::new();
     let mut seen = HashSet::new();
     let mut nodes = Vec::new();
 
@@ -153,6 +158,7 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
             "outsplit",
             false,
             &mut candidates,
+            &mut family_candidates,
             &mut seen,
             &mut nodes,
         );
@@ -162,6 +168,7 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
             "insplit",
             true,
             &mut candidates,
+            &mut family_candidates,
             &mut seen,
             &mut nodes,
         );
@@ -170,25 +177,41 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
     if current.rows > 2 {
         for witness in enumerate_out_amalgamations(current) {
             candidates += 1;
+            *family_candidates.entry("out_amalgamation").or_default() += 1;
+            let step = EsseStep {
+                u: witness.edge,
+                v: witness.division,
+            };
             push_canonical_graph_successor(
                 "out_amalgamation",
                 witness.outsplit,
+                step,
                 &mut seen,
                 &mut nodes,
             );
         }
         for witness in enumerate_in_amalgamations(current) {
             candidates += 1;
+            *family_candidates.entry("in_amalgamation").or_default() += 1;
+            let step = EsseStep {
+                u: witness.division,
+                v: witness.edge,
+            };
             push_canonical_graph_successor(
                 "in_amalgamation",
                 witness.outsplit,
+                step,
                 &mut seen,
                 &mut nodes,
             );
         }
     }
 
-    GraphMoveSuccessors { candidates, nodes }
+    GraphMoveSuccessors {
+        candidates,
+        family_candidates,
+        nodes,
+    }
 }
 
 fn append_representative_outsplit_successors(
@@ -196,6 +219,7 @@ fn append_representative_outsplit_successors(
     family: &'static str,
     transpose_result: bool,
     candidates: &mut usize,
+    family_candidates: &mut BTreeMap<&'static str, usize>,
     seen: &mut HashSet<DynMatrix>,
     nodes: &mut Vec<GraphMoveSuccessor>,
 ) {
@@ -217,6 +241,7 @@ fn append_representative_outsplit_successors(
                 }
             })
             .collect();
+        let division = division_matrix_from_assignment(&assignment, parent_count);
 
         for split in split_row_into_children(&parent_rows[split_parent], 2) {
             // The two split children are interchangeable up to permutation.
@@ -225,6 +250,7 @@ fn append_representative_outsplit_successors(
             }
 
             *candidates += 1;
+            *family_candidates.entry(family).or_default() += 1;
 
             let mut child_rows = parent_rows.clone();
             child_rows[split_parent] = split[0].clone();
@@ -237,11 +263,33 @@ fn append_representative_outsplit_successors(
                 }
             }
 
-            let mut outsplit = DynMatrix::new(child_count, child_count, data);
+            let edge = DynMatrix::new(
+                child_count,
+                parent_count,
+                child_rows
+                    .iter()
+                    .flat_map(|row| row.iter())
+                    .copied()
+                    .collect(),
+            );
+            let outsplit = edge.mul(&division);
+
             if transpose_result {
-                outsplit = outsplit.transpose();
+                let division = division.transpose();
+                let edge = edge.transpose();
+                let outsplit = outsplit.transpose();
+                let step = EsseStep {
+                    u: edge.clone(),
+                    v: division.clone(),
+                };
+                push_canonical_graph_successor(family, outsplit, step, seen, nodes);
+            } else {
+                let step = EsseStep {
+                    u: division.clone(),
+                    v: edge.clone(),
+                };
+                push_canonical_graph_successor(family, outsplit, step, seen, nodes);
             }
-            push_canonical_graph_successor(family, outsplit, seen, nodes);
         }
     }
 }
@@ -249,6 +297,7 @@ fn append_representative_outsplit_successors(
 fn push_canonical_graph_successor(
     family: &'static str,
     matrix: DynMatrix,
+    step: EsseStep,
     seen: &mut HashSet<DynMatrix>,
     nodes: &mut Vec<GraphMoveSuccessor>,
 ) {
@@ -257,6 +306,8 @@ fn push_canonical_graph_successor(
         nodes.push(GraphMoveSuccessor {
             family,
             matrix: canon,
+            orig_matrix: matrix,
+            step,
         });
     }
 }
@@ -686,6 +737,7 @@ mod tests {
                 .into_iter()
                 .map(|witness| witness.outsplit.canonical_perm())
                 .collect::<HashSet<_>>();
+            let mut family_candidates = BTreeMap::new();
             let mut seen = HashSet::new();
             let mut nodes = Vec::new();
             let mut candidates = 0;
@@ -694,6 +746,7 @@ mod tests {
                 "outsplit",
                 false,
                 &mut candidates,
+                &mut family_candidates,
                 &mut seen,
                 &mut nodes,
             );
@@ -703,6 +756,22 @@ mod tests {
                 .collect::<HashSet<_>>();
             assert_eq!(actual, expected);
             assert!(candidates <= expected.len() * 2);
+        }
+    }
+
+    #[test]
+    fn test_graph_move_successors_include_valid_steps() {
+        let a = DynMatrix::from_sq(&SqMatrix::new([[1, 3], [2, 1]]));
+        let successors = enumerate_graph_move_successors(&a, 3);
+
+        assert!(!successors.nodes.is_empty());
+        for successor in successors.nodes {
+            assert_eq!(successor.step.u.mul(&successor.step.v), a);
+            assert_eq!(
+                successor.step.v.mul(&successor.step.u),
+                successor.orig_matrix
+            );
+            assert_eq!(successor.orig_matrix.canonical_perm(), successor.matrix);
         }
     }
 
