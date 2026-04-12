@@ -379,65 +379,83 @@ fn search_between_waypoints(
         }
 
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
-        let expansions = expand_frontier(
-            &current_frontier,
-            orig,
-            max_dim,
-            max_entry,
-            search_mode,
-            source_trace,
-            source_trace_square,
-        );
         let next_depth = layer_depth + 1;
         let mut next_frontier = VecDeque::new();
+        let mut timed_out = false;
 
-        for expansion in expansions {
-            if parent.contains_key(&expansion.next_canon) {
-                continue;
-            }
-
-            parent.insert(
-                expansion.next_canon.clone(),
-                Some((expansion.parent_canon.clone(), expansion.step)),
-            );
-            depths.insert(expansion.next_canon.clone(), next_depth);
-            orig.insert(expansion.next_canon.clone(), expansion.next_orig);
-
-            if let Some(&other_depth) = other_depths.get(&expansion.next_canon) {
-                let total_lag = next_depth + other_depth;
-                if total_lag <= max_lag {
-                    let meeting = expansion.next_canon;
-                    let path = if expand_forward {
-                        reconstruct_path(
-                            start,
-                            target,
-                            &meeting,
-                            &fwd_parent,
-                            &fwd_orig,
-                            &bwd_parent,
-                            &bwd_orig,
-                        )
-                    } else {
-                        reconstruct_path(
-                            start,
-                            target,
-                            &meeting,
-                            other_parent,
-                            other_orig,
-                            parent,
-                            orig,
-                        )
-                    };
-                    let visited = visited_union_size(&fwd_parent, &bwd_parent);
-                    return SearchResult::Found(FoundPath {
-                        matrices: path.matrices,
-                        steps: path.steps,
-                        visited,
-                    });
+        const CHUNK_SIZE: usize = 256;
+        for chunk in current_frontier.chunks(CHUNK_SIZE) {
+            if let Some(dl) = deadline {
+                if Instant::now() >= dl {
+                    timed_out = true;
+                    break;
                 }
             }
 
-            next_frontier.push_back(expansion.next_canon);
+            let expansions = expand_frontier(
+                chunk,
+                orig,
+                max_dim,
+                max_entry,
+                search_mode,
+                source_trace,
+                source_trace_square,
+            );
+
+            for expansion in expansions {
+                if parent.contains_key(&expansion.next_canon) {
+                    continue;
+                }
+
+                parent.insert(
+                    expansion.next_canon.clone(),
+                    Some((expansion.parent_canon.clone(), expansion.step)),
+                );
+                depths.insert(expansion.next_canon.clone(), next_depth);
+                orig.insert(expansion.next_canon.clone(), expansion.next_orig);
+
+                if let Some(&other_depth) = other_depths.get(&expansion.next_canon) {
+                    let total_lag = next_depth + other_depth;
+                    if total_lag <= max_lag {
+                        let meeting = expansion.next_canon;
+                        let path = if expand_forward {
+                            reconstruct_path(
+                                start,
+                                target,
+                                &meeting,
+                                &fwd_parent,
+                                &fwd_orig,
+                                &bwd_parent,
+                                &bwd_orig,
+                            )
+                        } else {
+                            reconstruct_path(
+                                start,
+                                target,
+                                &meeting,
+                                other_parent,
+                                other_orig,
+                                parent,
+                                orig,
+                            )
+                        };
+                        let visited = visited_union_size(&fwd_parent, &bwd_parent);
+                        return SearchResult::Found(FoundPath {
+                            matrices: path.matrices,
+                            steps: path.steps,
+                            visited,
+                        });
+                    }
+                }
+
+                next_frontier.push_back(expansion.next_canon);
+            }
+        }
+
+        if timed_out {
+            return SearchResult::TimedOut {
+                visited: visited_union_size(&fwd_parent, &bwd_parent),
+            };
         }
 
         if next_frontier.is_empty() {
