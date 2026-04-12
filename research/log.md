@@ -173,3 +173,12 @@
   and matches the known Baker lag-7 witness length. The best routes pass through 4x4 and 3x3
   intermediates with max entry 6. All improved results were persisted to the sqlite database
   (9 total result rows, 2 at lag 7).
+
+- `new-moves-3` Added binary-sparse 4x4↔5x5 rectangular factorisation families.
+  Two new families enable short visits to dimension 5 from 4x4 nodes and back:
+  5x5→4x4 (U has binary-sparse rows, 10K outer iterations per node) and 4x4→5x5
+  (U has 4 binary-sparse columns + 1 distinguished weighted column). Both gated on
+  `max_intermediate_dim ≥ 5`. Supporting infrastructure: `solve_nonneg_4x4` via
+  Cramer's rule with rank-3 fallback, `solve_overdetermined_5x4`, and length-4
+  binary-sparse/weighted row helpers. Quick shortcut search confirms the families
+  fire and produce shortcuts (e.g. 2x2→5x5 gap=5 solved in 262 visited nodes).
