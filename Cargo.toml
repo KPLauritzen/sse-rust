@@ -66,6 +66,11 @@ path = "src/bin/find_brix_ruiz_graph_path.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "find_brix_ruiz_path_shortcuts"
+path = "src/bin/find_brix_ruiz_path_shortcuts.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "find_lind_marcus_graph_waypoints"
 path = "src/bin/find_lind_marcus_graph_waypoints.rs"
 required-features = ["research-tools"]
