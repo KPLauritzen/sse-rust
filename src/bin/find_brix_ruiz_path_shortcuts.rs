@@ -14,6 +14,7 @@ fn main() {
     let mut max_entry = 6u32;
     let mut min_gap = 2usize;
     let mut max_gap = usize::MAX;
+    let mut refine_rounds = 1usize;
     let mut search_mode = SearchMode::Mixed;
 
     let mut args = std::env::args().skip(1);
@@ -54,6 +55,13 @@ fn main() {
                     .parse()
                     .expect("invalid max gap");
             }
+            "--refine-rounds" => {
+                refine_rounds = args
+                    .next()
+                    .expect("--refine-rounds requires a value")
+                    .parse()
+                    .expect("invalid refine rounds");
+            }
             "--search-mode" => {
                 let value = args.next().expect("--search-mode requires a value");
                 search_mode = match value.as_str() {
@@ -64,7 +72,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--search-mode mixed|graph-only]"
+                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--refine-rounds N] [--search-mode mixed|graph-only]"
                 );
                 return;
             }
@@ -72,127 +80,34 @@ fn main() {
         }
     }
 
-    let guide = endpoint_16_path();
-    println!("Brix-Ruiz k=3 shortcut search along the known 16-move graph path");
+    println!("Brix-Ruiz k=3 shortcut search along guide paths");
     println!(
-        "config: search_mode={:?}, max_shortcut_lag={}, max_dim={}, max_entry={}, min_gap={}, max_gap={}",
-        search_mode, max_shortcut_lag, max_dim, max_entry, min_gap, max_gap
+        "config: search_mode={:?}, max_shortcut_lag={}, max_dim={}, max_entry={}, min_gap={}, max_gap={}, refine_rounds={}",
+        search_mode, max_shortcut_lag, max_dim, max_entry, min_gap, max_gap, refine_rounds
     );
-    println!("guide moves = {}", guide.len() - 1);
-    println!();
 
-    let mut edges = Vec::new();
-    for idx in 0..guide.len() - 1 {
-        edges.push(ShortcutEdge {
-            from: idx,
-            to: idx + 1,
-            lag: 1,
-            path: ShortcutPath {
-                matrices: vec![guide[idx].clone(), guide[idx + 1].clone()],
-                steps: Vec::new(),
-            },
-            kind: "guide",
-        });
-    }
-
-    for start in 0..guide.len() - 1 {
-        for end in start + min_gap..guide.len() {
-            let gap = end - start;
-            if gap > max_gap {
-                break;
-            }
-
-            let lag_cap = max_shortcut_lag.min(gap - 1);
-            if lag_cap == 0 {
-                continue;
-            }
-
-            println!(
-                "segment {start:>2}->{end:>2} gap={gap:>2} lag_cap={lag_cap:>2} dims={}x{} -> {}x{}",
-                guide[start].rows,
-                guide[start].cols,
-                guide[end].rows,
-                guide[end].cols
-            );
-
-            let result = search_between_waypoints(
-                &guide[start],
-                &guide[end],
-                lag_cap,
-                max_dim,
-                max_entry,
-                search_mode,
-            );
-            match result {
-                SearchResult::Found(path) => {
-                    let lag = path.steps.len();
-                    if lag < gap {
-                        println!(
-                            "  found shortcut: lag={} matrices={} visited={}",
-                            lag,
-                            path.matrices.len(),
-                            path.visited
-                        );
-                        edges.push(ShortcutEdge {
-                            from: start,
-                            to: end,
-                            lag,
-                            path: ShortcutPath {
-                                matrices: path.matrices,
-                                steps: path.steps,
-                            },
-                            kind: "shortcut",
-                        });
-                    } else {
-                        println!(
-                            "  found non-improving path: lag={} gap={} matrices={} visited={}",
-                            lag,
-                            gap,
-                            path.matrices.len(),
-                            path.visited
-                        );
-                    }
-                }
-                SearchResult::NotFound { visited } => {
-                    println!("  no shortcut found within lag cap; visited={visited}");
-                }
-            }
-        }
-    }
-
-    println!();
-    println!("Discovered edges:");
-    for edge in &edges {
-        if edge.to - edge.from > 1 {
-            println!(
-                "  {} {:>2}->{:>2} gap={} lag={}",
-                edge.kind,
-                edge.from,
-                edge.to,
-                edge.to - edge.from,
-                edge.lag
-            );
-        }
-    }
-
-    let best =
-        shortest_index_path(guide.len(), &edges).expect("guide path should connect endpoints");
-    println!();
-    println!("Best route over guide indices:");
-    for edge in &best {
-        println!(
-            "  {:>2}->{:>2} gap={} lag={} kind={} matrices={}",
-            edge.from,
-            edge.to,
-            edge.to - edge.from,
-            edge.lag,
-            edge.kind,
-            edge.path.matrices.len()
+    let mut guide = endpoint_16_path();
+    for round in 0..refine_rounds {
+        println!();
+        println!("=== refinement round {} ===", round + 1);
+        let outcome = search_guide_path(
+            &guide,
+            max_shortcut_lag,
+            max_dim,
+            max_entry,
+            min_gap,
+            max_gap,
+            search_mode,
         );
+
+        let next_guide = stitch_route(&outcome.best);
+        if next_guide.len() == guide.len() {
+            println!();
+            println!("refinement stalled at {} moves", guide.len() - 1);
+            break;
+        }
+        guide = next_guide;
     }
-    let total_lag: usize = best.iter().map(|edge| edge.lag).sum();
-    println!();
-    println!("best total lag = {total_lag}");
 }
 
 #[derive(Clone)]
@@ -219,6 +134,10 @@ struct FoundPath {
 enum SearchResult {
     Found(FoundPath),
     NotFound { visited: usize },
+}
+
+struct GuideSearchOutcome {
+    best: Vec<ShortcutEdge>,
 }
 
 #[derive(Clone)]
@@ -376,6 +295,144 @@ fn search_between_waypoints(
     SearchResult::NotFound {
         visited: visited_union_size(&fwd_parent, &bwd_parent),
     }
+}
+
+fn search_guide_path(
+    guide: &[DynMatrix],
+    max_shortcut_lag: usize,
+    max_dim: usize,
+    max_entry: u32,
+    min_gap: usize,
+    max_gap: usize,
+    search_mode: SearchMode,
+) -> GuideSearchOutcome {
+    println!("guide moves = {}", guide.len() - 1);
+    println!();
+
+    let mut edges = Vec::new();
+    for idx in 0..guide.len() - 1 {
+        edges.push(ShortcutEdge {
+            from: idx,
+            to: idx + 1,
+            lag: 1,
+            path: ShortcutPath {
+                matrices: vec![guide[idx].clone(), guide[idx + 1].clone()],
+                steps: Vec::new(),
+            },
+            kind: "guide",
+        });
+    }
+
+    for start in 0..guide.len() - 1 {
+        for end in start + min_gap..guide.len() {
+            let gap = end - start;
+            if gap > max_gap {
+                break;
+            }
+
+            let lag_cap = max_shortcut_lag.min(gap - 1);
+            if lag_cap == 0 {
+                continue;
+            }
+
+            println!(
+                "segment {start:>2}->{end:>2} gap={gap:>2} lag_cap={lag_cap:>2} dims={}x{} -> {}x{}",
+                guide[start].rows,
+                guide[start].cols,
+                guide[end].rows,
+                guide[end].cols
+            );
+
+            let result = search_between_waypoints(
+                &guide[start],
+                &guide[end],
+                lag_cap,
+                max_dim,
+                max_entry,
+                search_mode,
+            );
+            match result {
+                SearchResult::Found(path) => {
+                    let lag = path.steps.len();
+                    if lag < gap {
+                        println!(
+                            "  found shortcut: lag={} matrices={} visited={}",
+                            lag,
+                            path.matrices.len(),
+                            path.visited
+                        );
+                        edges.push(ShortcutEdge {
+                            from: start,
+                            to: end,
+                            lag,
+                            path: ShortcutPath {
+                                matrices: path.matrices,
+                                steps: path.steps,
+                            },
+                            kind: "shortcut",
+                        });
+                    } else {
+                        println!(
+                            "  found non-improving path: lag={} gap={} matrices={} visited={}",
+                            lag,
+                            gap,
+                            path.matrices.len(),
+                            path.visited
+                        );
+                    }
+                }
+                SearchResult::NotFound { visited } => {
+                    println!("  no shortcut found within lag cap; visited={visited}");
+                }
+            }
+        }
+    }
+
+    println!();
+    println!("Discovered edges:");
+    for edge in &edges {
+        if edge.to - edge.from > 1 {
+            println!(
+                "  {} {:>2}->{:>2} gap={} lag={}",
+                edge.kind,
+                edge.from,
+                edge.to,
+                edge.to - edge.from,
+                edge.lag
+            );
+        }
+    }
+
+    let best =
+        shortest_index_path(guide.len(), &edges).expect("guide path should connect endpoints");
+    println!();
+    println!("Best route over guide indices:");
+    for edge in &best {
+        println!(
+            "  {:>2}->{:>2} gap={} lag={} kind={} matrices={}",
+            edge.from,
+            edge.to,
+            edge.to - edge.from,
+            edge.lag,
+            edge.kind,
+            edge.path.matrices.len()
+        );
+    }
+    let total_lag: usize = best.iter().map(|edge| edge.lag).sum();
+    println!();
+    println!("best total lag = {total_lag}");
+    println!("best route matrices:");
+    for (idx, matrix) in stitch_route(&best).iter().enumerate() {
+        println!(
+            "  {:>2}: {}x{} {}",
+            idx,
+            matrix.rows,
+            matrix.cols,
+            format_matrix(matrix)
+        );
+    }
+
+    GuideSearchOutcome { best }
 }
 
 fn expand_frontier(
@@ -646,6 +703,30 @@ fn shortest_index_path(edge_count: usize, edges: &[ShortcutEdge]) -> Option<Vec<
     }
     route.reverse();
     Some(route)
+}
+
+fn stitch_route(route: &[ShortcutEdge]) -> Vec<DynMatrix> {
+    let mut matrices = Vec::new();
+    for (idx, edge) in route.iter().enumerate() {
+        if idx == 0 {
+            matrices.extend(edge.path.matrices.iter().cloned());
+        } else {
+            matrices.extend(edge.path.matrices.iter().skip(1).cloned());
+        }
+    }
+    matrices
+}
+
+fn format_matrix(matrix: &DynMatrix) -> String {
+    let rows: Vec<String> = (0..matrix.rows)
+        .map(|row| {
+            let entries: Vec<String> = (0..matrix.cols)
+                .map(|col| matrix.get(row, col).to_string())
+                .collect();
+            format!("[{}]", entries.join(","))
+        })
+        .collect();
+    rows.join(" ")
 }
 
 fn mat(dim: usize, data: Vec<u32>) -> DynMatrix {
