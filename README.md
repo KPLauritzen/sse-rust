@@ -107,6 +107,15 @@ See [docs/TODO.md](docs/TODO.md) for concrete approaches: bidirectional BFS, ite
 
 Native builds now expand each BFS frontier layer in parallel with `rayon`, using a collect-then-merge pass so collision detection and parent-map updates stay deterministic. The `wasm32` build keeps the same serial expansion path.
 
+## Documentation Map
+
+- [`docs/README.md`](docs/README.md) explains how repo docs are split between
+  project overview, roadmap context, and research workflow.
+- [`docs/TODO.md`](docs/TODO.md) is roadmap context only; use `bd` for live
+  actionable work during the Beads trial.
+- [`research/README.md`](research/README.md) explains where to put terse log
+  entries, longer research notes, and local run artifacts.
+
 ---
 
 ## Implementation
