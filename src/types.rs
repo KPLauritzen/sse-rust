@@ -60,6 +60,16 @@ pub struct SsePath<const N: usize> {
     pub steps: Vec<EsseStep>,
 }
 
+/// A chain of elementary SSE steps connecting arbitrary square endpoints.
+#[derive(Clone, Debug)]
+pub struct DynSsePath {
+    /// The sequence of matrices: A = matrices[0], B = matrices[last].
+    pub matrices: Vec<DynMatrix>,
+    /// The elementary steps: matrices[i] = steps[i].u * steps[i].v,
+    /// matrices[i+1] = steps[i].v * steps[i].u.
+    pub steps: Vec<EsseStep>,
+}
+
 /// Result of an SSE search.
 #[derive(Clone, Debug)]
 pub enum SseResult<const N: usize> {
@@ -67,6 +77,17 @@ pub enum SseResult<const N: usize> {
     Equivalent(SsePath<N>),
     /// Found a direct aligned/balanced/compatible concrete-shift witness.
     EquivalentByConcreteShift(ConcreteShiftWitness2x2),
+    /// Proved not SSE by an invariant mismatch.
+    NotEquivalent(String),
+    /// Search exhausted without finding a path or proving non-equivalence.
+    Unknown,
+}
+
+/// Result of an SSE search between arbitrary square endpoints.
+#[derive(Clone, Debug)]
+pub enum DynSseResult {
+    /// Found a path proving SSE.
+    Equivalent(DynSsePath),
     /// Proved not SSE by an invariant mismatch.
     NotEquivalent(String),
     /// Search exhausted without finding a path or proving non-equivalence.
