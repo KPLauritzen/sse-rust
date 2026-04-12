@@ -182,6 +182,3 @@
   Cramer's rule with rank-3 fallback, `solve_overdetermined_5x4`, and length-4
   binary-sparse/weighted row helpers. Quick shortcut search confirms the families
   fire and produce shortcuts (e.g. 2x2→5x5 gap=5 solved in 262 visited nodes).
-
-- `2026-04-12-1646-factor-solver-memo` Added thread-local memoization for the small `2x3` and `3x2` linear solvers.
-  Failed. The cache clone/lookup overhead pushed all three telemetry-focus mixed probes into timeout, so the smaller-subproblem cache did not pay for itself.
