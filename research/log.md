@@ -152,3 +152,6 @@
 
 - `worktree` Added a binary-sparse `4x4 -> 3x3` rectangular factor family.
   Kept. It now recovers Baker step 6 and the hidden `3x3` bridge inside Baker step 5, but step 2 is still missing and the default shortcut search still bottoms out at total lag 11.
+
+- `worktree` Added the dual structured `3x3 -> 4x4` rectangular factor family.
+  Kept. It now recovers Baker step 2 directly while keeping the default shortcut search flat at total lag 11, so the remaining literal gap is step 5 itself rather than the `3x4`/`4x3` boundary moves around it.

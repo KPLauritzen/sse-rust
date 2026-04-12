@@ -127,3 +127,22 @@ enumerator. It succeeded on the local acceptance gate partially:
 
 So the next implementation target should be the dual `3x3 -> 4x4` structured
 family rather than more work on the `4x4 -> 3x3` side.
+
+The dual family is now implemented too. With the same acceptance probes:
+
+- Baker step 2 is now covered directly by
+  `binary_sparse_rectangular_factorisation_3x3_to_4`.
+- Baker steps 3 and 4 remain covered by `elementary_conjugation`.
+- Baker step 6 remains covered directly by
+  `binary_sparse_rectangular_factorisation_4x3_to_3`.
+- Baker step 7 remains covered by `rectangular_factorisation_3x3_to_2`.
+- Baker step 5 is still missing as a literal `4x4 -> 4x4` step, even though
+  its hidden `4x4 -> 3x3` bridge is now recovered.
+
+The default shortcut search result did **not** improve further:
+
+- best total lag is still `11`
+
+So the `3x4` / `4x3` vocabulary gap around Baker step 2 was real and is now
+closed, but the remaining optimisation target is the literal step-5 refactor
+or an equivalent shortcut that bypasses it.
