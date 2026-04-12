@@ -8,6 +8,7 @@ This repo can support autonomous search work, but only through the fixed researc
    Prefer `autoresearch/<tag>`.
 2. Read these files before editing:
    - `README.md`
+   - `research/README.md`
    - `docs/TODO.md`
    - `research/cases.json`
    - `src/search.rs`
@@ -115,7 +116,13 @@ The idea is that you are a completely autonomous researcher trying things out. I
 
 NEVER STOP: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working indefinitely until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
 
-Research log: Keep a log at ` research/log.md`. Write a short, concise, 1-3 line description of what you tried and if it failed, why you think it didnt work. No implementation details here. 
+Research notes:
+
+- Keep the terse chronological ledger in `research/log.md`.
+- Write short, concise, `1-3` line log entries describing what you tried and,
+  if it failed, why you think it did not work. No implementation details there.
+- If a reading session or experiment needs more room, add a note under
+  `research/notes/` and reference the relevant commit hash or run stamp.
 
 ## Known Constraints
 

@@ -4,23 +4,32 @@ These notes come from reading `README.md`, `docs/TODO.md`, the current search co
 
 The goal is not to filter too aggressively. If an idea looked even somewhat plausible as a way to improve the search, it goes here. But the document is no longer flat: the papers now support a clearer priority order than before.
 
+This file is an idea bank, not the active backlog. Use `bd` for actionable work
+and `research/notes/` for longer evolving dossiers.
+
 ## Major Corrections To The Local Picture
 
-- The note in [`docs/TODO.md`](/home/kasper/dev/sse-rust/docs/TODO.md) about aligned shift equivalence being blocked on a missing matrix-level definition is now stale.
-- Bilich-Dor-On-Ruiz 2024 defines matrix-level aligned, balanced, and compatible shift equivalence for finite essential matrices and proves that they coincide with each other and with SSE.
-- So aligned/balanced/compatible search is no longer a speculative sidecar. It is a legitimate search substrate for the main problem.
-- The current [`src/aligned.rs`](/home/kasper/dev/sse-rust/src/aligned.rs) still reflects the older module-level aligned viewpoint from Brix-Dor-On-Hazrat-Ruiz 2025. That code may still be useful heuristically, but it is behind the literature for matrix search.
+- The repo now has matrix-level concrete-shift validators and bounded search
+  machinery in [`src/aligned.rs`](../src/aligned.rs), even though some public
+  names still preserve the older local `module` terminology.
+- Bilich-Dor-On-Ruiz 2024 defines matrix-level aligned, balanced, and
+  compatible shift equivalence for finite essential matrices and proves that
+  they coincide with each other and with SSE.
+- So aligned/balanced/compatible search is no longer a speculative sidecar. It
+  is a legitimate search substrate for the main problem.
+- The remaining gap is not source acquisition. It is search-space reduction,
+  clearer naming, and better integration into the main solver.
 - Carlsen-Dor-On-Eilers 2024 and the Matsumoto line of papers make the operator-algebraic witness spaces much less "remote" than they first looked. In several finite-essential settings they are exactly the same equivalence relation seen through better-structured data.
 
 ## What The Code Already Has
 
-- Bounded bidirectional integer SSE search in [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs).
-- Factorization enumeration in [`src/factorisation.rs`](/home/kasper/dev/sse-rust/src/factorisation.rs).
-- `2x2` invariants in [`src/invariants.rs`](/home/kasper/dev/sse-rust/src/invariants.rs), including Bowen-Franks, generalized Bowen-Franks, and an Eilers-Kiming ideal-class test.
-- Module-aligned sidecar search in [`src/aligned.rs`](/home/kasper/dev/sse-rust/src/aligned.rs).
-- Balanced one-step search in [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs).
-- Positive-conjugacy search in [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs).
-- Graph-move search experiments in [`src/graph_moves.rs`](/home/kasper/dev/sse-rust/src/graph_moves.rs).
+- Bounded bidirectional integer SSE search in [`src/search.rs`](../src/search.rs).
+- Factorization enumeration in [`src/factorisation.rs`](../src/factorisation.rs).
+- `2x2` invariants in [`src/invariants.rs`](../src/invariants.rs), including Bowen-Franks, generalized Bowen-Franks, and an Eilers-Kiming ideal-class test.
+- Concrete-shift validation and bounded aligned search in [`src/aligned.rs`](../src/aligned.rs).
+- Balanced one-step search in [`src/balanced.rs`](../src/balanced.rs).
+- Positive-conjugacy search in [`src/conjugacy.rs`](../src/conjugacy.rs).
+- Graph-move search experiments in [`src/graph_moves.rs`](../src/graph_moves.rs).
 
 That means the best next ideas are mostly about:
 
@@ -184,21 +193,21 @@ That means the best next ideas are mostly about:
 
 ## Concrete Implementation Candidates
 
-- Add a new matrix-level aligned or compatible search module and wire it into [`src/search.rs`](/home/kasper/dev/sse-rust/src/search.rs) as both:
+- Add a new matrix-level aligned or compatible search module and wire it into [`src/search.rs`](../src/search.rs) as both:
   - a direct bounded witness search,
   - and a proposal source for the generic search.
 
-- Promote [`src/conjugacy.rs`](/home/kasper/dev/sse-rust/src/conjugacy.rs) into a move generator that emits prioritized candidate factorizations or structured split moves.
+- Promote [`src/conjugacy.rs`](../src/conjugacy.rs) into a move generator that emits prioritized candidate factorizations or structured split moves.
 
-- Extend [`src/balanced.rs`](/home/kasper/dev/sse-rust/src/balanced.rs) from one-step search to short balanced zig-zag search with caching of common intermediates.
+- Extend [`src/balanced.rs`](../src/balanced.rs) from one-step search to short balanced zig-zag search with caching of common intermediates.
 
-- Refactor [`src/graph_moves.rs`](/home/kasper/dev/sse-rust/src/graph_moves.rs) around targeted move families from the papers:
+- Refactor [`src/graph_moves.rs`](../src/graph_moves.rs) around targeted move families from the papers:
   - out-splits,
   - refined in-splits of the `(I+)` flavor,
   - higher-block refinements,
   - canonical probe moves.
 
-- Upgrade [`src/invariants.rs`](/home/kasper/dev/sse-rust/src/invariants.rs) with a second arithmetic stage specialized to the quadratic-order data of the `2x2` case.
+- Upgrade [`src/invariants.rs`](../src/invariants.rs) with a second arithmetic stage specialized to the quadratic-order data of the `2x2` case.
 
 - Add a unified experimental driver which can alternate:
   - ordinary factorization moves,
