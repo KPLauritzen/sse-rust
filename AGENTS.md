@@ -1,5 +1,6 @@
 - Run `cargo fmt` before any commit. 
 - Use reasonable timeouts for potentially explosive search/probe commands; start with small bounds and increase only after the telemetry looks manageable.
+- Commit your changes to git often. Before you ask the user for feedback or additional input. 
 
 ## Beads Trial
 
