@@ -794,6 +794,63 @@ fn weighted_sparse_rows_len3(max_entry: u32) -> Vec<[u32; 3]> {
     rows
 }
 
+fn binary_sparse_rows_len4() -> Vec<[u32; 4]> {
+    vec![
+        // Support size 1: C(4,1) = 4
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+        // Support size 2: C(4,2) = 6
+        [1, 1, 0, 0],
+        [1, 0, 1, 0],
+        [1, 0, 0, 1],
+        [0, 1, 1, 0],
+        [0, 1, 0, 1],
+        [0, 0, 1, 1],
+    ]
+}
+
+fn is_binary_sparse_row_len4(row: [u32; 4]) -> bool {
+    let nonzero = row.iter().filter(|&&v| v != 0).count();
+    nonzero >= 1 && nonzero <= 2 && row.iter().all(|&v| v <= 1)
+}
+
+fn push_unique_row_len4(rows: &mut Vec<[u32; 4]>, row: [u32; 4]) {
+    if !rows.contains(&row) {
+        rows.push(row);
+    }
+}
+
+fn weighted_sparse_rows_len4(max_entry: u32) -> Vec<[u32; 4]> {
+    let binary_rows = binary_sparse_rows_len4();
+    let mut rows = binary_rows.clone();
+
+    for row in binary_rows {
+        let nonzero_positions: Vec<usize> = row
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &entry)| if entry > 0 { Some(idx) } else { None })
+            .collect();
+
+        for weight in 2..=max_entry {
+            let mut scaled_row = row;
+            for &idx in &nonzero_positions {
+                scaled_row[idx] = weight;
+            }
+            push_unique_row_len4(&mut rows, scaled_row);
+
+            for &idx in &nonzero_positions {
+                let mut weighted_row = row;
+                weighted_row[idx] = weight;
+                push_unique_row_len4(&mut rows, weighted_row);
+            }
+        }
+    }
+
+    rows
+}
+
 /// Enumerate a narrow structured family of 4x4 -> 3x3 factorisations A = UV
 /// where the 4x3 factor U has binary rows with support size 1 or 2.
 fn visit_binary_sparse_factorisations_4x4_to_3<F>(a: &DynMatrix, max_entry: u32, visit: &mut F)
@@ -1056,6 +1113,432 @@ where
                             );
                             let u = DynMatrix::new(3, 4, u_data);
                             visit(u, v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Enumerate a narrow structured family of 5x5 -> 4x4 factorisations A = UV
+/// where the 5x4 factor U has binary-sparse rows with support size 1 or 2.
+fn visit_binary_sparse_factorisations_5x5_to_4<F>(a: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 5);
+    assert_eq!(a.cols, 5);
+
+    let rows = binary_sparse_rows_len4();
+    // A's columns as length-4 vectors (top 4 rows only), for solving V.
+    let a_cols: [[i64; 4]; 5] = [
+        [
+            a.get(0, 0) as i64,
+            a.get(1, 0) as i64,
+            a.get(2, 0) as i64,
+            a.get(3, 0) as i64,
+        ],
+        [
+            a.get(0, 1) as i64,
+            a.get(1, 1) as i64,
+            a.get(2, 1) as i64,
+            a.get(3, 1) as i64,
+        ],
+        [
+            a.get(0, 2) as i64,
+            a.get(1, 2) as i64,
+            a.get(2, 2) as i64,
+            a.get(3, 2) as i64,
+        ],
+        [
+            a.get(0, 3) as i64,
+            a.get(1, 3) as i64,
+            a.get(2, 3) as i64,
+            a.get(3, 3) as i64,
+        ],
+        [
+            a.get(0, 4) as i64,
+            a.get(1, 4) as i64,
+            a.get(2, 4) as i64,
+            a.get(3, 4) as i64,
+        ],
+    ];
+    let last_row = [
+        a.get(4, 0) as i64,
+        a.get(4, 1) as i64,
+        a.get(4, 2) as i64,
+        a.get(4, 3) as i64,
+        a.get(4, 4) as i64,
+    ];
+
+    for &row0 in &rows {
+        for &row1 in &rows {
+            for &row2 in &rows {
+                for &row3 in &rows {
+                    let u_top = [
+                        [
+                            row0[0] as i64,
+                            row0[1] as i64,
+                            row0[2] as i64,
+                            row0[3] as i64,
+                        ],
+                        [
+                            row1[0] as i64,
+                            row1[1] as i64,
+                            row1[2] as i64,
+                            row1[3] as i64,
+                        ],
+                        [
+                            row2[0] as i64,
+                            row2[1] as i64,
+                            row2[2] as i64,
+                            row2[3] as i64,
+                        ],
+                        [
+                            row3[0] as i64,
+                            row3[1] as i64,
+                            row3[2] as i64,
+                            row3[3] as i64,
+                        ],
+                    ];
+
+                    // Quick determinant check via cofactor expansion.
+                    let m00 = det3x3(&[
+                        [u_top[1][1], u_top[1][2], u_top[1][3]],
+                        [u_top[2][1], u_top[2][2], u_top[2][3]],
+                        [u_top[3][1], u_top[3][2], u_top[3][3]],
+                    ]);
+                    let m01 = det3x3(&[
+                        [u_top[1][0], u_top[1][2], u_top[1][3]],
+                        [u_top[2][0], u_top[2][2], u_top[2][3]],
+                        [u_top[3][0], u_top[3][2], u_top[3][3]],
+                    ]);
+                    let m02 = det3x3(&[
+                        [u_top[1][0], u_top[1][1], u_top[1][3]],
+                        [u_top[2][0], u_top[2][1], u_top[2][3]],
+                        [u_top[3][0], u_top[3][1], u_top[3][3]],
+                    ]);
+                    let m03 = det3x3(&[
+                        [u_top[1][0], u_top[1][1], u_top[1][2]],
+                        [u_top[2][0], u_top[2][1], u_top[2][2]],
+                        [u_top[3][0], u_top[3][1], u_top[3][2]],
+                    ]);
+                    let det = u_top[0][0] * m00 - u_top[0][1] * m01 + u_top[0][2] * m02
+                        - u_top[0][3] * m03;
+                    if det == 0 {
+                        continue;
+                    }
+
+                    let mut v_cols = Vec::with_capacity(5);
+                    let mut ok = true;
+                    for col in &a_cols {
+                        let solutions = solve_nonneg_4x4(&u_top, col, max_entry);
+                        if solutions.len() != 1 {
+                            ok = false;
+                            break;
+                        }
+                        v_cols.push(solutions[0]);
+                    }
+                    if !ok {
+                        continue;
+                    }
+
+                    // Build V^T (transposed view for overdetermined solve).
+                    let vt: [[i64; 4]; 5] = [
+                        [
+                            v_cols[0][0] as i64,
+                            v_cols[0][1] as i64,
+                            v_cols[0][2] as i64,
+                            v_cols[0][3] as i64,
+                        ],
+                        [
+                            v_cols[1][0] as i64,
+                            v_cols[1][1] as i64,
+                            v_cols[1][2] as i64,
+                            v_cols[1][3] as i64,
+                        ],
+                        [
+                            v_cols[2][0] as i64,
+                            v_cols[2][1] as i64,
+                            v_cols[2][2] as i64,
+                            v_cols[2][3] as i64,
+                        ],
+                        [
+                            v_cols[3][0] as i64,
+                            v_cols[3][1] as i64,
+                            v_cols[3][2] as i64,
+                            v_cols[3][3] as i64,
+                        ],
+                        [
+                            v_cols[4][0] as i64,
+                            v_cols[4][1] as i64,
+                            v_cols[4][2] as i64,
+                            v_cols[4][3] as i64,
+                        ],
+                    ];
+
+                    let Some(row4) = solve_overdetermined_5x4(&vt, &last_row, max_entry) else {
+                        continue;
+                    };
+                    if !is_binary_sparse_row_len4(row4) {
+                        continue;
+                    }
+
+                    let u = DynMatrix::new(
+                        5,
+                        4,
+                        vec![
+                            row0[0], row0[1], row0[2], row0[3], row1[0], row1[1], row1[2], row1[3],
+                            row2[0], row2[1], row2[2], row2[3], row3[0], row3[1], row3[2], row3[3],
+                            row4[0], row4[1], row4[2], row4[3],
+                        ],
+                    );
+                    let v = DynMatrix::new(
+                        4,
+                        5,
+                        vec![
+                            v_cols[0][0],
+                            v_cols[1][0],
+                            v_cols[2][0],
+                            v_cols[3][0],
+                            v_cols[4][0],
+                            v_cols[0][1],
+                            v_cols[1][1],
+                            v_cols[2][1],
+                            v_cols[3][1],
+                            v_cols[4][1],
+                            v_cols[0][2],
+                            v_cols[1][2],
+                            v_cols[2][2],
+                            v_cols[3][2],
+                            v_cols[4][2],
+                            v_cols[0][3],
+                            v_cols[1][3],
+                            v_cols[2][3],
+                            v_cols[3][3],
+                            v_cols[4][3],
+                        ],
+                    );
+                    visit(u, v);
+                }
+            }
+        }
+    }
+}
+
+/// Enumerate a narrow structured family of 4x4 -> 5x5 factorisations A = UV
+/// where the 4x5 factor U has four binary-sparse columns and one distinguished
+/// weighted column, and the solved 5x4 factor V stays within the same support
+/// vocabulary with at most one weighted row.
+fn visit_binary_sparse_factorisations_4x4_to_5<F>(a: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 4);
+    assert_eq!(a.cols, 4);
+
+    let binary_rows = binary_sparse_rows_len4();
+    let weighted_rows = weighted_sparse_rows_len4(max_entry);
+    let a_cols: [[i64; 4]; 4] = [
+        [
+            a.get(0, 0) as i64,
+            a.get(1, 0) as i64,
+            a.get(2, 0) as i64,
+            a.get(3, 0) as i64,
+        ],
+        [
+            a.get(0, 1) as i64,
+            a.get(1, 1) as i64,
+            a.get(2, 1) as i64,
+            a.get(3, 1) as i64,
+        ],
+        [
+            a.get(0, 2) as i64,
+            a.get(1, 2) as i64,
+            a.get(2, 2) as i64,
+            a.get(3, 2) as i64,
+        ],
+        [
+            a.get(0, 3) as i64,
+            a.get(1, 3) as i64,
+            a.get(2, 3) as i64,
+            a.get(3, 3) as i64,
+        ],
+    ];
+
+    for distinguished_slot in 0..5 {
+        for &distinguished_col in &weighted_rows {
+            for &distinguished_row in &binary_rows {
+                // Subtract the outer product of the distinguished column and row from A.
+                let mut residual_cols = [[0i64; 4]; 4];
+                let mut residual_valid = true;
+                for col in 0..4 {
+                    for row in 0..4 {
+                        let residual = a_cols[col][row]
+                            - (distinguished_col[row] as i64) * (distinguished_row[col] as i64);
+                        if residual < 0 {
+                            residual_valid = false;
+                            break;
+                        }
+                        residual_cols[col][row] = residual;
+                    }
+                    if !residual_valid {
+                        break;
+                    }
+                }
+                if !residual_valid {
+                    continue;
+                }
+
+                // Enumerate 4 core columns (binary-sparse, length 4).
+                for &core_col0 in &binary_rows {
+                    for &core_col1 in &binary_rows {
+                        for &core_col2 in &binary_rows {
+                            for &core_col3 in &binary_rows {
+                                let core_cols = [core_col0, core_col1, core_col2, core_col3];
+                                let core = [
+                                    [
+                                        core_cols[0][0] as i64,
+                                        core_cols[1][0] as i64,
+                                        core_cols[2][0] as i64,
+                                        core_cols[3][0] as i64,
+                                    ],
+                                    [
+                                        core_cols[0][1] as i64,
+                                        core_cols[1][1] as i64,
+                                        core_cols[2][1] as i64,
+                                        core_cols[3][1] as i64,
+                                    ],
+                                    [
+                                        core_cols[0][2] as i64,
+                                        core_cols[1][2] as i64,
+                                        core_cols[2][2] as i64,
+                                        core_cols[3][2] as i64,
+                                    ],
+                                    [
+                                        core_cols[0][3] as i64,
+                                        core_cols[1][3] as i64,
+                                        core_cols[2][3] as i64,
+                                        core_cols[3][3] as i64,
+                                    ],
+                                ];
+
+                                // Quick det check.
+                                let m00 = det3x3(&[
+                                    [core[1][1], core[1][2], core[1][3]],
+                                    [core[2][1], core[2][2], core[2][3]],
+                                    [core[3][1], core[3][2], core[3][3]],
+                                ]);
+                                let m01 = det3x3(&[
+                                    [core[1][0], core[1][2], core[1][3]],
+                                    [core[2][0], core[2][2], core[2][3]],
+                                    [core[3][0], core[3][2], core[3][3]],
+                                ]);
+                                let m02 = det3x3(&[
+                                    [core[1][0], core[1][1], core[1][3]],
+                                    [core[2][0], core[2][1], core[2][3]],
+                                    [core[3][0], core[3][1], core[3][3]],
+                                ]);
+                                let m03 = det3x3(&[
+                                    [core[1][0], core[1][1], core[1][2]],
+                                    [core[2][0], core[2][1], core[2][2]],
+                                    [core[3][0], core[3][1], core[3][2]],
+                                ]);
+                                let det = core[0][0] * m00 - core[0][1] * m01 + core[0][2] * m02
+                                    - core[0][3] * m03;
+                                if det == 0 {
+                                    continue;
+                                }
+
+                                let mut core_row_cols = Vec::with_capacity(4);
+                                let mut core_valid = true;
+                                for residual_col in &residual_cols {
+                                    let solutions =
+                                        solve_nonneg_4x4(&core, residual_col, max_entry);
+                                    if solutions.len() != 1 {
+                                        core_valid = false;
+                                        break;
+                                    }
+                                    core_row_cols.push(solutions[0]);
+                                }
+                                if !core_valid {
+                                    continue;
+                                }
+
+                                let core_rows = [
+                                    [
+                                        core_row_cols[0][0],
+                                        core_row_cols[1][0],
+                                        core_row_cols[2][0],
+                                        core_row_cols[3][0],
+                                    ],
+                                    [
+                                        core_row_cols[0][1],
+                                        core_row_cols[1][1],
+                                        core_row_cols[2][1],
+                                        core_row_cols[3][1],
+                                    ],
+                                    [
+                                        core_row_cols[0][2],
+                                        core_row_cols[1][2],
+                                        core_row_cols[2][2],
+                                        core_row_cols[3][2],
+                                    ],
+                                    [
+                                        core_row_cols[0][3],
+                                        core_row_cols[1][3],
+                                        core_row_cols[2][3],
+                                        core_row_cols[3][3],
+                                    ],
+                                ];
+
+                                if core_rows.iter().any(|row| !weighted_rows.contains(row)) {
+                                    continue;
+                                }
+                                if core_rows
+                                    .iter()
+                                    .filter(|&&row| !is_binary_sparse_row_len4(row))
+                                    .count()
+                                    > 1
+                                {
+                                    continue;
+                                }
+
+                                // Build U (4×5): insert distinguished_col at distinguished_slot.
+                                let mut u_data = Vec::with_capacity(20);
+                                for row in 0..4 {
+                                    let mut core_idx = 0usize;
+                                    for slot in 0..5 {
+                                        if slot == distinguished_slot {
+                                            u_data.push(distinguished_col[row]);
+                                        } else {
+                                            u_data.push(core_cols[core_idx][row]);
+                                            core_idx += 1;
+                                        }
+                                    }
+                                }
+
+                                // Build V (5×4): insert distinguished_row at distinguished_slot.
+                                let mut v_rows = [[0u32; 4]; 5];
+                                let mut core_idx = 0usize;
+                                for (slot, row) in v_rows.iter_mut().enumerate() {
+                                    if slot == distinguished_slot {
+                                        *row = distinguished_row;
+                                    } else {
+                                        *row = core_rows[core_idx];
+                                        core_idx += 1;
+                                    }
+                                }
+
+                                let v = DynMatrix::new(
+                                    5,
+                                    4,
+                                    v_rows.iter().flat_map(|row| row.iter().copied()).collect(),
+                                );
+                                let u = DynMatrix::new(4, 5, u_data);
+                                visit(u, v);
+                            }
                         }
                     }
                 }
@@ -1477,6 +1960,183 @@ fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32
     vec![]
 }
 
+/// Compute the determinant of a 3×3 matrix given as rows.
+fn det3x3(m: &[[i64; 3]; 3]) -> i64 {
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+}
+
+/// Solve U·x = b where U is 4×4 (given as rows), b is 4-vector.
+/// Returns all nonneg integer 4-vectors x with entries ≤ max_entry.
+///
+/// Algorithm: cofactor expansion for the determinant and adjugate.
+/// Falls back to rank-3 reduction via `solve_nonneg_3x3` when singular.
+fn solve_nonneg_4x4(a: &[[i64; 4]; 4], b: &[i64; 4], max_entry: u32) -> Vec<[u32; 4]> {
+    let me = max_entry as i64;
+
+    // 3×3 minor: delete row r and column c from the 4×4 matrix.
+    let minor = |r: usize, c: usize| -> [[i64; 3]; 3] {
+        let mut m = [[0i64; 3]; 3];
+        let mut mi = 0;
+        for i in 0..4 {
+            if i == r {
+                continue;
+            }
+            let mut mj = 0;
+            for j in 0..4 {
+                if j == c {
+                    continue;
+                }
+                m[mi][mj] = a[i][j];
+                mj += 1;
+            }
+            mi += 1;
+        }
+        m
+    };
+
+    // Determinant via cofactor expansion along row 0.
+    let c00 = det3x3(&minor(0, 0));
+    let c01 = -det3x3(&minor(0, 1));
+    let c02 = det3x3(&minor(0, 2));
+    let c03 = -det3x3(&minor(0, 3));
+    let det = a[0][0] * c00 + a[0][1] * c01 + a[0][2] * c02 + a[0][3] * c03;
+
+    if det != 0 {
+        // Compute full adjugate (transpose of cofactor matrix).
+        let cofactors: [[i64; 4]; 4] = [
+            [c00, c01, c02, c03],
+            [
+                -det3x3(&minor(1, 0)),
+                det3x3(&minor(1, 1)),
+                -det3x3(&minor(1, 2)),
+                det3x3(&minor(1, 3)),
+            ],
+            [
+                det3x3(&minor(2, 0)),
+                -det3x3(&minor(2, 1)),
+                det3x3(&minor(2, 2)),
+                -det3x3(&minor(2, 3)),
+            ],
+            [
+                -det3x3(&minor(3, 0)),
+                det3x3(&minor(3, 1)),
+                -det3x3(&minor(3, 2)),
+                det3x3(&minor(3, 3)),
+            ],
+        ];
+
+        // x = adj(A)·b / det, where adj = cofactors^T.
+        let mut x = [0i64; 4];
+        for i in 0..4 {
+            let num = cofactors[0][i] * b[0]
+                + cofactors[1][i] * b[1]
+                + cofactors[2][i] * b[2]
+                + cofactors[3][i] * b[3];
+            if num % det != 0 {
+                return vec![];
+            }
+            x[i] = num / det;
+            if x[i] < 0 || x[i] > me {
+                return vec![];
+            }
+        }
+        return vec![[x[0] as u32, x[1] as u32, x[2] as u32, x[3] as u32]];
+    }
+
+    // det = 0: find a rank-3 triple of rows and reduce to solve_nonneg_3x3.
+    let triples = [
+        (0usize, 1usize, 2usize, 3usize),
+        (0, 1, 3, 2),
+        (0, 2, 3, 1),
+        (1, 2, 3, 0),
+    ];
+    for &(r0, r1, r2, r_check) in &triples {
+        // Extract the 3×4 submatrix and try each 3×3 column subset.
+        let sub = [a[r0], a[r1], a[r2]];
+        let b_sub = [b[r0], b[r1], b[r2]];
+
+        // Try each of the 4 possible 3×3 column subsets.
+        for free_col in 0..4 {
+            let cols: Vec<usize> = (0..4).filter(|&c| c != free_col).collect();
+            let system = [
+                [sub[0][cols[0]], sub[0][cols[1]], sub[0][cols[2]]],
+                [sub[1][cols[0]], sub[1][cols[1]], sub[1][cols[2]]],
+                [sub[2][cols[0]], sub[2][cols[1]], sub[2][cols[2]]],
+            ];
+            let d = det3x3(&system);
+            if d == 0 {
+                continue;
+            }
+
+            // Enumerate free_col values 0..=max_entry.
+            for fv in 0..=max_entry {
+                let fv = fv as i64;
+                let rhs = [
+                    b_sub[0] - sub[0][free_col] * fv,
+                    b_sub[1] - sub[1][free_col] * fv,
+                    b_sub[2] - sub[2][free_col] * fv,
+                ];
+                let solutions = solve_nonneg_3x3(&system, &rhs, max_entry);
+                for sol in solutions {
+                    // Reassemble full 4-vector.
+                    let mut x = [0u32; 4];
+                    x[free_col] = fv as u32;
+                    for (si, &ci) in cols.iter().enumerate() {
+                        x[ci] = sol[si];
+                    }
+                    // Verify the check row.
+                    let check = a[r_check][0] * x[0] as i64
+                        + a[r_check][1] * x[1] as i64
+                        + a[r_check][2] * x[2] as i64
+                        + a[r_check][3] * x[3] as i64;
+                    if check == b[r_check] {
+                        return vec![x];
+                    }
+                }
+            }
+            // Found a non-singular 3x3 subset; no need to try others.
+            return vec![];
+        }
+    }
+
+    // Rank ≤ 2: skip.
+    vec![]
+}
+
+/// Solve U·x = b where U is 5×4 (given as rows), b is 5-vector.
+/// Returns the unique nonneg integer 4-vector x with entries ≤ max_entry, if it exists.
+fn solve_overdetermined_5x4(u: &[[i64; 4]; 5], b: &[i64; 5], max_entry: u32) -> Option<[u32; 4]> {
+    // Try each of the C(5,4)=5 subsets of 4 rows.
+    let subsets: [(usize, usize, usize, usize, usize); 5] = [
+        (0, 1, 2, 3, 4),
+        (0, 1, 2, 4, 3),
+        (0, 1, 3, 4, 2),
+        (0, 2, 3, 4, 1),
+        (1, 2, 3, 4, 0),
+    ];
+
+    for &(r0, r1, r2, r3, r_check) in &subsets {
+        let system = [u[r0], u[r1], u[r2], u[r3]];
+        let rhs = [b[r0], b[r1], b[r2], b[r3]];
+        let solutions = solve_nonneg_4x4(&system, &rhs, max_entry);
+        if solutions.len() != 1 {
+            continue;
+        }
+        let x = solutions[0];
+        let check = u[r_check][0] * x[0] as i64
+            + u[r_check][1] * x[1] as i64
+            + u[r_check][2] * x[2] as i64
+            + u[r_check][3] * x[3] as i64;
+        if check == b[r_check] {
+            return Some(x);
+        }
+    }
+
+    None
+}
+
 /// Enumerate all square 3×3 nonneg integer factorisations C = UV where U and V
 /// are both 3×3 with entries in 0..=max_entry.
 ///
@@ -1894,6 +2554,16 @@ pub fn visit_all_factorisations_with_family<F>(
                 visit("binary_sparse_rectangular_factorisation_4x3_to_3", u, v);
             });
         }
+        if k == 4 && max_intermediate_dim >= 5 {
+            visit_binary_sparse_factorisations_4x4_to_5(a, max_entry, &mut |u, v| {
+                visit("binary_sparse_rectangular_factorisation_4x4_to_5", u, v);
+            });
+        }
+        if k == 5 && max_intermediate_dim >= 5 {
+            visit_binary_sparse_factorisations_5x5_to_4(a, max_entry, &mut |u, v| {
+                visit("binary_sparse_rectangular_factorisation_5x5_to_4", u, v);
+            });
+        }
         // For dimensions ≥ 4: elementary conjugations (same-dimension moves).
         // These use the dimension-generic implementation.
         if max_intermediate_dim >= k {
@@ -2273,5 +2943,195 @@ mod tests {
             let uv = u.mul(v);
             assert_eq!(uv, a_dyn, "UV != A");
         }
+    }
+
+    // --- 4×4 solver tests ---
+
+    #[test]
+    fn test_solve_nonneg_4x4_identity() {
+        let a = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+        let b = [2, 3, 5, 7];
+        let solutions = solve_nonneg_4x4(&a, &b, 10);
+        assert_eq!(solutions, vec![[2, 3, 5, 7]]);
+    }
+
+    #[test]
+    fn test_solve_nonneg_4x4_no_solution() {
+        let a = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+        let b = [2, 3, 5, -1]; // negative RHS
+        let solutions = solve_nonneg_4x4(&a, &b, 10);
+        assert!(solutions.is_empty());
+    }
+
+    #[test]
+    fn test_solve_nonneg_4x4_nonsingular() {
+        // A = [[1,1,0,0],[0,1,1,0],[0,0,1,1],[1,0,0,1]]
+        // x = [1,1,1,1]: Ax = [2,2,2,2]
+        let a = [[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1]];
+        let b = [2, 2, 2, 2];
+        let solutions = solve_nonneg_4x4(&a, &b, 10);
+        assert_eq!(solutions.len(), 1);
+        // Verify
+        for x in &solutions {
+            for row in 0..4 {
+                let check: i64 = (0..4).map(|c| a[row][c] * x[c] as i64).sum();
+                assert_eq!(check, b[row]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_solve_overdetermined_5x4_basic() {
+        let u = [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [1, 1, 0, 0],
+        ];
+        let b = [2, 3, 5, 7, 5];
+        let result = solve_overdetermined_5x4(&u, &b, 10);
+        assert_eq!(result, Some([2, 3, 5, 7]));
+    }
+
+    #[test]
+    fn test_solve_overdetermined_5x4_inconsistent() {
+        let u = [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [1, 1, 0, 0],
+        ];
+        let b = [2, 3, 5, 7, 99]; // 2+3=5≠99
+        let result = solve_overdetermined_5x4(&u, &b, 10);
+        assert_eq!(result, None);
+    }
+
+    // --- 5x5→4x4 and 4x4→5x5 factorisation tests ---
+
+    #[test]
+    fn test_binary_sparse_5x5_to_4_verify_product() {
+        // Construct a 5×5 matrix that factors as (5×4)(4×5).
+        let u = DynMatrix::new(
+            5,
+            4,
+            vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0],
+        );
+        let v = DynMatrix::new(
+            4,
+            5,
+            vec![1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1],
+        );
+        let a = u.mul(&v);
+
+        let mut results = Vec::new();
+        visit_binary_sparse_factorisations_5x5_to_4(&a, 5, &mut |u, v| {
+            results.push((u, v));
+        });
+
+        assert!(
+            !results.is_empty(),
+            "Should find at least one 5x5->4x4 factorisation"
+        );
+        for (u_found, v_found) in &results {
+            assert_eq!(u_found.rows, 5);
+            assert_eq!(u_found.cols, 4);
+            assert_eq!(v_found.rows, 4);
+            assert_eq!(v_found.cols, 5);
+            let product = u_found.mul(v_found);
+            assert_eq!(product, a, "UV != A for U={:?}, V={:?}", u_found, v_found);
+        }
+    }
+
+    #[test]
+    fn test_binary_sparse_4x4_to_5_verify_product() {
+        // Construct a 4×4 matrix that factors as (4×5)(5×4).
+        let u = DynMatrix::new(
+            4,
+            5,
+            vec![1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1],
+        );
+        let v = DynMatrix::new(
+            5,
+            4,
+            vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0],
+        );
+        let a = u.mul(&v);
+
+        let mut results = Vec::new();
+        visit_binary_sparse_factorisations_4x4_to_5(&a, 5, &mut |u, v| {
+            results.push((u, v));
+        });
+
+        assert!(
+            !results.is_empty(),
+            "Should find at least one 4x4->5x5 factorisation"
+        );
+        for (u_found, v_found) in &results {
+            assert_eq!(u_found.rows, 4);
+            assert_eq!(u_found.cols, 5);
+            assert_eq!(v_found.rows, 5);
+            assert_eq!(v_found.cols, 4);
+            let product = u_found.mul(v_found);
+            assert_eq!(product, a, "UV != A for U={:?}, V={:?}", u_found, v_found);
+        }
+    }
+
+    #[test]
+    fn test_dispatcher_exposes_4x4_to_5_family() {
+        // Construct a 4×4 matrix that has a binary-sparse 4→5 factorisation.
+        let u = DynMatrix::new(
+            4,
+            5,
+            vec![1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1],
+        );
+        let v = DynMatrix::new(
+            5,
+            4,
+            vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0],
+        );
+        let a = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&a, 5, 5, |family, u, v| {
+            if family == "binary_sparse_rectangular_factorisation_4x4_to_5" {
+                assert_eq!(u.mul(&v), a);
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the binary sparse 4x4->5x5 family"
+        );
+    }
+
+    #[test]
+    fn test_dispatcher_exposes_5x5_to_4_family() {
+        let u = DynMatrix::new(
+            5,
+            4,
+            vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0],
+        );
+        let v = DynMatrix::new(
+            4,
+            5,
+            vec![1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1],
+        );
+        let a = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&a, 5, 5, |family, u, v| {
+            if family == "binary_sparse_rectangular_factorisation_5x5_to_4" {
+                assert_eq!(u.mul(&v), a);
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the binary sparse 5x5->4x4 family"
+        );
     }
 }
