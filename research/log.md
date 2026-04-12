@@ -182,3 +182,9 @@
   Cramer's rule with rank-3 fallback, `solve_overdetermined_5x4`, and length-4
   binary-sparse/weighted row helpers. Quick shortcut search confirms the families
   fire and produce shortcuts (e.g. 2x2→5x5 gap=5 solved in 262 visited nodes).
+
+- `2026-04-12-1646-factor-solver-memo` Cached full `2x3` and `3x2` solver outputs.
+  Failed. The added lookup and cloning cost pushed all three telemetry-focus mixed probes into timeout.
+
+- `2026-04-12-1650-unsat-solver-memo` Cached only repeated unsatisfiable `2x3` and `3x2` solver calls.
+  Failed. Lighter than the full cache, but still regressed enough to timeout `brix_ruiz_k3_wide_probe`.
