@@ -201,7 +201,7 @@ panes:
 #-------------------------------------------------------------------------------
 
 sandbox:
-  enabled: false
+  enabled: true
   image: my-sandbox
 #   backend: lima
 #   # host_commands: ["just", "cargo", "npm"]
