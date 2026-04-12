@@ -1,4 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sse_core::factorisation::visit_all_factorisations_with_family;
 use sse_core::graph_moves::enumerate_graph_move_successors;
@@ -7,6 +11,8 @@ use sse_core::types::{EsseStep, SearchMode};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use rusqlite::{params, Connection};
 
 fn main() {
     let mut max_shortcut_lag = 6usize;
@@ -16,6 +22,7 @@ fn main() {
     let mut max_gap = usize::MAX;
     let mut refine_rounds = 1usize;
     let mut search_mode = SearchMode::Mixed;
+    let mut paths_db: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -70,9 +77,12 @@ fn main() {
                     _ => panic!("unknown search mode: {value}"),
                 };
             }
+            "--paths-db" | "--sqlite" => {
+                paths_db = Some(args.next().expect("--paths-db requires a value"));
+            }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--refine-rounds N] [--search-mode mixed|graph-only]"
+                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--refine-rounds N] [--search-mode mixed|graph-only] [--paths-db PATH]"
                 );
                 return;
             }
@@ -82,32 +92,141 @@ fn main() {
 
     println!("Brix-Ruiz k=3 shortcut search along guide paths");
     println!(
-        "config: search_mode={:?}, max_shortcut_lag={}, max_dim={}, max_entry={}, min_gap={}, max_gap={}, refine_rounds={}",
-        search_mode, max_shortcut_lag, max_dim, max_entry, min_gap, max_gap, refine_rounds
+        "config: search_mode={:?}, max_shortcut_lag={}, max_dim={}, max_entry={}, min_gap={}, max_gap={}, refine_rounds={}, paths_db={}",
+        search_mode,
+        max_shortcut_lag,
+        max_dim,
+        max_entry,
+        min_gap,
+        max_gap,
+        refine_rounds,
+        paths_db.as_deref().unwrap_or("none")
     );
 
-    let mut guide = endpoint_16_path();
-    for round in 0..refine_rounds {
-        println!();
-        println!("=== refinement round {} ===", round + 1);
-        let outcome = search_guide_path(
-            &guide,
-            max_shortcut_lag,
-            max_dim,
-            max_entry,
-            min_gap,
-            max_gap,
-            search_mode,
-        );
-
-        let next_guide = stitch_route(&outcome.best);
-        if next_guide.len() == guide.len() {
-            println!();
-            println!("refinement stalled at {} moves", guide.len() - 1);
-            break;
-        }
-        guide = next_guide;
+    let mut guides = vec![GuidePath {
+        label: "hardcoded endpoint 16-path".to_string(),
+        source_kind: "hardcoded".to_string(),
+        source_path_signature: matrix_path_signature(&endpoint_16_path()),
+        matrices: endpoint_16_path(),
+    }];
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(db_path) = paths_db.as_deref() {
+        let loaded = load_guides_from_sqlite(db_path).unwrap_or_else(|err| panic!("{err}"));
+        guides.extend(loaded);
     }
+    #[cfg(target_arch = "wasm32")]
+    if paths_db.is_some() {
+        panic!("--paths-db is not supported on wasm32 targets");
+    }
+    guides = deduplicate_guides(guides);
+
+    println!("loaded guide paths = {}", guides.len());
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut recorder = paths_db
+        .as_deref()
+        .map(ShortcutPathSqliteRecorder::new)
+        .transpose()
+        .unwrap_or_else(|err| panic!("{err}"));
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(recorder) = recorder.as_mut() {
+        recorder
+            .start_run(&ShortcutRunConfig {
+                k: 3,
+                max_shortcut_lag,
+                max_dim,
+                max_entry,
+                min_gap,
+                max_gap,
+                refine_rounds,
+                search_mode,
+                guide_count: guides.len(),
+            })
+            .unwrap_or_else(|err| panic!("{err}"));
+    }
+
+    let mut results = Vec::new();
+    for guide in guides {
+        println!();
+        println!("=== guide: {} ({}) ===", guide.label, guide.source_kind);
+        let mut current_guide = guide.matrices.clone();
+        let initial_lag = current_guide.len().saturating_sub(1);
+        let mut last_round = 0usize;
+        let mut best_route = current_guide.clone();
+
+        for round in 0..refine_rounds {
+            println!();
+            println!("=== refinement round {} ===", round + 1);
+            let outcome = search_guide_path(
+                &current_guide,
+                max_shortcut_lag,
+                max_dim,
+                max_entry,
+                min_gap,
+                max_gap,
+                search_mode,
+            );
+
+            let next_guide = stitch_route(&outcome.best);
+            last_round = round;
+            best_route = next_guide.clone();
+            if next_guide.len() == current_guide.len() {
+                println!();
+                println!("refinement stalled at {} moves", current_guide.len() - 1);
+                break;
+            }
+            println!();
+            println!("refined guide to {} moves", next_guide.len() - 1);
+            current_guide = next_guide;
+        }
+
+        let final_lag = best_route.len().saturating_sub(1);
+        let result = ShortcutGuideResult {
+            guide_label: guide.label,
+            source_kind: guide.source_kind,
+            source_path_signature: guide.source_path_signature,
+            final_round_index: last_round,
+            initial_lag,
+            final_lag,
+            improved: final_lag < initial_lag,
+            final_route: best_route,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(recorder) = recorder.as_mut() {
+            recorder
+                .record_result(&result)
+                .unwrap_or_else(|err| panic!("{err}"));
+        }
+        results.push(result);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(recorder) = recorder.as_mut() {
+        recorder
+            .finish_run(&results)
+            .unwrap_or_else(|err| panic!("{err}"));
+    }
+
+    println!();
+    println!("Shortcut summary:");
+    for result in &results {
+        println!(
+            "  {} [{}]: {} -> {} moves{}",
+            result.guide_label,
+            result.source_kind,
+            result.initial_lag,
+            result.final_lag,
+            if result.improved { " improved" } else { "" }
+        );
+    }
+}
+
+#[derive(Clone)]
+struct GuidePath {
+    label: String,
+    source_kind: String,
+    source_path_signature: String,
+    matrices: Vec<DynMatrix>,
 }
 
 #[derive(Clone)]
@@ -138,6 +257,17 @@ enum SearchResult {
 
 struct GuideSearchOutcome {
     best: Vec<ShortcutEdge>,
+}
+
+struct ShortcutGuideResult {
+    guide_label: String,
+    source_kind: String,
+    source_path_signature: String,
+    final_round_index: usize,
+    initial_lag: usize,
+    final_lag: usize,
+    improved: bool,
+    final_route: Vec<DynMatrix>,
 }
 
 #[derive(Clone)]
@@ -783,4 +913,506 @@ fn endpoint_16_path() -> Vec<DynMatrix> {
         mat(3, vec![0, 0, 2, 1, 1, 4, 1, 1, 1]),
         mat(2, vec![1, 1, 6, 1]),
     ]
+}
+
+fn matrix_key(matrix: &DynMatrix) -> String {
+    let mut key = format!("{}x{}:", matrix.rows, matrix.cols);
+    for (idx, value) in matrix.data.iter().enumerate() {
+        if idx > 0 {
+            key.push(',');
+        }
+        key.push_str(&value.to_string());
+    }
+    key
+}
+
+fn matrix_path_signature(path: &[DynMatrix]) -> String {
+    path.iter().map(matrix_key).collect::<Vec<_>>().join("|")
+}
+
+fn deduplicate_guides(guides: Vec<GuidePath>) -> Vec<GuidePath> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for guide in guides {
+        if seen.insert(matrix_path_signature(&guide.matrices)) {
+            deduped.push(guide);
+        }
+    }
+    deduped
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_guides_from_sqlite(path: impl AsRef<Path>) -> Result<Vec<GuidePath>, String> {
+    let conn = Connection::open(path.as_ref())
+        .map_err(|err| format!("failed to open {}: {err}", path.as_ref().display()))?;
+    let mut guides = load_graph_guides(&conn)?;
+    guides.extend(load_shortcut_guides(&conn)?);
+    Ok(guides)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_graph_guides(conn: &Connection) -> Result<Vec<GuidePath>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                r.id,
+                r.ordinal,
+                r.path_signature,
+                s.step_index,
+                mf.data_json,
+                mt.data_json
+             FROM graph_path_results r
+             JOIN graph_path_steps s ON s.result_id = r.id
+             JOIN matrices mf ON mf.id = s.from_matrix_id
+             JOIN matrices mt ON mt.id = s.to_matrix_id
+             ORDER BY r.id, s.step_index",
+        )
+        .map_err(|err| format!("failed to prepare graph guide query: {err}"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| format!("failed to query graph guides: {err}"))?;
+    let mut guides = Vec::new();
+    let mut current_result_id = None;
+    let mut current_ordinal = 0i64;
+    let mut current_signature = String::new();
+    let mut current_matrices = Vec::new();
+
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| format!("failed to read graph guide row: {err}"))?
+    {
+        let result_id: i64 = row
+            .get(0)
+            .map_err(|err| format!("bad graph result id: {err}"))?;
+        let ordinal: i64 = row
+            .get(1)
+            .map_err(|err| format!("bad graph ordinal: {err}"))?;
+        let signature: String = row
+            .get(2)
+            .map_err(|err| format!("bad graph path signature: {err}"))?;
+        let step_index: i64 = row
+            .get(3)
+            .map_err(|err| format!("bad graph step index: {err}"))?;
+        let from_json: String = row
+            .get(4)
+            .map_err(|err| format!("bad graph from matrix json: {err}"))?;
+        let to_json: String = row
+            .get(5)
+            .map_err(|err| format!("bad graph to matrix json: {err}"))?;
+
+        if current_result_id != Some(result_id) {
+            if let Some(prev_id) = current_result_id {
+                guides.push(GuidePath {
+                    label: format!("graph_path_result_{prev_id}_ordinal_{current_ordinal}"),
+                    source_kind: "graph".to_string(),
+                    source_path_signature: current_signature.clone(),
+                    matrices: std::mem::take(&mut current_matrices),
+                });
+            }
+            current_result_id = Some(result_id);
+            current_ordinal = ordinal;
+            current_signature = signature;
+        }
+
+        if step_index == 0 {
+            current_matrices.push(parse_matrix_json(&from_json)?);
+        }
+        current_matrices.push(parse_matrix_json(&to_json)?);
+    }
+
+    if let Some(result_id) = current_result_id {
+        guides.push(GuidePath {
+            label: format!("graph_path_result_{result_id}_ordinal_{current_ordinal}"),
+            source_kind: "graph".to_string(),
+            source_path_signature: current_signature,
+            matrices: current_matrices,
+        });
+    }
+
+    Ok(guides)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_shortcut_guides(conn: &Connection) -> Result<Vec<GuidePath>, String> {
+    let table_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'shortcut_path_results'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|err| format!("failed to probe shortcut tables: {err}"))?;
+    if table_exists == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                r.id,
+                r.guide_label,
+                r.path_signature,
+                m.step_index,
+                mm.data_json
+             FROM shortcut_path_results r
+             JOIN shortcut_path_matrices m ON m.result_id = r.id
+             JOIN matrices mm ON mm.id = m.matrix_id
+             ORDER BY r.id, m.step_index",
+        )
+        .map_err(|err| format!("failed to prepare shortcut guide query: {err}"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| format!("failed to query shortcut guides: {err}"))?;
+
+    let mut guides = Vec::new();
+    let mut current_result_id = None;
+    let mut current_label = String::new();
+    let mut current_signature = String::new();
+    let mut current_matrices = Vec::new();
+
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| format!("failed to read shortcut guide row: {err}"))?
+    {
+        let result_id: i64 = row
+            .get(0)
+            .map_err(|err| format!("bad shortcut result id: {err}"))?;
+        let guide_label: String = row
+            .get(1)
+            .map_err(|err| format!("bad shortcut guide label: {err}"))?;
+        let signature: String = row
+            .get(2)
+            .map_err(|err| format!("bad shortcut path signature: {err}"))?;
+        let matrix_json: String = row
+            .get(4)
+            .map_err(|err| format!("bad shortcut matrix json: {err}"))?;
+
+        if current_result_id != Some(result_id) {
+            if let Some(prev_id) = current_result_id {
+                guides.push(GuidePath {
+                    label: format!("shortcut_path_result_{prev_id}_from_{current_label}"),
+                    source_kind: "shortcut".to_string(),
+                    source_path_signature: current_signature.clone(),
+                    matrices: std::mem::take(&mut current_matrices),
+                });
+            }
+            current_result_id = Some(result_id);
+            current_label = guide_label;
+            current_signature = signature;
+        }
+
+        current_matrices.push(parse_matrix_json(&matrix_json)?);
+    }
+
+    if let Some(result_id) = current_result_id {
+        guides.push(GuidePath {
+            label: format!("shortcut_path_result_{result_id}_from_{current_label}"),
+            source_kind: "shortcut".to_string(),
+            source_path_signature: current_signature,
+            matrices: current_matrices,
+        });
+    }
+
+    Ok(guides)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_matrix_json(raw: &str) -> Result<DynMatrix, String> {
+    let rows: Vec<Vec<u32>> =
+        serde_json::from_str(raw).map_err(|err| format!("failed to parse matrix json: {err}"))?;
+    let dim = rows.len();
+    if dim == 0 {
+        return Err("matrix json must not be empty".to_string());
+    }
+    if rows.iter().any(|row| row.len() != dim) {
+        return Err("matrix json must be square".to_string());
+    }
+    let data = rows.into_iter().flatten().collect();
+    Ok(DynMatrix::new(dim, dim, data))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy)]
+struct ShortcutRunConfig {
+    k: u32,
+    max_shortcut_lag: usize,
+    max_dim: usize,
+    max_entry: u32,
+    min_gap: usize,
+    max_gap: usize,
+    refine_rounds: usize,
+    search_mode: SearchMode,
+    guide_count: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ShortcutPathSqliteRecorder {
+    conn: Connection,
+    run_id: i64,
+    matrix_ids: HashMap<String, i64>,
+    inserted_results: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ShortcutPathSqliteRecorder {
+    fn new(path: impl AsRef<Path>) -> Result<Self, String> {
+        let conn = Connection::open(path.as_ref())
+            .map_err(|err| format!("failed to open {}: {err}", path.as_ref().display()))?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))
+            .map_err(|err| format!("failed to configure sqlite busy timeout: {err}"))?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA foreign_keys = ON;",
+        )
+        .map_err(|err| format!("failed to configure sqlite pragmas: {err}"))?;
+        initialise_shortcut_sqlite_schema(&conn)?;
+        Ok(Self {
+            conn,
+            run_id: 0,
+            matrix_ids: HashMap::new(),
+            inserted_results: 0,
+        })
+    }
+
+    fn start_run(&mut self, config: &ShortcutRunConfig) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO shortcut_path_runs (
+                    started_unix_ms,
+                    k,
+                    max_shortcut_lag,
+                    max_dim,
+                    max_entry,
+                    min_gap,
+                    max_gap,
+                    refine_rounds,
+                    search_mode,
+                    guide_count
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    unix_timestamp_ms(),
+                    config.k as i64,
+                    config.max_shortcut_lag as i64,
+                    config.max_dim as i64,
+                    config.max_entry as i64,
+                    config.min_gap as i64,
+                    config.max_gap as i64,
+                    config.refine_rounds as i64,
+                    search_mode_label(config.search_mode),
+                    config.guide_count as i64,
+                ],
+            )
+            .map_err(|err| format!("failed to insert shortcut_path_runs row: {err}"))?;
+        self.run_id = self.conn.last_insert_rowid();
+        Ok(())
+    }
+
+    fn record_result(&mut self, result: &ShortcutGuideResult) -> Result<(), String> {
+        if !result.improved {
+            return Ok(());
+        }
+        let path_signature = matrix_path_signature(&result.final_route);
+        let matrix_ids = result
+            .final_route
+            .iter()
+            .map(|matrix| self.ensure_matrix_id(matrix))
+            .collect::<Result<Vec<_>, String>>()?;
+
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|err| format!("failed to start shortcut sqlite transaction: {err}"))?;
+        tx.execute(
+            "INSERT OR IGNORE INTO shortcut_path_results (
+                run_id,
+                guide_label,
+                source_kind,
+                source_path_signature,
+                final_round_index,
+                initial_lag,
+                final_lag,
+                improved,
+                matrix_count,
+                path_signature
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                self.run_id,
+                result.guide_label,
+                result.source_kind,
+                result.source_path_signature,
+                result.final_round_index as i64,
+                result.initial_lag as i64,
+                result.final_lag as i64,
+                result.improved as i64,
+                result.final_route.len() as i64,
+                path_signature,
+            ],
+        )
+        .map_err(|err| format!("failed to insert shortcut_path_results row: {err}"))?;
+        let inserted = tx.changes() > 0;
+        let result_id = tx.last_insert_rowid();
+        if inserted {
+            for (step_index, matrix_id) in matrix_ids.into_iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO shortcut_path_matrices (
+                        result_id,
+                        step_index,
+                        matrix_id
+                    ) VALUES (?1, ?2, ?3)",
+                    params![result_id, step_index as i64, matrix_id],
+                )
+                .map_err(|err| format!("failed to insert shortcut_path_matrices row: {err}"))?;
+            }
+            self.inserted_results += 1;
+        }
+        tx.commit()
+            .map_err(|err| format!("failed to commit shortcut sqlite transaction: {err}"))?;
+        Ok(())
+    }
+
+    fn finish_run(&self, results: &[ShortcutGuideResult]) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE shortcut_path_runs
+                 SET finished_unix_ms = ?1,
+                     result_count = ?2,
+                     improved_count = ?3,
+                     inserted_result_count = ?4
+                 WHERE id = ?5",
+                params![
+                    unix_timestamp_ms(),
+                    results.len() as i64,
+                    results.iter().filter(|result| result.improved).count() as i64,
+                    self.inserted_results as i64,
+                    self.run_id,
+                ],
+            )
+            .map_err(|err| format!("failed to update shortcut_path_runs row: {err}"))?;
+        Ok(())
+    }
+
+    fn ensure_matrix_id(&mut self, matrix: &DynMatrix) -> Result<i64, String> {
+        let key = matrix_key(matrix);
+        if let Some(&id) = self.matrix_ids.get(&key) {
+            return Ok(id);
+        }
+        self.conn
+            .execute(
+                "INSERT INTO matrices (
+                    matrix_key,
+                    rows,
+                    cols,
+                    data_json,
+                    entry_sum,
+                    max_entry,
+                    trace
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                ON CONFLICT(matrix_key) DO NOTHING",
+                params![
+                    key,
+                    matrix.rows as i64,
+                    matrix.cols as i64,
+                    matrix_json(matrix)?,
+                    matrix.entry_sum() as i64,
+                    matrix.max_entry() as i64,
+                    Some(matrix.trace() as i64),
+                ],
+            )
+            .map_err(|err| format!("failed to insert matrix row: {err}"))?;
+        let id = self
+            .conn
+            .query_row(
+                "SELECT id FROM matrices WHERE matrix_key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .map_err(|err| format!("failed to load matrix id: {err}"))?;
+        self.matrix_ids.insert(key, id);
+        Ok(id)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn initialise_shortcut_sqlite_schema(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS matrices (
+            id INTEGER PRIMARY KEY,
+            matrix_key TEXT NOT NULL UNIQUE,
+            rows INTEGER NOT NULL,
+            cols INTEGER NOT NULL,
+            data_json TEXT NOT NULL,
+            entry_sum INTEGER NOT NULL,
+            max_entry INTEGER NOT NULL,
+            trace INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS shortcut_path_runs (
+            id INTEGER PRIMARY KEY,
+            started_unix_ms INTEGER NOT NULL,
+            finished_unix_ms INTEGER,
+            k INTEGER NOT NULL,
+            max_shortcut_lag INTEGER NOT NULL,
+            max_dim INTEGER NOT NULL,
+            max_entry INTEGER NOT NULL,
+            min_gap INTEGER NOT NULL,
+            max_gap INTEGER NOT NULL,
+            refine_rounds INTEGER NOT NULL,
+            search_mode TEXT NOT NULL,
+            guide_count INTEGER NOT NULL,
+            result_count INTEGER,
+            improved_count INTEGER,
+            inserted_result_count INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS shortcut_path_results (
+            id INTEGER PRIMARY KEY,
+            run_id INTEGER NOT NULL REFERENCES shortcut_path_runs(id) ON DELETE CASCADE,
+            guide_label TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            source_path_signature TEXT NOT NULL,
+            final_round_index INTEGER NOT NULL,
+            initial_lag INTEGER NOT NULL,
+            final_lag INTEGER NOT NULL,
+            improved INTEGER NOT NULL,
+            matrix_count INTEGER NOT NULL,
+            path_signature TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS shortcut_path_matrices (
+            id INTEGER PRIMARY KEY,
+            result_id INTEGER NOT NULL REFERENCES shortcut_path_results(id) ON DELETE CASCADE,
+            step_index INTEGER NOT NULL,
+            matrix_id INTEGER NOT NULL REFERENCES matrices(id),
+            UNIQUE(result_id, step_index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_shortcut_path_results_run ON shortcut_path_results(run_id);
+        CREATE INDEX IF NOT EXISTS idx_shortcut_path_matrices_result ON shortcut_path_matrices(result_id, step_index);",
+    )
+    .map_err(|err| format!("failed to initialise shortcut sqlite schema: {err}"))?;
+    Ok(())
+}
+
+fn matrix_json(matrix: &DynMatrix) -> Result<String, String> {
+    let rows: Vec<Vec<u32>> = (0..matrix.rows)
+        .map(|row| {
+            (0..matrix.cols)
+                .map(|col| matrix.get(row, col))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    serde_json::to_string(&rows).map_err(|err| format!("failed to serialise matrix: {err}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn search_mode_label(search_mode: SearchMode) -> &'static str {
+    match search_mode {
+        SearchMode::Mixed => "mixed",
+        SearchMode::GraphOnly => "graph_only",
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn unix_timestamp_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
