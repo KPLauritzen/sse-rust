@@ -134,6 +134,29 @@
       "tags": ["hard-positive", "target", "telemetry-focus"]
     },
     {
+      "id": "brix_ruiz_k3_graph_only",
+      "description": "Known graph-only proof target for the blind endpoint search. This guards the recent graph-move progress directly in the main harness.",
+      "a": [[1, 3], [2, 1]],
+      "b": [[1, 6], [1, 1]],
+      "config": {
+        "max_lag": 22,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "search_mode": "graph-only"
+      },
+      "timeout_ms": 60000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 300,
+        "not_equivalent": -3000,
+        "unknown": -3000,
+        "timeout": -4000,
+        "panic": -4000
+      },
+      "tags": ["hard-positive", "target", "graph-only"]
+    },
+    {
       "id": "brix_ruiz_k3_wide_probe",
       "description": "Wider telemetry probe for the same hard known-SSE pair. This case is for progress diagnostics, not target scoring.",
       "a": [[1, 3], [2, 1]],

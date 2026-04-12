@@ -45,7 +45,7 @@ struct ResearchCase {
     tags: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct JsonSearchConfig {
     max_lag: usize,
     max_intermediate_dim: usize,
@@ -102,6 +102,7 @@ struct FitnessSummary {
 struct CaseSummary {
     id: String,
     description: String,
+    config: JsonSearchConfig,
     actual_outcome: String,
     allowed_outcomes: Vec<String>,
     target_outcome: Option<String>,
@@ -399,6 +400,7 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
         cases.push(CaseSummary {
             id: case.id.clone(),
             description: case.description.clone(),
+            config: case.config.clone(),
             actual_outcome: executed.actual_outcome,
             allowed_outcomes: case.allowed_outcomes.clone(),
             target_outcome: case.target_outcome.clone(),
@@ -774,6 +776,14 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             case.hit_target,
             case.points,
             case.elapsed_ms
+        ));
+        out.push_str(&format!(
+            "  config: mode={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
+            case.config.search_mode,
+            case.config.max_lag,
+            case.config.max_intermediate_dim,
+            case.config.max_entry,
+            case.timeout_ms,
         ));
         if let Some(reason) = &case.reason {
             out.push_str(&format!("  reason: {}\n", reason));
