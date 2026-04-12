@@ -155,3 +155,21 @@
 
 - `worktree` Added the dual structured `3x3 -> 4x4` rectangular factor family.
   Kept. It now recovers Baker step 2 directly while keeping the default shortcut search flat at total lag 11, so the remaining literal gap is step 5 itself rather than the `3x4`/`4x3` boundary moves around it.
+
+- `search-k3-graph-paths` Wired the shortcut search to read/write sqlite guide paths.
+  The `find_brix_ruiz_path_shortcuts` binary now accepts `--paths-db` to load graph-move
+  paths and prior shortcut results from the sqlite database, and writes improved shortcut
+  paths back. This creates a feedback loop: graph-path explorer → shortcut search → next
+  shortcut search.
+
+- `search-k3-graph-paths` Added `--segment-timeout` to prevent OOM in shortcut search.
+  The BFS can consume 27+ GB on large-gap segments (2x2→2x2 with gap ≥ 8–9). A per-segment
+  timeout with 256-node frontier chunking now aborts before memory pressure becomes critical.
+
+- `search-k3-graph-paths` First sqlite-seeded shortcut run (`--segment-timeout 10`, 7 guides).
+  Kept. The feedback loop works: starting from 2 graph paths (16 moves each) and 5 prior
+  shortcut results, the search found two independent 7-move SSE paths for `brix_ruiz_k3`.
+  This is a significant improvement over the 11-step result from the endpoint-only search
+  and matches the known Baker lag-7 witness length. The best routes pass through 4x4 and 3x3
+  intermediates with max entry 6. All improved results were persisted to the sqlite database
+  (9 total result rows, 2 at lag 7).
