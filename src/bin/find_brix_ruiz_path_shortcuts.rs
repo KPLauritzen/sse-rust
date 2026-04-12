@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+use std::time::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,6 +23,7 @@ fn main() {
     let mut max_gap = usize::MAX;
     let mut refine_rounds = 1usize;
     let mut search_mode = SearchMode::Mixed;
+    let mut segment_timeout: Option<Duration> = None;
     let mut paths_db: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
@@ -77,12 +79,20 @@ fn main() {
                     _ => panic!("unknown search mode: {value}"),
                 };
             }
+            "--segment-timeout" => {
+                let secs: u64 = args
+                    .next()
+                    .expect("--segment-timeout requires a value (seconds)")
+                    .parse()
+                    .expect("invalid segment timeout");
+                segment_timeout = Some(Duration::from_secs(secs));
+            }
             "--paths-db" | "--sqlite" => {
                 paths_db = Some(args.next().expect("--paths-db requires a value"));
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--refine-rounds N] [--search-mode mixed|graph-only] [--paths-db PATH]"
+                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--segment-timeout SECS] [--refine-rounds N] [--search-mode mixed|graph-only] [--paths-db PATH]"
                 );
                 return;
             }
@@ -92,13 +102,14 @@ fn main() {
 
     println!("Brix-Ruiz k=3 shortcut search along guide paths");
     println!(
-        "config: search_mode={:?}, max_shortcut_lag={}, max_dim={}, max_entry={}, min_gap={}, max_gap={}, refine_rounds={}, paths_db={}",
+        "config: search_mode={:?}, max_shortcut_lag={}, max_dim={}, max_entry={}, min_gap={}, max_gap={}, segment_timeout={}, refine_rounds={}, paths_db={}",
         search_mode,
         max_shortcut_lag,
         max_dim,
         max_entry,
         min_gap,
         max_gap,
+        segment_timeout.map_or("none".to_string(), |d| format!("{}s", d.as_secs())),
         refine_rounds,
         paths_db.as_deref().unwrap_or("none")
     );
@@ -164,6 +175,7 @@ fn main() {
                 max_entry,
                 min_gap,
                 max_gap,
+                segment_timeout,
                 search_mode,
             );
 
@@ -253,6 +265,7 @@ struct FoundPath {
 enum SearchResult {
     Found(FoundPath),
     NotFound { visited: usize },
+    TimedOut { visited: usize },
 }
 
 struct GuideSearchOutcome {
@@ -284,6 +297,7 @@ fn search_between_waypoints(
     max_lag: usize,
     max_dim: usize,
     max_entry: u32,
+    segment_timeout: Option<Duration>,
     search_mode: SearchMode,
 ) -> SearchResult {
     let start_canon = start.canonical_perm();
@@ -322,7 +336,17 @@ fn search_between_waypoints(
     bwd_orig.insert(target_canon.clone(), target.clone());
     bwd_frontier.push_back(target_canon);
 
+    let deadline = segment_timeout.map(|d| Instant::now() + d);
+
     for _layer in 0..max_lag {
+        if let Some(dl) = deadline {
+            if Instant::now() >= dl {
+                return SearchResult::TimedOut {
+                    visited: visited_union_size(&fwd_parent, &bwd_parent),
+                };
+            }
+        }
+
         let expand_forward = fwd_frontier.len() <= bwd_frontier.len();
         let (frontier, parent, depths, orig, other_depths, other_orig, other_parent) =
             if expand_forward {
@@ -434,6 +458,7 @@ fn search_guide_path(
     max_entry: u32,
     min_gap: usize,
     max_gap: usize,
+    segment_timeout: Option<Duration>,
     search_mode: SearchMode,
 ) -> GuideSearchOutcome {
     println!("guide moves = {}", guide.len() - 1);
@@ -479,6 +504,7 @@ fn search_guide_path(
                 lag_cap,
                 max_dim,
                 max_entry,
+                segment_timeout,
                 search_mode,
             );
             match result {
@@ -513,6 +539,9 @@ fn search_guide_path(
                 }
                 SearchResult::NotFound { visited } => {
                     println!("  no shortcut found within lag cap; visited={visited}");
+                }
+                SearchResult::TimedOut { visited } => {
+                    println!("  timed out; visited={visited}");
                 }
             }
         }
