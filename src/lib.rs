@@ -8,4 +8,5 @@ pub mod matrix;
 pub mod quadratic;
 pub mod search;
 pub mod types;
+#[cfg(feature = "wasm-bindings")]
 pub mod wasm;

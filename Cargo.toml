@@ -2,12 +2,17 @@
 name = "sse-core"
 version = "0.1.0"
 edition = "2021"
+autobins = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+research-tools = []
+wasm-bindings = ["dep:wasm-bindgen"]
+
 [dependencies]
-wasm-bindgen = "0.2"
+wasm-bindgen = { version = "0.2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -21,6 +26,110 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "search"
 harness = false
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = "s"
+lto = "thin"
+
+[profile.dist]
+inherits = "release"
 lto = true
+
+[[bin]]
+name = "brix_ruiz_k3"
+path = "src/bin/brix_ruiz_k3.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "check_lind_marcus_path"
+path = "src/bin/check_lind_marcus_path.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "compare_brix_ruiz_graph_paths"
+path = "src/bin/compare_brix_ruiz_graph_paths.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_balanced"
+path = "src/bin/find_balanced.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_brix_ruiz_graph_path"
+path = "src/bin/find_brix_ruiz_graph_path.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_lind_marcus_graph_waypoints"
+path = "src/bin/find_lind_marcus_graph_waypoints.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_mixed_split_refinement"
+path = "src/bin/find_mixed_split_refinement.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_outsplit_3x3_zigzag"
+path = "src/bin/find_outsplit_3x3_zigzag.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_outsplit_bridge"
+path = "src/bin/find_outsplit_bridge.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_outsplit_bridge_zigzag"
+path = "src/bin/find_outsplit_bridge_zigzag.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_outsplit_refinement"
+path = "src/bin/find_outsplit_refinement.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_positive_conjugacy"
+path = "src/bin/find_positive_conjugacy.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_rectangular_case"
+path = "src/bin/find_rectangular_case.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_two_step_mixed_split_refinement"
+path = "src/bin/find_two_step_mixed_split_refinement.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "find_two_step_outsplit_refinement"
+path = "src/bin/find_two_step_outsplit_refinement.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "profile_graph_moves"
+path = "src/bin/profile_graph_moves.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "replay_graph_path_scores"
+path = "src/bin/replay_graph_path_scores.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "research_harness"
+path = "src/bin/research_harness.rs"
+required-features = ["research-tools"]
+
+[[bin]]
+name = "search"
+path = "src/bin/search.rs"
