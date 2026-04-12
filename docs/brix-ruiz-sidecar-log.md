@@ -225,7 +225,7 @@ The first estimate of `18` graph moves only replaced the three missing Baker ele
 - Baker step `6` becomes `3` graph moves
 - Baker step `7` becomes `3` graph moves
 
-Printed path from `cargo run --release --bin find_lind_marcus_graph_waypoints -- --max-depth 6 --max-dim 5 --max-states 1000000`:
+Printed path from `cargo run --release --features research-tools --bin find_lind_marcus_graph_waypoints -- --max-depth 6 --max-dim 5 --max-states 1000000`:
 
 ```text
 1. outsplit: 2x2 [1, 2, 3, 1] -> 3x3 [0, 0, 1, 1, 1, 2, 2, 2, 1]

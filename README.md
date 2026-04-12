@@ -148,24 +148,39 @@ Rust library crate (`sse-core`) with WASM bindings. Native builds use `rayon` fo
 - [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).
 - [`src/factorisation.rs`](src/factorisation.rs) — Exhaustive enumeration of nonneg integer factorisations A = UV (square and rectangular).
 - [`src/matrix.rs`](src/matrix.rs) — Fixed-size `SqMatrix<N>` and dynamic `DynMatrix` types.
-- [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse`,
+- [`src/wasm.rs`](src/wasm.rs) — Optional WASM bindings, enabled with the
+  `wasm-bindings` feature, exposing `search_sse`,
   `search_aligned_shift`, and the compatibility alias
   `search_aligned_module` as JSON-returning functions.
 
 **Building WASM:**
 
 ```sh
-wasm-pack build --target web
+wasm-pack build --target web -- --features wasm-bindings
 ```
 
 This produces a `pkg/` directory with `sse_core.js` and `sse_core_bg.wasm`.
+
+**Native build targets:**
+
+Default `cargo build` now builds the library plus the main `search` CLI. The
+research helper programs in `src/bin/` are available behind the
+`research-tools` feature so iterative builds do not relink every helper binary
+by default.
+
+```sh
+cargo build --release
+cargo build --release --features research-tools --bins
+cargo run --release --bin search -- --help
+cargo run --profile dist --features research-tools --bin research_harness -- --cases research/cases.json --format pretty
+```
 
 **Deployment:**
 
 The WASM output is used by the [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend, hosted on [kplauritzen.github.io](https://github.com/KPLauritzen/kplauritzen.github.io). The built WASM files (`sse_core.js` and `sse_core_bg.wasm`) are committed directly into that repo under `docs/wasm/`. After rebuilding, copy the files manually:
 
 ```sh
-wasm-pack build --target web
+wasm-pack build --target web -- --features wasm-bindings
 cp pkg/sse_core.js pkg/sse_core_bg.wasm ../kplauritzen.github.io/docs/wasm/
 ```
 

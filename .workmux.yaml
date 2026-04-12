@@ -65,14 +65,14 @@
 # mode: session
 
 # Custom tmux pane layout (mutually exclusive with 'windows').
-# Default: Two-pane layout with shell and clear command.
-# panes:
-#   - command: pnpm install
-#     focus: true
-#   - split: horizontal
-#   - command: clear
-#     split: vertical
-#     size: 5
+# Warm the main CLI build in one pane while the agent starts immediately in the
+# other. This keeps worktree creation non-blocking and avoids copying target/
+# across paths.
+panes:
+  - command: cargo build --quiet --bin search
+  - command: <agent>
+    split: horizontal
+    focus: true
 
 # Multiple windows per session (session mode only, mutually exclusive with 'panes').
 # Each window can have its own pane layout. Unnamed windows get tmux's
