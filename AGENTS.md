@@ -1,2 +1,13 @@
 - Run `cargo fmt` before any commit. 
 - Use reasonable timeouts for potentially explosive search/probe commands; start with small bounds and increase only after the telemetry looks manageable.
+
+## Beads Trial
+
+- Beads (`bd`) is in trial use for task tracking in this repo.
+- During the trial, prefer `bd` for actionable work tracking instead of adding new markdown TODO items.
+- Treat existing markdown planning files as the source material to migrate from; do not assume they have already been imported into `bd`.
+- Check ready work with `bd ready --json` or `bd list --json`.
+- Create work with `bd create "Title" -t task|feature|bug -p 0-4 --json`.
+- Update work with `bd update <id> --notes "..." --status ... --priority ... --json`.
+- Close finished work with `bd close <id> --reason "..." --json`.
+- Avoid `bd edit`; use non-interactive `bd update` flags instead.
