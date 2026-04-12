@@ -113,3 +113,17 @@ Implement one narrow structured `3x4` / `4x3` family and use
 `check_lind_marcus_path` plus the shortcut-search total lag as the acceptance
 criteria. A candidate is successful only if it covers one of Baker steps 2, 5,
 or 6 or reduces the current best lag below `11`.
+
+## Follow-up
+
+The first narrow family was a binary-sparse `4x4 -> 3x3` rectangular
+enumerator. It succeeded on the local acceptance gate partially:
+
+- Baker step 6 is now covered directly.
+- The hidden `3x3` bridge inside Baker step 5 is now recovered directly.
+- Baker step 2 is still missing.
+- The default shortcut search (`max_shortcut_lag=6`) still bottoms out at
+  total lag `11`.
+
+So the next implementation target should be the dual `3x3 -> 4x4` structured
+family rather than more work on the `4x4 -> 3x3` side.

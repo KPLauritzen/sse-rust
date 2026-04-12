@@ -263,6 +263,32 @@ pub fn solve_overdetermined_3x2(
     None
 }
 
+/// Solve U·x = b where U is 4×3 (given as rows), b is 4-vector.
+/// Returns the unique nonneg integer 3-vector x with entries ≤ max_entry, if it exists.
+fn solve_overdetermined_4x3(u: &[[i64; 3]; 4], b: &[i64; 4], max_entry: u32) -> Option<[u32; 3]> {
+    let row_sets = [
+        (0usize, 1usize, 2usize, 3usize),
+        (0, 1, 3, 2),
+        (0, 2, 3, 1),
+        (1, 2, 3, 0),
+    ];
+
+    for &(r0, r1, r2, r_check) in &row_sets {
+        let system = [u[r0], u[r1], u[r2]];
+        let rhs = [b[r0], b[r1], b[r2]];
+        for solution in solve_nonneg_3x3(&system, &rhs, max_entry) {
+            let check = u[r_check][0] * solution[0] as i64
+                + u[r_check][1] * solution[1] as i64
+                + u[r_check][2] * solution[2] as i64;
+            if check == b[r_check] {
+                return Some(solution);
+            }
+        }
+    }
+
+    None
+}
+
 // --- Rectangular factorisation enumerators ---
 
 /// Enumerate all factorisations A = UV where U is 2×3, V is 3×2,
@@ -713,6 +739,139 @@ fn enumerate_factorisations_3x3_to_2_from_row0(
     }
 
     results
+}
+
+fn binary_sparse_rows_len3() -> Vec<[u32; 3]> {
+    vec![
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 1, 0],
+        [1, 0, 1],
+        [0, 1, 1],
+    ]
+}
+
+fn is_binary_sparse_row_len3(row: [u32; 3]) -> bool {
+    matches!(
+        row,
+        [1, 0, 0] | [0, 1, 0] | [0, 0, 1] | [1, 1, 0] | [1, 0, 1] | [0, 1, 1]
+    )
+}
+
+/// Enumerate a narrow structured family of 4x4 -> 3x3 factorisations A = UV
+/// where the 4x3 factor U has binary rows with support size 1 or 2.
+fn visit_binary_sparse_factorisations_4x4_to_3<F>(a: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 4);
+    assert_eq!(a.cols, 4);
+
+    let rows = binary_sparse_rows_len3();
+    let a_cols: [[i64; 3]; 4] = [
+        [a.get(0, 0) as i64, a.get(1, 0) as i64, a.get(2, 0) as i64],
+        [a.get(0, 1) as i64, a.get(1, 1) as i64, a.get(2, 1) as i64],
+        [a.get(0, 2) as i64, a.get(1, 2) as i64, a.get(2, 2) as i64],
+        [a.get(0, 3) as i64, a.get(1, 3) as i64, a.get(2, 3) as i64],
+    ];
+    let last_row = [
+        a.get(3, 0) as i64,
+        a.get(3, 1) as i64,
+        a.get(3, 2) as i64,
+        a.get(3, 3) as i64,
+    ];
+
+    for &row0 in &rows {
+        for &row1 in &rows {
+            for &row2 in &rows {
+                let u_top = [
+                    [row0[0] as i64, row0[1] as i64, row0[2] as i64],
+                    [row1[0] as i64, row1[1] as i64, row1[2] as i64],
+                    [row2[0] as i64, row2[1] as i64, row2[2] as i64],
+                ];
+
+                let det = u_top[0][0] * (u_top[1][1] * u_top[2][2] - u_top[1][2] * u_top[2][1])
+                    - u_top[0][1] * (u_top[1][0] * u_top[2][2] - u_top[1][2] * u_top[2][0])
+                    + u_top[0][2] * (u_top[1][0] * u_top[2][1] - u_top[1][1] * u_top[2][0]);
+                if det == 0 {
+                    continue;
+                }
+
+                let mut v_cols = Vec::with_capacity(4);
+                let mut ok = true;
+                for col in &a_cols {
+                    let solutions = solve_nonneg_3x3(&u_top, col, max_entry);
+                    if solutions.len() != 1 {
+                        ok = false;
+                        break;
+                    }
+                    v_cols.push(solutions[0]);
+                }
+                if !ok {
+                    continue;
+                }
+
+                let vt = [
+                    [
+                        v_cols[0][0] as i64,
+                        v_cols[0][1] as i64,
+                        v_cols[0][2] as i64,
+                    ],
+                    [
+                        v_cols[1][0] as i64,
+                        v_cols[1][1] as i64,
+                        v_cols[1][2] as i64,
+                    ],
+                    [
+                        v_cols[2][0] as i64,
+                        v_cols[2][1] as i64,
+                        v_cols[2][2] as i64,
+                    ],
+                    [
+                        v_cols[3][0] as i64,
+                        v_cols[3][1] as i64,
+                        v_cols[3][2] as i64,
+                    ],
+                ];
+
+                let Some(row3) = solve_overdetermined_4x3(&vt, &last_row, max_entry) else {
+                    continue;
+                };
+                if !is_binary_sparse_row_len3(row3) {
+                    continue;
+                }
+
+                let u = DynMatrix::new(
+                    4,
+                    3,
+                    vec![
+                        row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1],
+                        row2[2], row3[0], row3[1], row3[2],
+                    ],
+                );
+                let v = DynMatrix::new(
+                    3,
+                    4,
+                    vec![
+                        v_cols[0][0],
+                        v_cols[1][0],
+                        v_cols[2][0],
+                        v_cols[3][0],
+                        v_cols[0][1],
+                        v_cols[1][1],
+                        v_cols[2][1],
+                        v_cols[3][1],
+                        v_cols[0][2],
+                        v_cols[1][2],
+                        v_cols[2][2],
+                        v_cols[3][2],
+                    ],
+                );
+                visit(u, v);
+            }
+        }
+    }
 }
 
 // --- Elementary conjugation moves for 3×3 ---
@@ -1535,6 +1694,11 @@ pub fn visit_all_factorisations_with_family<F>(
             });
         }
     } else if k >= 4 {
+        if k == 4 && max_intermediate_dim >= 4 {
+            visit_binary_sparse_factorisations_4x4_to_3(a, max_entry, &mut |u, v| {
+                visit("binary_sparse_rectangular_factorisation_4x3_to_3", u, v);
+            });
+        }
         // For dimensions ≥ 4: elementary conjugations (same-dimension moves).
         // These use the dimension-generic implementation.
         if max_intermediate_dim >= k {
@@ -1710,6 +1874,14 @@ mod tests {
     }
 
     #[test]
+    fn test_solve_overdetermined_4x3_basic() {
+        let u = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0]];
+        let b = [2, 3, 5, 5];
+        let result = solve_overdetermined_4x3(&u, &b, 10);
+        assert_eq!(result, Some([2, 3, 5]));
+    }
+
+    #[test]
     fn test_visit_all_factorisations_includes_opposite_shear_conjugation() {
         let u = DynMatrix::new(3, 3, vec![5, 2, 0, 2, 1, 0, 0, 0, 1]);
         let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
@@ -1755,6 +1927,42 @@ mod tests {
         });
 
         assert!(found, "expected convergent-shear conjugation factorisation");
+    }
+
+    #[test]
+    fn test_binary_sparse_factorisations_reach_baker_step_6() {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 1, 1, 3, 0, 2, 2, 1, 0, 0, 0, 0, 1, 1, 1]);
+        let target = DynMatrix::new(3, 3, vec![1, 1, 1, 5, 0, 5, 1, 0, 1]);
+        let mut found = false;
+
+        visit_binary_sparse_factorisations_4x4_to_3(&current, 5, &mut |u, v| {
+            if v.mul(&u) == target {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected binary sparse 4x4->3x3 factorisation for Baker step 6"
+        );
+    }
+
+    #[test]
+    fn test_binary_sparse_factorisations_reach_hidden_baker_step_5_bridge() {
+        let current = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 2, 1, 0]);
+        let bridge = DynMatrix::new(3, 3, vec![1, 1, 1, 3, 0, 2, 1, 1, 1]);
+        let mut found = false;
+
+        visit_binary_sparse_factorisations_4x4_to_3(&current, 5, &mut |u, v| {
+            if v.mul(&u) == bridge {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected binary sparse 4x4->3x3 factorisation for the hidden Baker step 5 bridge"
+        );
     }
 
     // --- Rectangular factorisation tests ---

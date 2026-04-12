@@ -149,3 +149,6 @@
 
 - `worktree` Checked Lind-Marcus/Baker step coverage against the current move families.
   Kept as evidence. Steps 2, 5, and 6 are still missing; a failed generic `4x4` shear extension confirmed that the real gap is not same-size conjugation but the missing `3x4` / `4x3` structured vocabulary.
+
+- `worktree` Added a binary-sparse `4x4 -> 3x3` rectangular factor family.
+  Kept. It now recovers Baker step 6 and the hidden `3x3` bridge inside Baker step 5, but step 2 is still missing and the default shortcut search still bottoms out at total lag 11.
