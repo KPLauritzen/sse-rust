@@ -138,3 +138,8 @@ required-features = ["research-tools"]
 [[bin]]
 name = "search"
 path = "src/bin/search.rs"
+
+[[bin]]
+name = "verify_lind_marcus_reconstruction"
+path = "src/bin/verify_lind_marcus_reconstruction.rs"
+required-features = ["research-tools"]
