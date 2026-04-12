@@ -85,7 +85,10 @@ Before attempting the expensive search for an SSE path, we can check necessary c
 
 ### Aligned shift equivalence
 
-Carlsen, Dor-On & Eilers showed that aligned shift equivalence characterises SSE and that fixed-lag aligned SE algorithms perform better. Implementing this reformulation alongside naive factorisation search would be a concrete contribution.
+The repo now has bounded concrete-shift validation and aligned witness search
+for small `2x2` cases. The remaining work is to standardize the aligned,
+balanced, and compatible formulations, reduce the witness search space, and use
+those witnesses more effectively inside the main solver.
 
 ### Visualisation of SSE paths
 
@@ -97,7 +100,10 @@ Systematically enumerate SSE classes for small matrices (e.g. all irreducible 2�
 
 ### Interactive web tool
 
-The WASM bindings exist but there is no frontend yet. A web-based explorer where users input two matrices and get back either a proof (the SSE path) or evidence against (which invariants fail) would be useful to the symbolic dynamics community.
+The WASM bindings already power the
+[SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend. The remaining
+opportunity is to make the frontend expose more of the solver surface, such as
+telemetry, graph-only runs, and concrete-shift witness details.
 
 ### Search improvements
 
@@ -125,20 +131,26 @@ Rust library crate (`sse-core`) with WASM bindings. Native builds use `rayon` fo
 **What it can do:**
 
 - BFS search for SSE paths between 2×2 matrices, including through 3×3 intermediate matrices (rectangular factorisations).
+- Run the main solver in either `mixed` or `graph-only` mode.
 - Disprove SSE via a chain of invariants: trace, determinant, Bowen-Franks group, generalised Bowen-Franks groups (18 polynomials from Eilers & Kiming 2008), and the Eilers-Kiming ideal class invariant.
-- Experimentally search for aligned module shift-equivalence witnesses for small 2×2 cases.
-  This is exposed separately from SSE search and is not currently used as an SSE proof method.
+- Search for bounded aligned concrete-shift witnesses for small `2x2` cases.
+- Use an aligned concrete-shift witness as a bounded fallback proof path from
+  `search_sse_2x2` on finite essential pairs.
 - Compile to WASM for in-browser use.
 
 **Key source files:**
 
-- [`src/aligned.rs`](src/aligned.rs) — Fixed-lag SE witnesses, aligned module witness verification, and bounded aligned module search.
+- [`src/aligned.rs`](src/aligned.rs) — Fixed-lag SE witnesses, concrete-shift
+  witness verification, and bounded aligned concrete-shift search. Some public
+  names still preserve the older local `module` terminology for compatibility.
 - [`src/search.rs`](src/search.rs) — BFS search engine. Entry point: `search_sse_2x2`.
 - [`src/invariants.rs`](src/invariants.rs) — All invariant checks, called as pre-filters before search. Entry point: `check_invariants_2x2`.
 - [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).
 - [`src/factorisation.rs`](src/factorisation.rs) — Exhaustive enumeration of nonneg integer factorisations A = UV (square and rectangular).
 - [`src/matrix.rs`](src/matrix.rs) — Fixed-size `SqMatrix<N>` and dynamic `DynMatrix` types.
-- [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse` and the experimental `search_aligned_module` as JSON-returning functions.
+- [`src/wasm.rs`](src/wasm.rs) — WASM bindings exposing `search_sse`,
+  `search_aligned_shift`, and the compatibility alias
+  `search_aligned_module` as JSON-returning functions.
 
 **Building WASM:**
 
