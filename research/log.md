@@ -188,3 +188,6 @@
 
 - `2026-04-12-1650-unsat-solver-memo` Cached only repeated unsatisfiable `2x3` and `3x2` solver calls.
   Failed. Lighter than the full cache, but still regressed enough to timeout `brix_ruiz_k3_wide_probe`.
+
+- `2026-04-12-1656-row-candidate-cache` Cached valid `U` row candidates by target row and reused them for both outer and inner rectangular loops.
+  Kept. It preserved the full baseline score while cutting saved-artifact runtime from `26522 ms` to `20277 ms`.
