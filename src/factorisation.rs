@@ -1,7 +1,26 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use crate::matrix::{DynMatrix, SqMatrix};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
+
+const SOLVE_NONNEG_2X3_CACHE_LIMIT: usize = 16_384;
+const SOLVE_OVERDETERMINED_3X2_CACHE_LIMIT: usize = 16_384;
+
+type SolveNonneg2x3Key = ([[i64; 3]; 2], [i64; 2], u32);
+type SolveOverdetermined3x2Key = ([[i64; 2]; 3], [i64; 3], u32);
+
+thread_local! {
+    // Reuse small linear-system results across nearby frontier states without
+    // paying the cloning/synchronization cost of caching full factorizations.
+    static SOLVE_NONNEG_2X3_CACHE: RefCell<HashMap<SolveNonneg2x3Key, Vec<[u32; 3]>>> =
+        RefCell::new(HashMap::new());
+    static SOLVE_OVERDETERMINED_3X2_CACHE:
+        RefCell<HashMap<SolveOverdetermined3x2Key, Option<[u32; 2]>>> =
+            RefCell::new(HashMap::new());
+}
 
 /// Enumerate all 2x2 nonneg integer factorisations A = UV where U and V are 2x2
 /// with entries in 0..=max_entry and det(U) > 0.
@@ -109,6 +128,23 @@ pub fn vu_product_2x2(v: &DynMatrix, u: &DynMatrix) -> SqMatrix<2> {
 /// compute the 1D null space, find a particular solution, then enumerate
 /// the free parameter t such that x0 + t*n has all entries in [0, max_entry].
 pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<[u32; 3]> {
+    let key = (*u, *b, max_entry);
+    if let Some(cached) = SOLVE_NONNEG_2X3_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return cached;
+    }
+
+    let solutions = solve_nonneg_2x3_uncached(u, b, max_entry);
+    SOLVE_NONNEG_2X3_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= SOLVE_NONNEG_2X3_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, solutions.clone());
+    });
+    solutions
+}
+
+fn solve_nonneg_2x3_uncached(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<[u32; 3]> {
     let me = max_entry as i64;
 
     // Compute 2×2 minors: d_ij = u[0][i]*u[1][j] - u[0][j]*u[1][i]
@@ -223,6 +259,29 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
 ///
 /// Overdetermined system: pick a 2×2 submatrix, solve, verify the third equation.
 pub fn solve_overdetermined_3x2(
+    u: &[[i64; 2]; 3],
+    b: &[i64; 3],
+    max_entry: u32,
+) -> Option<[u32; 2]> {
+    let key = (*u, *b, max_entry);
+    if let Some(cached) =
+        SOLVE_OVERDETERMINED_3X2_CACHE.with(|cache| cache.borrow().get(&key).copied())
+    {
+        return cached;
+    }
+
+    let solution = solve_overdetermined_3x2_uncached(u, b, max_entry);
+    SOLVE_OVERDETERMINED_3X2_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= SOLVE_OVERDETERMINED_3X2_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, solution);
+    });
+    solution
+}
+
+fn solve_overdetermined_3x2_uncached(
     u: &[[i64; 2]; 3],
     b: &[i64; 3],
     max_entry: u32,
@@ -2685,6 +2744,15 @@ mod tests {
             assert_eq!(check0, b[0], "Failed for x={:?}", x);
             assert_eq!(check1, b[1], "Failed for x={:?}", x);
         }
+    }
+
+    #[test]
+    fn test_solve_nonneg_2x3_repeated_calls_match() {
+        let u = [[1, 0, 1], [0, 1, 1]];
+        let b = [3, 2];
+        let first = solve_nonneg_2x3(&u, &b, 10);
+        let second = solve_nonneg_2x3(&u, &b, 10);
+        assert_eq!(first, second);
     }
 
     #[test]
