@@ -175,6 +175,34 @@ cargo run --release --bin search -- --help
 cargo run --profile dist --features research-tools --bin research_harness -- --cases research/cases.json --format pretty
 ```
 
+### Persisting the visited search graph
+
+The main `search` CLI can optionally persist the visited graph to a local
+SQLite database:
+
+```sh
+cargo run --release --bin search -- \
+  1,3,2,1 1,6,1,1 \
+  --max-lag 4 \
+  --max-intermediate-dim 3 \
+  --max-entry 4 \
+  --visited-db visited.sqlite \
+  --telemetry
+```
+
+The persisted schema is graph-shaped even though it uses SQLite tables:
+
+- `matrices` stores each unique square or rectangular matrix once.
+- `search_runs` stores one row per invocation, including config, outcome, and
+  serialized telemetry/result payloads.
+- `run_nodes` stores the canonical nodes discovered from each side.
+- `run_edges` stores each explored post-pruning SSE edge, including move family,
+  BFS direction, layer/depth, `U`, and `V`.
+
+The recorder is disabled by default and uses batched per-layer transactions with
+WAL mode, so normal searches do not pay any storage overhead unless
+`--visited-db` is enabled.
+
 **Deployment:**
 
 The WASM output is used by the [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend, hosted on [kplauritzen.github.io](https://github.com/KPLauritzen/kplauritzen.github.io). The built WASM files (`sse_core.js` and `sse_core_bg.wasm`) are committed directly into that repo under `docs/wasm/`. After rebuilding, copy the files manually:

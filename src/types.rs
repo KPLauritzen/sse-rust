@@ -74,7 +74,7 @@ pub enum SseResult<const N: usize> {
 }
 
 /// Direction of a BFS layer expansion in bidirectional search.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchDirection {
     Forward,

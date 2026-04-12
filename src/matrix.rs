@@ -274,6 +274,10 @@ impl DynMatrix {
         self.data.iter().copied().max().unwrap_or(0)
     }
 
+    pub fn entry_sum(&self) -> u64 {
+        self.data.iter().map(|&value| value as u64).sum()
+    }
+
     pub fn trace(&self) -> u64 {
         assert!(self.is_square());
         let mut sum = 0u64;

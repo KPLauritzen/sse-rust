@@ -8,6 +8,9 @@ use crate::factorisation::visit_all_factorisations_with_family;
 use crate::graph_moves::enumerate_graph_move_successors;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
+use crate::search_observer::{
+    SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
+};
 use crate::types::{
     EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry, SearchMode,
     SearchMoveFamilyTelemetry, SearchTelemetry, SsePath, SseResult,
@@ -85,11 +88,45 @@ pub fn search_sse_2x2_with_telemetry(
     b: &SqMatrix<2>,
     config: &SearchConfig,
 ) -> (SseResult<2>, SearchTelemetry) {
+    search_sse_2x2_with_telemetry_and_observer(a, b, config, None)
+}
+
+/// Search for a strong shift equivalence path, optionally recording the visited graph.
+pub fn search_sse_2x2_with_telemetry_and_observer(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &SearchConfig,
+    mut observer: Option<&mut dyn SearchObserver>,
+) -> (SseResult<2>, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
+    let a_dyn = DynMatrix::from_sq(a);
+    let b_dyn = DynMatrix::from_sq(b);
+    let a_canon = a_dyn.canonical_perm();
+    let b_canon = b_dyn.canonical_perm();
+
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_search_started(&a_dyn, &b_dyn, &a_canon, &b_canon, config);
+        let roots = [
+            SearchRootRecord {
+                direction: SearchDirection::Forward,
+                canonical: a_canon.clone(),
+                orig: a_dyn.clone(),
+                depth: 0,
+            },
+            SearchRootRecord {
+                direction: SearchDirection::Backward,
+                canonical: b_canon.clone(),
+                orig: b_dyn.clone(),
+                depth: 0,
+            },
+        ];
+        observer.on_roots(&roots);
+    }
 
     // Quick check: are they already equal?
     if a == b {
-        return (
+        return finish_search(
+            observer,
             SseResult::Equivalent(SsePath {
                 matrices: vec![a.clone()],
                 steps: vec![],
@@ -101,7 +138,7 @@ pub fn search_sse_2x2_with_telemetry(
     // Pre-filter with invariants.
     if let Some(reason) = check_invariants_2x2(a, b) {
         telemetry.invariant_filtered = true;
-        return (SseResult::NotEquivalent(reason), telemetry);
+        return finish_search(observer, SseResult::NotEquivalent(reason), telemetry);
     }
 
     // If a and b have the same canonical form, they are related by permutation
@@ -112,7 +149,8 @@ pub fn search_sse_2x2_with_telemetry(
         let p = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
         let ap = DynMatrix::from_sq(a).mul(&p);
         let step = EsseStep { u: ap, v: p };
-        return (
+        return finish_search(
+            observer,
             SseResult::Equivalent(SsePath {
                 matrices: vec![a.clone(), b.clone()],
                 steps: vec![step],
@@ -120,12 +158,6 @@ pub fn search_sse_2x2_with_telemetry(
             telemetry,
         );
     }
-
-    // Bidirectional BFS: expand from both A and B, meet in the middle.
-    let a_dyn = DynMatrix::from_sq(a);
-    let b_dyn = DynMatrix::from_sq(b);
-    let a_canon = a_dyn.canonical_perm();
-    let b_canon = b_dyn.canonical_perm();
 
     // Forward direction (from A).
     let mut fwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
@@ -163,7 +195,8 @@ pub fn search_sse_2x2_with_telemetry(
     if a_canon == b_canon {
         telemetry.canonical_shortcut = true;
         telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-        return (
+        return finish_search(
+            observer,
             SseResult::Equivalent(reconstruct_bidirectional_path(
                 a,
                 b,
@@ -178,7 +211,7 @@ pub fn search_sse_2x2_with_telemetry(
     }
 
     if config.search_mode == SearchMode::GraphOnly {
-        return search_graph_only_2x2_with_telemetry(a, b, config);
+        return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer);
     }
 
     // Precompute spectral invariants for pruning intermediates.
@@ -278,22 +311,52 @@ pub fn search_sse_2x2_with_telemetry(
         let mut parents_with_progress = HashSet::new();
         let mut enqueued_nodes = 0usize;
         let mut layer_move_family_telemetry = expansion_stats.move_family_telemetry.clone();
+        let mut layer_records = observer
+            .as_ref()
+            .map(|_| Vec::with_capacity(expansions.len()));
         let next_depth = layer_depth + 1;
 
-        for expansion in expansions {
+        for expansion in &expansions {
+            let parent_orig = orig
+                .get(&expansion.parent_canon)
+                .expect("parent node should have an original matrix")
+                .clone();
             if parent.contains_key(&expansion.next_canon) {
                 collisions_with_seen += 1;
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: SearchEdgeStatus::SeenCollision,
+                        approximate_other_side_hit: false,
+                        enqueued: false,
+                    });
+                }
                 continue;
             }
 
             discovered_nodes += 1;
             parent.insert(
                 expansion.next_canon.clone(),
-                Some((expansion.parent_canon.clone(), expansion.step)),
+                Some((expansion.parent_canon.clone(), expansion.step.clone())),
             );
             depths.insert(expansion.next_canon.clone(), next_depth);
             orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
             signatures.insert(approx_signature(&expansion.next_canon));
+
+            let approximate_hit =
+                other_signatures.contains(&approx_signature(&expansion.next_canon));
+            let enqueued =
+                expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry;
+            let mut record_status = SearchEdgeStatus::Discovered;
 
             // Check if the other side has already visited this node.
             if let Some(&other_depth) = other_depths.get(&expansion.next_canon) {
@@ -309,8 +372,26 @@ pub fn search_sse_2x2_with_telemetry(
                     expansion.move_family,
                 )
                 .discovered_nodes += 1;
+                record_status = SearchEdgeStatus::ExactMeet;
                 let path_depth = next_depth + other_depth;
                 if path_depth > config.max_lag {
+                    if let Some(records) = layer_records.as_mut() {
+                        records.push(SearchEdgeRecord {
+                            layer_index,
+                            direction,
+                            move_family: expansion.move_family,
+                            from_canonical: expansion.parent_canon.clone(),
+                            from_orig: parent_orig.clone(),
+                            to_canonical: expansion.next_canon.clone(),
+                            to_orig: expansion.next_orig.clone(),
+                            from_depth: layer_depth,
+                            to_depth: next_depth,
+                            step: expansion.step.clone(),
+                            status: record_status,
+                            approximate_other_side_hit: approximate_hit,
+                            enqueued,
+                        });
+                    }
                     continue;
                 }
                 telemetry.collisions_with_seen += collisions_with_seen;
@@ -327,6 +408,28 @@ pub fn search_sse_2x2_with_telemetry(
                     &mut telemetry.move_family_telemetry,
                     &layer_move_family_telemetry,
                 );
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: record_status,
+                        approximate_other_side_hit: approximate_hit,
+                        enqueued,
+                    });
+                }
+                if let (Some(observer), Some(records)) =
+                    (observer.as_deref_mut(), layer_records.as_ref())
+                {
+                    observer.on_layer(records);
+                }
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
                     direction: Some(direction.clone()),
@@ -347,7 +450,8 @@ pub fn search_sse_2x2_with_telemetry(
                     total_visited_nodes: telemetry.total_visited_nodes,
                     move_family_telemetry: layer_move_family_telemetry,
                 });
-                return (
+                return finish_search(
+                    observer,
                     SseResult::Equivalent(reconstruct_bidirectional_path(
                         a,
                         b,
@@ -361,7 +465,7 @@ pub fn search_sse_2x2_with_telemetry(
                 );
             }
 
-            if other_signatures.contains(&approx_signature(&expansion.next_canon)) {
+            if approximate_hit {
                 approximate_other_side_hits += 1;
                 move_family_telemetry_mut(
                     &mut layer_move_family_telemetry,
@@ -377,9 +481,26 @@ pub fn search_sse_2x2_with_telemetry(
             // For 2x2 nodes, bound entries to prevent unbounded growth.
             // For intermediate (3x3+) nodes, always add -- the factorisation
             // back to 2x2 already bounds factor entries via max_entry.
-            if expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry {
-                next_frontier.push_back(expansion.next_canon);
+            if enqueued {
+                next_frontier.push_back(expansion.next_canon.clone());
                 enqueued_nodes += 1;
+            }
+            if let Some(records) = layer_records.as_mut() {
+                records.push(SearchEdgeRecord {
+                    layer_index,
+                    direction,
+                    move_family: expansion.move_family,
+                    from_canonical: expansion.parent_canon.clone(),
+                    from_orig: parent_orig,
+                    to_canonical: expansion.next_canon.clone(),
+                    to_orig: expansion.next_orig.clone(),
+                    from_depth: layer_depth,
+                    to_depth: next_depth,
+                    step: expansion.step.clone(),
+                    status: record_status,
+                    approximate_other_side_hit: approximate_hit,
+                    enqueued,
+                });
             }
         }
 
@@ -406,6 +527,9 @@ pub fn search_sse_2x2_with_telemetry(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
         );
+        if let (Some(observer), Some(records)) = (observer.as_deref_mut(), layer_records.as_ref()) {
+            observer.on_layer(records);
+        }
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
             direction: Some(direction),
@@ -449,11 +573,15 @@ pub fn search_sse_2x2_with_telemetry(
             search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
         {
             telemetry.concrete_shift_shortcut = true;
-            return (SseResult::EquivalentByConcreteShift(witness), telemetry);
+            return finish_search(
+                observer,
+                SseResult::EquivalentByConcreteShift(witness),
+                telemetry,
+            );
         }
     }
 
-    (SseResult::Unknown, telemetry)
+    finish_search(observer, SseResult::Unknown, telemetry)
 }
 
 fn is_essential_matrix_2x2(m: &SqMatrix<2>) -> bool {
@@ -483,10 +611,11 @@ fn should_try_concrete_shift_fallback(
         && config.max_entry <= 6
 }
 
-fn search_graph_only_2x2_with_telemetry(
+fn search_graph_only_2x2_with_telemetry_and_observer(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
     config: &SearchConfig,
+    mut observer: Option<&mut dyn SearchObserver>,
 ) -> (SseResult<2>, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
@@ -594,11 +723,18 @@ fn search_graph_only_2x2_with_telemetry(
             frontier_nodes: current_frontier_len,
             ..SearchLayerTelemetry::default()
         };
+        let mut layer_records = observer
+            .as_ref()
+            .map(|_| Vec::with_capacity(layer.candidates_after_pruning.max(8)));
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
 
         for (current_canon, successors) in computed {
+            let current_orig = orig
+                .get(&current_canon)
+                .expect("frontier node should have an original matrix")
+                .clone();
             layer.candidates_generated += successors.candidates;
             for (family, count) in successors.family_candidates {
                 move_family_telemetry_mut(&mut layer.move_family_telemetry, family)
@@ -632,12 +768,29 @@ fn search_graph_only_2x2_with_telemetry(
 
                 if parent.contains_key(&successor.matrix) {
                     layer.collisions_with_seen += 1;
+                    if let Some(records) = layer_records.as_mut() {
+                        records.push(SearchEdgeRecord {
+                            layer_index,
+                            direction,
+                            move_family: successor.family,
+                            from_canonical: current_canon.clone(),
+                            from_orig: current_orig.clone(),
+                            to_canonical: successor.matrix.clone(),
+                            to_orig: successor.orig_matrix.clone(),
+                            from_depth: layer_depth,
+                            to_depth: next_depth,
+                            step: successor.step.clone(),
+                            status: SearchEdgeStatus::SeenCollision,
+                            approximate_other_side_hit: false,
+                            enqueued: false,
+                        });
+                    }
                     continue;
                 }
 
                 parent.insert(
                     successor.matrix.clone(),
-                    Some((current_canon.clone(), successor.step)),
+                    Some((current_canon.clone(), successor.step.clone())),
                 );
                 depths.insert(successor.matrix.clone(), next_depth);
                 orig.insert(successor.matrix.clone(), successor.orig_matrix.clone());
@@ -645,6 +798,7 @@ fn search_graph_only_2x2_with_telemetry(
                 move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
                     .discovered_nodes += 1;
                 parents_with_progress.insert(current_canon.clone());
+                let mut record_status = SearchEdgeStatus::Discovered;
 
                 if let Some(&other_depth) = other_depths.get(&successor.matrix) {
                     layer.collisions_with_other_frontier += 1;
@@ -653,6 +807,7 @@ fn search_graph_only_2x2_with_telemetry(
                         successor.family,
                     )
                     .exact_meets += 1;
+                    record_status = SearchEdgeStatus::ExactMeet;
                     let path_depth = next_depth + other_depth;
                     if path_depth <= config.max_lag {
                         layer.next_frontier_nodes = next_frontier.len();
@@ -676,8 +831,31 @@ fn search_graph_only_2x2_with_telemetry(
                             &mut telemetry.move_family_telemetry,
                             &layer.move_family_telemetry,
                         );
+                        if let Some(records) = layer_records.as_mut() {
+                            records.push(SearchEdgeRecord {
+                                layer_index,
+                                direction,
+                                move_family: successor.family,
+                                from_canonical: current_canon.clone(),
+                                from_orig: current_orig.clone(),
+                                to_canonical: successor.matrix.clone(),
+                                to_orig: successor.orig_matrix.clone(),
+                                from_depth: layer_depth,
+                                to_depth: next_depth,
+                                step: successor.step.clone(),
+                                status: record_status,
+                                approximate_other_side_hit: false,
+                                enqueued: false,
+                            });
+                        }
+                        if let (Some(observer), Some(records)) =
+                            (observer.as_deref_mut(), layer_records.as_ref())
+                        {
+                            observer.on_layer(records);
+                        }
                         telemetry.layers.push(layer);
-                        return (
+                        return finish_search(
+                            observer,
                             SseResult::Equivalent(reconstruct_bidirectional_path(
                                 a,
                                 b,
@@ -694,8 +872,25 @@ fn search_graph_only_2x2_with_telemetry(
                     telemetry.total_visited_nodes += 1;
                 }
 
-                next_frontier.push_back(successor.matrix);
+                next_frontier.push_back(successor.matrix.clone());
                 layer.enqueued_nodes += 1;
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: successor.family,
+                        from_canonical: current_canon.clone(),
+                        from_orig: current_orig.clone(),
+                        to_canonical: successor.matrix.clone(),
+                        to_orig: successor.orig_matrix.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: successor.step.clone(),
+                        status: record_status,
+                        approximate_other_side_hit: false,
+                        enqueued: true,
+                    });
+                }
             }
         }
 
@@ -716,6 +911,9 @@ fn search_graph_only_2x2_with_telemetry(
             &mut telemetry.move_family_telemetry,
             &layer.move_family_telemetry,
         );
+        if let (Some(observer), Some(records)) = (observer.as_deref_mut(), layer_records.as_ref()) {
+            observer.on_layer(records);
+        }
         telemetry.layers.push(layer);
 
         if next_frontier.is_empty() {
@@ -725,7 +923,7 @@ fn search_graph_only_2x2_with_telemetry(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    (SseResult::Unknown, telemetry)
+    finish_search(observer, SseResult::Unknown, telemetry)
 }
 
 fn choose_next_layer(
@@ -1022,6 +1220,17 @@ fn record_candidates_after_pruning_by_family(
     for expansion in expansions {
         move_family_telemetry_mut(telemetry, expansion.move_family).candidates_after_pruning += 1;
     }
+}
+
+fn finish_search(
+    mut observer: Option<&mut dyn SearchObserver>,
+    result: SseResult<2>,
+    telemetry: SearchTelemetry,
+) -> (SseResult<2>, SearchTelemetry) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_search_finished(&result, &telemetry);
+    }
+    (result, telemetry)
 }
 
 fn visited_union_size(

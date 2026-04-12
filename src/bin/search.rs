@@ -1,7 +1,9 @@
 use std::process::ExitCode;
 
 use sse_core::matrix::{DynMatrix, SqMatrix};
-use sse_core::search::search_sse_2x2_with_telemetry;
+use sse_core::search::{search_sse_2x2_with_telemetry, search_sse_2x2_with_telemetry_and_observer};
+#[cfg(not(target_arch = "wasm32"))]
+use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{SearchConfig, SearchMode, SseResult};
 
 #[derive(Debug)]
@@ -11,6 +13,7 @@ struct Cli {
     config: SearchConfig,
     json: bool,
     telemetry: bool,
+    visited_db: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -26,7 +29,28 @@ fn main() -> ExitCode {
 fn run() -> Result<ExitCode, String> {
     let cli = parse_cli(std::env::args().skip(1))?;
 
-    let (result, telemetry) = search_sse_2x2_with_telemetry(&cli.a, &cli.b, &cli.config);
+    let (result, telemetry) = if let Some(path) = cli.visited_db.as_deref() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut recorder = SqliteGraphRecorder::new(path)?;
+            let output = search_sse_2x2_with_telemetry_and_observer(
+                &cli.a,
+                &cli.b,
+                &cli.config,
+                Some(&mut recorder),
+            );
+            if let Some(err) = recorder.error() {
+                return Err(format!("failed to persist visited graph to {path}: {err}"));
+            }
+            output
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Err("--visited-db is not supported on wasm32 targets".to_string());
+        }
+    } else {
+        search_sse_2x2_with_telemetry(&cli.a, &cli.b, &cli.config)
+    };
 
     if cli.json {
         print_json(&cli.a, &cli.b, &result, &telemetry, cli.telemetry)
@@ -50,6 +74,7 @@ where
     let mut config = SearchConfig::default();
     let mut json = false;
     let mut telemetry = false;
+    let mut visited_db = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -64,6 +89,7 @@ where
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --search-mode MODE       mixed | graph-only (default: mixed)\n\
+                       --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
                        --json                   output JSON instead of human-readable text\n\
                        --telemetry              include search telemetry in output"
                     .to_string());
@@ -84,6 +110,9 @@ where
                     "graph-only" | "graph_only" => SearchMode::GraphOnly,
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
+            }
+            "--visited-db" => {
+                visited_db = Some(args.next().ok_or("--visited-db requires a path")?);
             }
             "--json" => json = true,
             "--telemetry" => telemetry = true,
@@ -114,6 +143,7 @@ where
         config,
         json,
         telemetry,
+        visited_db,
     })
 }
 
