@@ -141,3 +141,11 @@
 
 - `071f236` Added histogram-based overlap signatures.
   Failed. The signature was too coarse, produced misleading overlap pressure, and collapsed the hard probes a layer earlier.
+
+## 2026-04-12
+
+- `worktree` Re-ran the endpoint-guided shortcut search at `max_dim=4`, `max_entry=5`.
+  Kept as evidence. The existing mixed shortcut search compresses the blind 16-move graph path to an 11-step SSE path, so the current bottleneck is no longer "can we beat graph-only at all?" but "how do we recover the missing short structured moves?"
+
+- `worktree` Checked Lind-Marcus/Baker step coverage against the current move families.
+  Kept as evidence. Steps 2, 5, and 6 are still missing; a failed generic `4x4` shear extension confirmed that the real gap is not same-size conjugation but the missing `3x4` / `4x3` structured vocabulary.
