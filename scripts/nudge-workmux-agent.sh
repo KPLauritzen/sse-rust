@@ -43,7 +43,7 @@ for ((i = 1; i <= iterations; i++)); do
 
   if [[ -z "$status_line" ]]; then
     echo "[$timestamp] iteration $i/$iterations: could not determine status for '$handle'" >&2
-  elif [[ "$status_line" == "waiting" || "$status_line" == "idle" ]]; then
+  elif [[ "$status_line" == "waiting" || "$status_line" == "idle" || "$status_line" == "done" ]]; then
     echo "[$timestamp] iteration $i/$iterations: '$handle' is $status_line, sending: $message"
     tmpfile="$(mktemp)"
     trap 'rm -f "$tmpfile"' EXIT
