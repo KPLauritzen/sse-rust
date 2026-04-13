@@ -1,5 +1,13 @@
 # Strong Shift Equivalence Explorer
 
+## Project Goals
+
+This project is currently optimizing for three concrete search goals:
+
+1. Find any path for `k = 3`. Solved.
+2. Find a new shortest path with lag `< 7` for `k = 3`.
+3. Find any path for `k = 4` or above.
+
 ## Problem Statement
 
 Two square matrices **A** and **B** over the nonneg integers ℤ₊ are **elementary strong shift equivalent (ESSE)** if there exist (possibly rectangular) matrices **U** and **V** over ℤ₊ such that:

@@ -2,6 +2,12 @@
 - Use reasonable timeouts for potentially explosive search/probe commands; start with small bounds and increase only after the telemetry looks manageable.
 - Commit your changes to git often. Before you ask the user for feedback or additional input. 
 
+## Project Goals
+
+- Goal 1: Find any path for `k = 3`. This is already solved.
+- Goal 2: Find a new shortest path with lag `< 7` for `k = 3`.
+- Goal 3: Find any path for `k = 4` or above.
+
 ## Beads Trial
 
 - Beads (`bd`) is in trial use for task tracking in this repo.
