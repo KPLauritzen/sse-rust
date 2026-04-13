@@ -7,6 +7,7 @@
 - Goal 1: Find any path for `k = 3`. This is already solved.
 - Goal 2: Find a new shortest path with lag `< 7` for `k = 3`.
 - Goal 3: Find any path for `k = 4` or above.
+- Goal 4: Make the main solver endpoint-agnostic for square matrices up to dimension 4, possibly higher later.
 
 ## Beads Trial
 
