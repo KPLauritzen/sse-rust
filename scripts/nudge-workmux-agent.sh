@@ -45,7 +45,12 @@ for ((i = 1; i <= iterations; i++)); do
     echo "[$timestamp] iteration $i/$iterations: could not determine status for '$handle'" >&2
   elif [[ "$status_line" == "waiting" || "$status_line" == "idle" ]]; then
     echo "[$timestamp] iteration $i/$iterations: '$handle' is $status_line, sending: $message"
-    workmux send "$handle" "$message"
+    tmpfile="$(mktemp)"
+    trap 'rm -f "$tmpfile"' EXIT
+    printf '%s\n' "$message" > "$tmpfile"
+    workmux send "$handle" -f "$tmpfile"
+    rm -f "$tmpfile"
+    trap - EXIT
   else
     echo "[$timestamp] iteration $i/$iterations: '$handle' is $status_line, no action"
   fi
