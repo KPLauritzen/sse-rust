@@ -154,7 +154,7 @@ struct CaseSummary {
     tags: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct EndpointSummary {
     source_dim: usize,
     target_dim: usize,
@@ -410,7 +410,7 @@ fn load_corpus(path: &Path) -> Result<CaseCorpus, String> {
 
 #[derive(Debug, Default)]
 struct ReusedResults {
-    case_best_witness: BTreeMap<String, BestKnownWitness>,
+    endpoint_best_witness: BTreeMap<String, BestKnownWitness>,
     sources: Vec<String>,
 }
 
@@ -422,7 +422,7 @@ struct PersistedHarnessSummary {
 
 #[derive(Debug, Deserialize)]
 struct PersistedCaseSummary {
-    id: String,
+    endpoint: EndpointSummary,
     elapsed_ms: u128,
     result_model: PersistedResultModel,
 }
@@ -477,21 +477,32 @@ fn load_reused_results(
             let Some(lag) = case.result_model.witness_lag else {
                 continue;
             };
+            let endpoint_key = endpoint_identity_key(&case.endpoint);
             let candidate = BestKnownWitness {
                 lag,
                 elapsed_ms: case.elapsed_ms,
                 source: source_label.clone(),
             };
-            match reused.case_best_witness.get(&case.id) {
+            match reused.endpoint_best_witness.get(&endpoint_key) {
                 Some(existing) if !best_known_witness_beats(&candidate, existing) => {}
                 _ => {
-                    reused.case_best_witness.insert(case.id, candidate);
+                    reused.endpoint_best_witness.insert(endpoint_key, candidate);
                 }
             }
         }
     }
 
     Ok(reused)
+}
+
+fn endpoint_identity_key(endpoint: &EndpointSummary) -> String {
+    serde_json::to_string(&(
+        endpoint.source_dim,
+        endpoint.target_dim,
+        &endpoint.a,
+        &endpoint.b,
+    ))
+    .expect("endpoint identity key should serialise")
 }
 
 fn run_case(case: &ResearchCase) -> WorkerCaseResult {
@@ -927,6 +938,7 @@ fn run_harness(
             a: case.a.clone(),
             b: case.b.clone(),
         };
+        let endpoint_key = endpoint_identity_key(&endpoint);
         if endpoint.source_dim != 2 || endpoint.target_dim != 2 {
             generalized_cases += 1;
         }
@@ -950,7 +962,7 @@ fn run_harness(
                     elapsed_ms: executed.elapsed_ms,
                     source: "current-run".to_string(),
                 }),
-            reused_results.case_best_witness.get(&case.id),
+            reused_results.endpoint_best_witness.get(&endpoint_key),
         );
         if let Some(best_known) = &best_known_witness {
             best_known_witness_cases += 1;
@@ -1027,13 +1039,7 @@ fn build_comparison_summaries(cases: &[CaseSummary]) -> Vec<ComparisonSummary> {
     let mut group_indices = BTreeMap::<String, usize>::new();
 
     for case in cases {
-        let key = serde_json::to_string(&(
-            case.endpoint.source_dim,
-            case.endpoint.target_dim,
-            &case.endpoint.a,
-            &case.endpoint.b,
-        ))
-        .expect("endpoint comparison key should serialise");
+        let key = endpoint_identity_key(&case.endpoint);
 
         let variant = ComparisonVariantSummary {
             case_id: case.id.clone(),
@@ -1980,7 +1986,7 @@ mod tests {
     }
 
     #[test]
-    fn load_reused_results_prefers_lower_lag_then_lower_elapsed() {
+    fn load_reused_results_shares_endpoint_history_across_case_ids() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
@@ -1999,7 +2005,13 @@ mod tests {
             r#"{
   "cases": [
     {
-      "id": "brix",
+      "id": "brix_ruiz_k3_graph_only",
+      "endpoint": {
+        "source_dim": 2,
+        "target_dim": 2,
+        "a": [[1, 3], [2, 1]],
+        "b": [[1, 6], [1, 1]]
+      },
       "elapsed_ms": 50,
       "result_model": { "witness_lag": 11 }
     }
@@ -2012,12 +2024,24 @@ mod tests {
             r#"{
   "cases": [
     {
-      "id": "brix",
+      "id": "brix_ruiz_k3_graph_only",
+      "endpoint": {
+        "source_dim": 2,
+        "target_dim": 2,
+        "a": [[1, 3], [2, 1]],
+        "b": [[1, 6], [1, 1]]
+      },
       "elapsed_ms": 40,
       "result_model": { "witness_lag": 7 }
     },
     {
       "id": "identity",
+      "endpoint": {
+        "source_dim": 2,
+        "target_dim": 2,
+        "a": [[1, 0], [0, 1]],
+        "b": [[1, 0], [0, 1]]
+      },
       "elapsed_ms": 2,
       "result_model": { "witness_lag": 0 }
     }
@@ -2028,13 +2052,84 @@ mod tests {
 
         let reused =
             load_reused_results(&[], &[temp_dir.clone()]).expect("reuse artifacts should load");
+        let endpoint_key = endpoint_identity_key(&EndpointSummary {
+            source_dim: 2,
+            target_dim: 2,
+            a: vec![vec![1, 3], vec![2, 1]],
+            b: vec![vec![1, 6], vec![1, 1]],
+        });
         let brix = reused
-            .case_best_witness
-            .get("brix")
-            .expect("brix witness should exist");
+            .endpoint_best_witness
+            .get(&endpoint_key)
+            .expect("shared endpoint witness should exist");
         assert_eq!(brix.lag, 7);
         assert_eq!(brix.elapsed_ms, 40);
         assert_eq!(reused.sources.len(), 2);
+
+        let merged_for_other_case =
+            merge_best_known_witness(None, reused.endpoint_best_witness.get(&endpoint_key));
+        assert_eq!(
+            merged_for_other_case.0.as_ref().map(|witness| witness.lag),
+            Some(7)
+        );
+        assert!(!merged_for_other_case.1);
+
+        let endpoint = EndpointSummary {
+            source_dim: 2,
+            target_dim: 2,
+            a: vec![vec![1, 3], vec![2, 1]],
+            b: vec![vec![1, 6], vec![1, 1]],
+        };
+        let case = |id: &str, strategy: &str| CaseSummary {
+            id: id.to_string(),
+            description: id.to_string(),
+            campaign: Some(CampaignConfig {
+                id: "brix_ruiz_k3".to_string(),
+                strategy: strategy.to_string(),
+                schedule_order: 10,
+            }),
+            endpoint: endpoint.clone(),
+            config: JsonSearchConfig {
+                max_lag: 6,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::Mixed,
+            },
+            actual_outcome: "unknown".to_string(),
+            allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            passed: true,
+            hit_target: false,
+            points: 0,
+            elapsed_ms: 10,
+            timeout_ms: 100,
+            steps: None,
+            reason: None,
+            result_model: ResultModel {
+                solver_path: HarnessSolverPath::TwoByTwo,
+                source_dim: 2,
+                target_dim: 2,
+                resolution_kind: ResultResolutionKind::SearchExhausted,
+                witness_lag: None,
+                path_matrix_count: None,
+                frontier_layers: 0,
+            },
+            best_known_witness: merged_for_other_case.0.clone(),
+            improved_best_known_witness: false,
+            telemetry: SearchTelemetry::default(),
+            telemetry_summary: derive_telemetry_summary("unknown", &SearchTelemetry::default(), 6),
+            tags: vec![],
+        };
+
+        let strategies = build_strategy_summaries(&[
+            case("brix_ruiz_k3", "mixed_baseline"),
+            case("brix_ruiz_k3_wide_probe", "mixed_wide_probe"),
+        ]);
+        assert_eq!(strategies.len(), 2);
+        for strategy in strategies {
+            assert_eq!(strategy.best_known_witness_cases, 1);
+            assert_eq!(strategy.best_known_witness_lag_total, 7);
+        }
 
         fs::remove_dir_all(temp_dir).expect("temporary reuse directory should be removed");
     }
