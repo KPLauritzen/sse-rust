@@ -226,6 +226,23 @@ The recorder is disabled by default and uses batched per-layer transactions with
 WAL mode, so normal searches do not pay any storage overhead unless
 `--visited-db` is enabled.
 
+### Exporting reusable guide artifacts
+
+The generic `search` CLI can also write a successful path witness as a reusable
+`full_path` guide artifact:
+
+```sh
+cargo run --release --bin search -- \
+  1,0,0,1 1,0,0,1 \
+  --write-guide-artifact guide.json
+```
+
+This export only succeeds for results that include an explicit SSE path witness.
+Concrete-shift-only witnesses, `not_equivalent`, and `unknown` results are not
+serializable as `full_path` guide artifacts. The written JSON matches the
+generic guide-artifact schema in `src/types.rs` and can be fed back into later
+guided searches with `--guide-artifacts`.
+
 **Deployment:**
 
 The WASM output is used by the [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend, hosted on [kplauritzen.github.io](https://github.com/KPLauritzen/kplauritzen.github.io). The built WASM files (`sse_core.js` and `sse_core_bg.wasm`) are committed directly into that repo under `docs/wasm/`. After rebuilding, copy the files manually:

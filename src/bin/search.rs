@@ -2,12 +2,14 @@ use std::process::ExitCode;
 use std::{fs, path::Path};
 
 use sse_core::matrix::DynMatrix;
-use sse_core::search::{execute_search_request, execute_search_request_and_observer};
+use sse_core::search::{
+    build_full_path_guide_artifact, execute_search_request, execute_search_request_and_observer,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
-    GuideArtifact, GuidedRefinementConfig, SearchConfig, SearchMode, SearchRequest,
-    SearchRunResult, SearchStage, SearchTelemetry,
+    GuideArtifact, GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig,
+    SearchConfig, SearchMode, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
 };
 
 #[derive(Debug)]
@@ -21,6 +23,7 @@ struct Cli {
     json: bool,
     telemetry: bool,
     visited_db: Option<String>,
+    write_guide_artifact: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -34,7 +37,14 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<ExitCode, String> {
-    let cli = parse_cli(std::env::args().skip(1))?;
+    run_with_args(std::env::args().skip(1))
+}
+
+fn run_with_args<I>(args: I) -> Result<ExitCode, String>
+where
+    I: Iterator<Item = String>,
+{
+    let cli = parse_cli(args)?;
     let mut guide_artifacts = Vec::new();
     for path in &cli.guide_artifact_paths {
         guide_artifacts.extend(load_guide_artifacts(path)?);
@@ -60,6 +70,12 @@ fn run() -> Result<ExitCode, String> {
             if let Some(err) = recorder.error() {
                 return Err(format!("failed to persist visited graph to {path}: {err}"));
             }
+            maybe_write_guide_artifact(
+                &request,
+                cli.stage,
+                &result,
+                cli.write_guide_artifact.as_deref(),
+            )?;
             if cli.json {
                 print_json(
                     &cli.a,
@@ -88,6 +104,12 @@ fn run() -> Result<ExitCode, String> {
     }
 
     let (result, telemetry) = execute_search_request(&request)?;
+    maybe_write_guide_artifact(
+        &request,
+        cli.stage,
+        &result,
+        cli.write_guide_artifact.as_deref(),
+    )?;
     if cli.json {
         print_json(
             &cli.a,
@@ -133,6 +155,7 @@ where
     let mut json = false;
     let mut telemetry = false;
     let mut visited_db = None;
+    let mut write_guide_artifact = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -156,6 +179,8 @@ where
                        --guided-max-gap N       maximum guide gap to consider for refinement\n\
                        --guided-rounds N        number of refinement rounds per guide (default: 1)\n\
                        --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
+                       --write-guide-artifact PATH\n\
+                                               write a reusable full_path guide artifact JSON file\n\
                        --json                   output JSON instead of human-readable text\n\
                        --telemetry              include search telemetry in output"
                     .to_string());
@@ -205,6 +230,12 @@ where
             "--visited-db" => {
                 visited_db = Some(args.next().ok_or("--visited-db requires a path")?);
             }
+            "--write-guide-artifact" => {
+                write_guide_artifact = Some(
+                    args.next()
+                        .ok_or("--write-guide-artifact requires a path")?,
+                );
+            }
             "--json" => json = true,
             "--telemetry" => telemetry = true,
             other if other.starts_with('-') => {
@@ -238,7 +269,66 @@ where
         json,
         telemetry,
         visited_db,
+        write_guide_artifact,
     })
+}
+
+fn maybe_write_guide_artifact(
+    request: &SearchRequest,
+    stage: SearchStage,
+    result: &SearchRunResult,
+    output_path: Option<&str>,
+) -> Result<(), String> {
+    let Some(output_path) = output_path else {
+        return Ok(());
+    };
+
+    let path = match result {
+        SearchRunResult::Equivalent(path) => path,
+        SearchRunResult::EquivalentByConcreteShift(_) => {
+            return Err(
+                "--write-guide-artifact only supports path witnesses; concrete shift witnesses \
+                 cannot be exported as full_path guide artifacts"
+                    .to_string(),
+            );
+        }
+        SearchRunResult::NotEquivalent(_) | SearchRunResult::Unknown => {
+            return Err(
+                "--write-guide-artifact requires a successful search result with a path witness"
+                    .to_string(),
+            );
+        }
+    };
+
+    let mut artifact = build_full_path_guide_artifact(&request.source, &request.target, path)
+        .map_err(|err| format!("failed to build guide artifact from search witness: {err}"))?;
+    artifact.artifact_id = Some(format!(
+        "search-{}-lag-{}",
+        search_stage_label(stage),
+        path.steps.len()
+    ));
+    artifact.provenance = GuideArtifactProvenance {
+        source_kind: Some("search_cli".to_string()),
+        label: Some(format!("search-{}-witness", search_stage_label(stage))),
+        source_ref: Some(format!("search:{}", search_stage_label(stage))),
+    };
+    artifact.compatibility = GuideArtifactCompatibility {
+        supported_stages: vec![SearchStage::GuidedRefinement],
+        max_endpoint_dim: Some(request.source.rows.max(request.target.rows)),
+    };
+
+    let json = serde_json::to_string_pretty(&artifact)
+        .map_err(|err| format!("failed to serialize guide artifact JSON: {err}"))?;
+    fs::write(output_path, format!("{json}\n"))
+        .map_err(|err| format!("failed to write guide artifact to {output_path}: {err}"))
+}
+
+fn search_stage_label(stage: SearchStage) -> &'static str {
+    match stage {
+        SearchStage::EndpointSearch => "endpoint_search",
+        SearchStage::GuidedRefinement => "guided_refinement",
+        SearchStage::ShortcutSearch => "shortcut_search",
+    }
 }
 
 fn next_parsed<I, T>(args: &mut I, flag: &str) -> Result<T, String>
@@ -513,7 +603,10 @@ fn load_guide_artifacts(path: impl AsRef<Path>) -> Result<Vec<GuideArtifact>, St
 
 #[cfg(test)]
 mod tests {
-    use super::parse_matrix;
+    use super::{parse_cli, parse_matrix, run_with_args};
+    use sse_core::types::{GuideArtifact, GuideArtifactPayload, SearchStage};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parse_bare_2x2_matrix() {
@@ -529,5 +622,87 @@ mod tests {
         assert_eq!(matrix.rows, 3);
         assert_eq!(matrix.cols, 3);
         assert_eq!(matrix.data, vec![0, 1, 0, 1, 0, 1, 0, 1, 0]);
+    }
+
+    #[test]
+    fn parse_cli_accepts_write_guide_artifact_flag() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--write-guide-artifact".to_string(),
+                "guide.json".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.write_guide_artifact.as_deref(), Some("guide.json"));
+    }
+
+    #[test]
+    fn run_with_args_writes_guide_artifact_for_path_witness() {
+        let output_path = temp_output_path("guide-artifact");
+
+        let exit_code = run_with_args(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--write-guide-artifact".to_string(),
+                output_path.display().to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+
+        let json = fs::read_to_string(&output_path).unwrap();
+        let artifact: GuideArtifact = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            artifact.provenance.source_kind.as_deref(),
+            Some("search_cli")
+        );
+        assert_eq!(
+            artifact.compatibility.supported_stages,
+            vec![SearchStage::GuidedRefinement]
+        );
+        assert_eq!(artifact.quality.lag, Some(0));
+        assert!(matches!(
+            artifact.payload,
+            GuideArtifactPayload::FullPath { path } if path.steps.is_empty()
+        ));
+
+        let _ = fs::remove_file(output_path);
+    }
+
+    #[test]
+    fn run_with_args_rejects_guide_artifact_export_without_path_witness() {
+        let output_path = temp_output_path("guide-artifact-error");
+
+        let err = run_with_args(
+            vec![
+                "2,1,1,1".to_string(),
+                "3,1,1,1".to_string(),
+                "--write-guide-artifact".to_string(),
+                output_path.display().to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("requires a successful search result with a path witness"));
+        assert!(!output_path.exists());
+    }
+
+    fn temp_output_path(label: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "sse-core-search-{label}-{}-{nonce}.json",
+            std::process::id()
+        ))
     }
 }

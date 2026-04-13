@@ -15,10 +15,11 @@ use crate::search_observer::{
     SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, GuideArtifact, GuideArtifactPayload,
-    GuidedRefinementConfig, SearchConfig, SearchDirection, SearchLayerTelemetry, SearchMode,
-    SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
-    SsePath, SseResult,
+    DynSsePath, DynSseResult, EsseStep, GuideArtifact, GuideArtifactCompatibility,
+    GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
+    GuideArtifactValidation, GuidedRefinementConfig, SearchConfig, SearchDirection,
+    SearchLayerTelemetry, SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -305,6 +306,31 @@ pub fn validate_sse_path_dyn(
     }
 
     Ok(())
+}
+
+/// Build a reusable `full_path` guide artifact from a validated witness path.
+pub fn build_full_path_guide_artifact(
+    source: &DynMatrix,
+    target: &DynMatrix,
+    path: &DynSsePath,
+) -> Result<GuideArtifact, String> {
+    validate_sse_path_dyn(source, target, path)?;
+    Ok(GuideArtifact {
+        artifact_id: None,
+        endpoints: GuideArtifactEndpoints {
+            source: source.clone(),
+            target: target.clone(),
+        },
+        payload: GuideArtifactPayload::FullPath { path: path.clone() },
+        provenance: GuideArtifactProvenance::default(),
+        validation: GuideArtifactValidation::WitnessValidated,
+        compatibility: GuideArtifactCompatibility::default(),
+        quality: GuideArtifactQuality {
+            lag: Some(path.steps.len()),
+            cost: Some(path.steps.len()),
+            score: None,
+        },
+    })
 }
 
 fn search_guided_refinement_with_observer(
@@ -2991,9 +3017,8 @@ fn reconstruct_bidirectional_dyn_path(
 mod tests {
     use super::*;
     use crate::types::{
-        GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints, GuideArtifactPayload,
-        GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
-        GuidedRefinementConfig,
+        GuideArtifact, GuideArtifactCompatibility, GuideArtifactPayload, GuideArtifactProvenance,
+        GuideArtifactValidation, GuidedRefinementConfig,
     };
 
     fn default_config() -> SearchConfig {
@@ -3006,37 +3031,67 @@ mod tests {
     }
 
     fn full_path_artifact(id: &str, path: DynSsePath) -> GuideArtifact {
-        GuideArtifact {
-            artifact_id: Some(id.to_string()),
-            endpoints: GuideArtifactEndpoints {
-                source: path
-                    .matrices
-                    .first()
-                    .expect("guide path should have a source matrix")
-                    .clone(),
-                target: path
-                    .matrices
-                    .last()
-                    .expect("guide path should have a target matrix")
-                    .clone(),
-            },
-            payload: GuideArtifactPayload::FullPath { path: path.clone() },
-            provenance: GuideArtifactProvenance {
-                source_kind: Some("unit_test".to_string()),
-                label: Some(id.to_string()),
-                source_ref: None,
-            },
-            validation: GuideArtifactValidation::WitnessValidated,
-            compatibility: GuideArtifactCompatibility {
-                supported_stages: vec![SearchStage::GuidedRefinement],
-                max_endpoint_dim: Some(4),
-            },
-            quality: GuideArtifactQuality {
-                lag: Some(path.steps.len()),
-                cost: Some(path.steps.len()),
-                score: None,
-            },
-        }
+        let source = path
+            .matrices
+            .first()
+            .expect("guide path should have a source matrix")
+            .clone();
+        let target = path
+            .matrices
+            .last()
+            .expect("guide path should have a target matrix")
+            .clone();
+        let mut artifact = build_full_path_guide_artifact(&source, &target, &path).unwrap();
+        artifact.artifact_id = Some(id.to_string());
+        artifact.provenance = GuideArtifactProvenance {
+            source_kind: Some("unit_test".to_string()),
+            label: Some(id.to_string()),
+            source_ref: None,
+        };
+        artifact.compatibility = GuideArtifactCompatibility {
+            supported_stages: vec![SearchStage::GuidedRefinement],
+            max_endpoint_dim: Some(4),
+        };
+        artifact
+    }
+
+    #[test]
+    fn test_build_full_path_guide_artifact_populates_metadata() {
+        let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let path = DynSsePath {
+            matrices: vec![source.clone()],
+            steps: vec![],
+        };
+
+        let artifact = build_full_path_guide_artifact(&source, &source, &path).unwrap();
+        assert_eq!(artifact.endpoints.source, source);
+        assert_eq!(artifact.endpoints.target, artifact.endpoints.source);
+        assert_eq!(
+            artifact.validation,
+            GuideArtifactValidation::WitnessValidated
+        );
+        assert_eq!(artifact.quality.lag, Some(0));
+        assert_eq!(artifact.quality.cost, Some(0));
+        assert!(matches!(
+            artifact.payload,
+            GuideArtifactPayload::FullPath { path: ref full_path } if full_path.steps.is_empty()
+        ));
+    }
+
+    #[test]
+    fn test_build_full_path_guide_artifact_rejects_invalid_path() {
+        let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let target = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let invalid = DynSsePath {
+            matrices: vec![source.clone(), source.clone()],
+            steps: vec![EsseStep {
+                u: target.clone(),
+                v: target.clone(),
+            }],
+        };
+
+        let err = build_full_path_guide_artifact(&source, &target, &invalid).unwrap_err();
+        assert!(err.contains("does not end"));
     }
 
     #[test]
