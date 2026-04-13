@@ -205,9 +205,13 @@ The solver should accept a request that can describe:
 This is the architectural prerequisite for integrating refinement in a way that
 does not keep inheriting `2x2` assumptions.
 
-This request surface should be paired with a correspondingly generic result and
-observer boundary, so dynamic endpoint search can participate in the same
-telemetry and persistence pipeline rather than remaining a parallel path.
+This request surface should be paired with a correspondingly generic result,
+event, and observer boundary, so dynamic endpoint search can participate in the
+same telemetry and persistence pipeline rather than remaining a parallel path.
+
+In practice, this means the project should treat the generic result/event model
+as the dependency that unlocks generic observers and persistence, rather than
+trying to generalize persistence in isolation.
 
 ### 2. Separate Three Layers Explicitly
 
@@ -518,18 +522,21 @@ Mitigation:
 ### Phase 1: Generalize The Boundaries
 
 - audit the semantic differences between the `2x2` and dynamic solver paths,
-- define generic request, result, observer, stage, and persistence interfaces
-  for square endpoints,
+- define generic request, result, event, observer, stage, and persistence
+  interfaces for square endpoints,
 - decide which behaviors remain intentionally `2x2`-specific for now and mark
   them explicitly,
+- in parallel, minimally extend the harness/corpus runner so at least one
+  non-`2x2` square endpoint case can run through the normal comparison flow,
+  because those boundary changes need a real regression surface immediately,
 - keep existing `mixed` and `graph-only` endpoint search behavior intact,
 - separate `SearchMode` from stage orchestration terminology,
 - and do not change default solver behavior yet.
 
 ### Phase 2: Minimum Viable Harness Generalization
 
-- extend the case corpus and runner so non-`2x2` square endpoints can be
-  expressed and executed in the normal harness flow,
+- complete the case-corpus and runner changes so non-`2x2` square endpoints can
+  be expressed and executed routinely in the normal harness flow,
 - add enough result modeling to compare generalized solver runs honestly,
 - preserve existing `2x2` scoring while expanding the regression surface,
 - and keep the harness capable of A/B comparison across configurations.
@@ -544,7 +551,9 @@ Mitigation:
 ### Phase 4: Integrate One Guided Stage Generically
 
 - define the first generic guide artifact format,
-- extract one existing guide-aware refinement path into a generic stage,
+- extract one existing guide-aware refinement path into a generic stage, with
+  the current shortcut/segment-refinement workflow as the default first
+  extraction target,
 - ensure it works for arbitrary square endpoints within current practical
   bounds,
 - and expose it as an explicit non-default solver stage.
