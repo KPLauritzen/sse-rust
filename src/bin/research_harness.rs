@@ -8,13 +8,12 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sse_core::matrix::DynMatrix;
-use sse_core::matrix::SqMatrix;
-use sse_core::search::{
-    search_sse_2x2_with_telemetry, search_sse_with_telemetry_dyn, validate_sse_path_2x2,
-    validate_sse_path_dyn,
-};
+use sse_core::search::{execute_search_request, validate_sse_path_dyn};
 use sse_core::types::{
-    DynSsePath, DynSseResult, SearchConfig, SearchMode, SearchTelemetry, SsePath, SseResult,
+    DynSsePath, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
+    GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
+    GuidedRefinementConfig, SearchConfig, SearchMode, SearchRequest, SearchRunResult, SearchStage,
+    SearchTelemetry,
 };
 
 #[derive(Debug)]
@@ -22,6 +21,7 @@ struct Cli {
     cases_path: PathBuf,
     format: OutputFormat,
     worker_case: Option<String>,
+    worker_output: Option<PathBuf>,
     reuse_runs: Vec<PathBuf>,
     reuse_dirs: Vec<PathBuf>,
 }
@@ -42,8 +42,16 @@ struct CaseCorpus {
 struct ResearchCase {
     id: String,
     description: String,
+    #[serde(default)]
     a: Vec<Vec<u32>>,
+    #[serde(default)]
     b: Vec<Vec<u32>>,
+    #[serde(default)]
+    endpoint_fixture: Option<String>,
+    #[serde(default)]
+    seeded_guide_ids: Vec<String>,
+    #[serde(default)]
+    guide_artifact_paths: Vec<String>,
     config: JsonSearchConfig,
     timeout_ms: u64,
     allowed_outcomes: Vec<String>,
@@ -70,6 +78,60 @@ struct JsonSearchConfig {
     max_entry: u32,
     #[serde(default = "default_search_mode")]
     search_mode: SearchMode,
+    #[serde(default)]
+    stage: SearchStage,
+    #[serde(default)]
+    guided_refinement: GuidedRefinementConfig,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EndpointFixtureCollection {
+    #[allow(dead_code)]
+    schema_version: u32,
+    fixtures: Vec<EndpointFixture>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum EndpointFixtureFile {
+    Collection(EndpointFixtureCollection),
+    Single(EndpointFixture),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EndpointFixture {
+    id: String,
+    #[serde(default)]
+    a: Vec<Vec<u32>>,
+    #[serde(default)]
+    b: Vec<Vec<u32>>,
+    #[serde(default)]
+    seeded_guides: Vec<SeededGuideFixture>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SeededGuideFixture {
+    id: String,
+    matrices: Vec<Vec<Vec<u32>>>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    source_kind: Option<String>,
+    #[serde(default)]
+    source_ref: Option<String>,
+    #[serde(default)]
+    supported_stages: Vec<SearchStage>,
+    #[serde(default)]
+    max_endpoint_dim: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedCase {
+    endpoint: EndpointSummary,
+    endpoint_fixture: Option<String>,
+    seeded_guide_ids: Vec<String>,
+    guide_artifact_paths: Vec<String>,
+    guide_artifacts: Vec<GuideArtifact>,
 }
 
 fn default_search_mode() -> SearchMode {
@@ -137,6 +199,9 @@ struct CaseSummary {
     id: String,
     description: String,
     campaign: Option<CampaignConfig>,
+    endpoint_fixture: Option<String>,
+    seeded_guide_ids: Vec<String>,
+    guide_artifact_paths: Vec<String>,
     endpoint: EndpointSummary,
     config: JsonSearchConfig,
     actual_outcome: String,
@@ -210,6 +275,7 @@ struct ComparisonVariantSummary {
     case_id: String,
     description: String,
     campaign: Option<CampaignConfig>,
+    stage_combination: String,
     config: JsonSearchConfig,
     actual_outcome: String,
     result_model: ResultModel,
@@ -314,12 +380,16 @@ fn run() -> Result<ExitCode, String> {
             .iter()
             .find(|case| case.id == case_id)
             .ok_or_else(|| format!("unknown worker case id: {case_id}"))?;
-        let result = run_case(case);
-        println!(
-            "{}",
-            serde_json::to_string(&result)
-                .map_err(|err| format!("failed to serialise worker result: {err}"))?
-        );
+        let result = run_case(case, &cli.cases_path);
+        let encoded = serde_json::to_string(&result)
+            .map_err(|err| format!("failed to serialise worker result: {err}"))?;
+        if let Some(path) = cli.worker_output {
+            fs::write(&path, encoded).map_err(|err| {
+                format!("failed to write worker result {}: {err}", path.display())
+            })?;
+        } else {
+            println!("{encoded}");
+        }
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -347,6 +417,7 @@ where
     let mut cases_path = PathBuf::from("research/cases.json");
     let mut format = OutputFormat::Pretty;
     let mut worker_case = None;
+    let mut worker_output = None;
     let mut reuse_runs = Vec::new();
     let mut reuse_dirs = Vec::new();
 
@@ -374,6 +445,12 @@ where
                     .ok_or_else(|| "--worker-case requires a case id".to_string())?;
                 worker_case = Some(value);
             }
+            "--worker-output" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--worker-output requires a path".to_string())?;
+                worker_output = Some(PathBuf::from(value));
+            }
             "--reuse-run" => {
                 let value = args
                     .next()
@@ -400,6 +477,7 @@ where
         cases_path,
         format,
         worker_case,
+        worker_output,
         reuse_runs,
         reuse_dirs,
     })
@@ -409,6 +487,323 @@ fn load_corpus(path: &Path) -> Result<CaseCorpus, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     serde_json::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+}
+
+fn resolve_case(case: &ResearchCase, cases_path: &Path) -> Result<ResolvedCase, String> {
+    let cases_root = cases_path.parent().unwrap_or_else(|| Path::new("."));
+    let (endpoint, fixture, seeded_guides) = if let Some(fixture_ref) = &case.endpoint_fixture {
+        let fixture = load_endpoint_fixture(fixture_ref, cases_root)?;
+        (
+            EndpointSummary {
+                source_dim: fixture.a.len(),
+                target_dim: fixture.b.len(),
+                a: fixture.a.clone(),
+                b: fixture.b.clone(),
+            },
+            Some(fixture_ref.clone()),
+            fixture.seeded_guides,
+        )
+    } else {
+        if case.a.is_empty() || case.b.is_empty() {
+            return Err(format!(
+                "case {} must define inline endpoints or endpoint_fixture",
+                case.id
+            ));
+        }
+        (
+            EndpointSummary {
+                source_dim: case.a.len(),
+                target_dim: case.b.len(),
+                a: case.a.clone(),
+                b: case.b.clone(),
+            },
+            None,
+            Vec::new(),
+        )
+    };
+
+    let mut guide_artifacts = Vec::new();
+    let mut guide_artifact_paths = Vec::with_capacity(case.guide_artifact_paths.len());
+    for artifact_path in &case.guide_artifact_paths {
+        let resolved_path = resolve_relative_path(cases_root, artifact_path);
+        guide_artifact_paths.push(resolved_path.display().to_string());
+        guide_artifacts.extend(load_guide_artifacts(&resolved_path)?);
+    }
+
+    for guide_id in &case.seeded_guide_ids {
+        let guide = seeded_guides
+            .iter()
+            .find(|guide| guide.id == *guide_id)
+            .ok_or_else(|| {
+                format!(
+                    "case {} requested unknown seeded guide {}",
+                    case.id, guide_id
+                )
+            })?;
+        guide_artifacts.push(materialize_seeded_guide_artifact(
+            &endpoint,
+            fixture.as_deref(),
+            guide,
+        )?);
+    }
+
+    Ok(ResolvedCase {
+        endpoint,
+        endpoint_fixture: fixture,
+        seeded_guide_ids: case.seeded_guide_ids.clone(),
+        guide_artifact_paths,
+        guide_artifacts,
+    })
+}
+
+fn resolve_relative_path(root: &Path, path: impl AsRef<Path>) -> PathBuf {
+    let path = path.as_ref();
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        let joined = root.join(path);
+        if joined.exists() {
+            joined
+        } else if let Some(parent) = root.parent() {
+            let from_parent = parent.join(path);
+            if from_parent.exists() {
+                from_parent
+            } else {
+                joined
+            }
+        } else {
+            joined
+        }
+    }
+}
+
+fn load_endpoint_fixture(fixture_ref: &str, cases_root: &Path) -> Result<EndpointFixture, String> {
+    let (path, fixture_id) = split_fixture_ref(fixture_ref);
+    let path = resolve_relative_path(cases_root, &path);
+    let raw = fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read endpoint fixture {}: {err}", path.display()))?;
+    let parsed: EndpointFixtureFile = serde_json::from_str(&raw)
+        .map_err(|err| format!("failed to parse endpoint fixture {}: {err}", path.display()))?;
+
+    let mut fixtures = match parsed {
+        EndpointFixtureFile::Single(fixture) => vec![fixture],
+        EndpointFixtureFile::Collection(collection) => collection.fixtures,
+    };
+
+    match fixture_id {
+        Some(id) => fixtures
+            .into_iter()
+            .find(|fixture| fixture.id == id)
+            .ok_or_else(|| format!("fixture {} not found in {}", id, path.display())),
+        None => {
+            if fixtures.len() != 1 {
+                return Err(format!(
+                    "fixture file {} contains {} fixtures; use path#fixture_id",
+                    path.display(),
+                    fixtures.len()
+                ));
+            }
+            Ok(fixtures.remove(0))
+        }
+    }
+}
+
+fn split_fixture_ref(fixture_ref: &str) -> (String, Option<String>) {
+    match fixture_ref.split_once('#') {
+        Some((path, fixture_id)) if !fixture_id.is_empty() => {
+            (path.to_string(), Some(fixture_id.to_string()))
+        }
+        _ => (fixture_ref.to_string(), None),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum GuideArtifactFile {
+    Artifact(GuideArtifact),
+    Artifacts(Vec<GuideArtifact>),
+    Envelope { artifacts: Vec<GuideArtifact> },
+}
+
+fn load_guide_artifacts(path: impl AsRef<Path>) -> Result<Vec<GuideArtifact>, String> {
+    let path = path.as_ref();
+    let json = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read guide artifacts from {}: {err}",
+            path.display()
+        )
+    })?;
+    let parsed: GuideArtifactFile = serde_json::from_str(&json).map_err(|err| {
+        format!(
+            "failed to parse guide artifacts from {} as JSON: {err}",
+            path.display()
+        )
+    })?;
+    Ok(match parsed {
+        GuideArtifactFile::Artifact(artifact) => vec![artifact],
+        GuideArtifactFile::Artifacts(artifacts) => artifacts,
+        GuideArtifactFile::Envelope { artifacts } => artifacts,
+    })
+}
+
+fn materialize_seeded_guide_artifact(
+    endpoint: &EndpointSummary,
+    fixture_ref: Option<&str>,
+    guide: &SeededGuideFixture,
+) -> Result<GuideArtifact, String> {
+    if guide.matrices.len() < 2 {
+        return Err(format!(
+            "seeded guide {} must contain at least two matrices",
+            guide.id
+        ));
+    }
+
+    let matrices = guide
+        .matrices
+        .iter()
+        .map(|rows| case_matrix(rows))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| {
+            format!(
+                "seeded guide {} contains invalid matrix data: {err}",
+                guide.id
+            )
+        })?;
+
+    let max_entry = matrices
+        .iter()
+        .flat_map(|matrix| matrix.data.iter().copied())
+        .max()
+        .unwrap_or(0);
+    let max_dim = matrices.iter().map(|matrix| matrix.rows).max().unwrap_or(0);
+
+    let mut full_path = DynSsePath {
+        matrices: vec![matrices[0].clone()],
+        steps: Vec::new(),
+    };
+
+    for window in matrices.windows(2) {
+        let request = SearchRequest {
+            source: window[0].clone(),
+            target: window[1].clone(),
+            config: SearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: max_dim,
+                max_entry,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::EndpointSearch,
+            guide_artifacts: Vec::new(),
+            guided_refinement: GuidedRefinementConfig::default(),
+        };
+        let (result, _telemetry) = execute_search_request(&request).map_err(|err| {
+            format!(
+                "failed to reconstruct seeded guide {} segment {}x{} -> {}x{}: {err}",
+                guide.id, window[0].rows, window[0].cols, window[1].rows, window[1].cols
+            )
+        })?;
+        let SearchRunResult::Equivalent(segment) = result else {
+            return Err(format!(
+                "seeded guide {} segment {}x{} -> {}x{} did not produce a direct path",
+                guide.id, window[0].rows, window[0].cols, window[1].rows, window[1].cols
+            ));
+        };
+
+        if segment.matrices.first() != Some(&window[0])
+            || segment.matrices.last() != Some(&window[1])
+        {
+            return Err(format!(
+                "seeded guide {} segment endpoints do not match the requested matrices",
+                guide.id
+            ));
+        }
+
+        if full_path.matrices.last() != segment.matrices.first() {
+            return Err(format!(
+                "seeded guide {} reconstruction failed to stitch consecutive segments",
+                guide.id
+            ));
+        }
+        full_path.steps.extend(segment.steps);
+        full_path
+            .matrices
+            .extend(segment.matrices.into_iter().skip(1));
+    }
+
+    validate_sse_path_dyn(
+        full_path
+            .matrices
+            .first()
+            .expect("seeded guide path should have a source matrix"),
+        full_path
+            .matrices
+            .last()
+            .expect("seeded guide path should have a target matrix"),
+        &full_path,
+    )
+    .map_err(|err| {
+        format!(
+            "seeded guide {} did not reconstruct cleanly: {err}",
+            guide.id
+        )
+    })?;
+
+    let source = full_path
+        .matrices
+        .first()
+        .expect("seeded guide path should have a source matrix")
+        .clone();
+    let target = full_path
+        .matrices
+        .last()
+        .expect("seeded guide path should have a target matrix")
+        .clone();
+    let endpoint_label = format!("{}->{}", endpoint.source_dim, endpoint.target_dim);
+    let label = guide
+        .label
+        .clone()
+        .unwrap_or_else(|| format!("seeded-guide-{}", guide.id));
+
+    Ok(GuideArtifact {
+        artifact_id: Some(match fixture_ref {
+            Some(fixture_ref) => format!("{fixture_ref}#{}", guide.id),
+            None => guide.id.clone(),
+        }),
+        endpoints: GuideArtifactEndpoints { source, target },
+        payload: GuideArtifactPayload::FullPath {
+            path: full_path.clone(),
+        },
+        provenance: GuideArtifactProvenance {
+            source_kind: Some(
+                guide
+                    .source_kind
+                    .clone()
+                    .unwrap_or_else(|| "seeded_fixture".to_string()),
+            ),
+            label: Some(label),
+            source_ref: Some(guide.source_ref.clone().unwrap_or_else(|| {
+                fixture_ref
+                    .map(|fixture_ref| format!("{fixture_ref}:{endpoint_label}"))
+                    .unwrap_or_else(|| endpoint_label.clone())
+            })),
+        },
+        validation: GuideArtifactValidation::WitnessValidated,
+        compatibility: GuideArtifactCompatibility {
+            supported_stages: if guide.supported_stages.is_empty() {
+                vec![SearchStage::GuidedRefinement]
+            } else {
+                guide.supported_stages.clone()
+            },
+            max_endpoint_dim: guide
+                .max_endpoint_dim
+                .or(Some(endpoint.source_dim.max(endpoint.target_dim))),
+        },
+        quality: GuideArtifactQuality {
+            lag: Some(full_path.steps.len()),
+            cost: Some(full_path.steps.len()),
+            score: None,
+        },
+    })
 }
 
 #[derive(Debug, Default)]
@@ -508,180 +903,183 @@ fn endpoint_identity_key(endpoint: &EndpointSummary) -> String {
     .expect("endpoint identity key should serialise")
 }
 
-fn run_case(case: &ResearchCase) -> WorkerCaseResult {
-    let a = case_matrix(&case.a).expect("invalid matrix A in corpus");
-    let b = case_matrix(&case.b).expect("invalid matrix B in corpus");
-    let config = SearchConfig {
-        max_lag: case.config.max_lag,
-        max_intermediate_dim: case.config.max_intermediate_dim,
-        max_entry: case.config.max_entry,
-        search_mode: case.config.search_mode,
+fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
+    let started = Instant::now();
+    let resolved = match resolve_case(case, cases_path) {
+        Ok(resolved) => resolved,
+        Err(reason) => {
+            return panic_result(
+                &case.id,
+                case.a.len(),
+                case.b.len(),
+                started.elapsed().as_millis(),
+                reason,
+            )
+        }
     };
 
-    let started = Instant::now();
-    if a.rows == 2 && b.rows == 2 {
-        let a_sq = a
-            .to_sq::<2>()
-            .expect("matrix A should be 2x2 when using the 2x2 solver path");
-        let b_sq = b
-            .to_sq::<2>()
-            .expect("matrix B should be 2x2 when using the 2x2 solver path");
-        let (result, telemetry) = search_sse_2x2_with_telemetry(&a_sq, &b_sq, &config);
-        match result {
-            SseResult::Equivalent(path) => match validate_sse_path_2x2(&a_sq, &b_sq, &path) {
-                Ok(()) => WorkerCaseResult {
-                    id: case.id.clone(),
-                    actual_outcome: "equivalent".to_string(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    steps: Some(path.steps.len()),
-                    reason: None,
-                    result_model: equivalent_result_model(
-                        HarnessSolverPath::TwoByTwo,
-                        a.rows,
-                        b.rows,
-                        &telemetry,
-                        path.steps.len(),
-                        path.matrices.len(),
-                    ),
-                    telemetry,
-                },
-                Err(reason) => WorkerCaseResult {
-                    id: case.id.clone(),
-                    actual_outcome: "panic".to_string(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    steps: Some(path.steps.len()),
-                    reason: Some(format!("invalid equivalent path: {reason}")),
-                    result_model: result_model(
-                        HarnessSolverPath::TwoByTwo,
-                        a.rows,
-                        b.rows,
-                        ResultResolutionKind::InvalidPath,
-                        Some(path.steps.len()),
-                        Some(path.matrices.len()),
-                        &telemetry,
-                    ),
-                    telemetry,
-                },
-            },
-            SseResult::EquivalentByConcreteShift(witness) => WorkerCaseResult {
+    let a = match case_matrix(&resolved.endpoint.a) {
+        Ok(matrix) => matrix,
+        Err(reason) => {
+            return panic_result(
+                &case.id,
+                resolved.endpoint.source_dim,
+                resolved.endpoint.target_dim,
+                started.elapsed().as_millis(),
+                format!("invalid matrix A in corpus: {reason}"),
+            )
+        }
+    };
+    let b = match case_matrix(&resolved.endpoint.b) {
+        Ok(matrix) => matrix,
+        Err(reason) => {
+            return panic_result(
+                &case.id,
+                resolved.endpoint.source_dim,
+                resolved.endpoint.target_dim,
+                started.elapsed().as_millis(),
+                format!("invalid matrix B in corpus: {reason}"),
+            )
+        }
+    };
+
+    let request = SearchRequest {
+        source: a.clone(),
+        target: b.clone(),
+        config: SearchConfig {
+            max_lag: case.config.max_lag,
+            max_intermediate_dim: case.config.max_intermediate_dim,
+            max_entry: case.config.max_entry,
+            search_mode: case.config.search_mode,
+        },
+        stage: case.config.stage,
+        guide_artifacts: resolved.guide_artifacts,
+        guided_refinement: case.config.guided_refinement.clone(),
+    };
+
+    let (result, telemetry) = match execute_search_request(&request) {
+        Ok(outcome) => outcome,
+        Err(reason) => {
+            return panic_result(
+                &case.id,
+                a.rows,
+                b.rows,
+                started.elapsed().as_millis(),
+                reason,
+            )
+        }
+    };
+
+    match result {
+        SearchRunResult::Equivalent(path) => match validate_sse_path_dyn(&a, &b, &path) {
+            Ok(()) => WorkerCaseResult {
                 id: case.id.clone(),
                 actual_outcome: "equivalent".to_string(),
                 elapsed_ms: started.elapsed().as_millis(),
-                steps: None,
-                reason: Some("aligned concrete-shift witness".to_string()),
-                result_model: result_model(
-                    HarnessSolverPath::TwoByTwo,
-                    a.rows,
-                    b.rows,
-                    ResultResolutionKind::ConcreteShiftWitness,
-                    Some(witness.shift.lag as usize),
-                    None,
-                    &telemetry,
-                ),
-                telemetry,
-            },
-            SseResult::NotEquivalent(reason) => WorkerCaseResult {
-                id: case.id.clone(),
-                actual_outcome: "not_equivalent".to_string(),
-                elapsed_ms: started.elapsed().as_millis(),
-                steps: None,
-                reason: Some(reason),
-                result_model: not_equivalent_result_model(
-                    HarnessSolverPath::TwoByTwo,
-                    a.rows,
-                    b.rows,
-                    &telemetry,
-                ),
-                telemetry,
-            },
-            SseResult::Unknown => WorkerCaseResult {
-                id: case.id.clone(),
-                actual_outcome: "unknown".to_string(),
-                elapsed_ms: started.elapsed().as_millis(),
-                steps: None,
+                steps: Some(path.steps.len()),
                 reason: None,
-                result_model: result_model(
-                    HarnessSolverPath::TwoByTwo,
+                result_model: equivalent_result_model(
+                    solver_path_for_dims(a.rows, b.rows),
                     a.rows,
                     b.rows,
-                    ResultResolutionKind::SearchExhausted,
-                    None,
-                    None,
                     &telemetry,
+                    path.steps.len(),
+                    path.matrices.len(),
                 ),
                 telemetry,
             },
-        }
-    } else {
-        let (result, telemetry) = search_sse_with_telemetry_dyn(&a, &b, &config);
-        match result {
-            DynSseResult::Equivalent(path) => match validate_sse_path_dyn(&a, &b, &path) {
-                Ok(()) => WorkerCaseResult {
-                    id: case.id.clone(),
-                    actual_outcome: "equivalent".to_string(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    steps: Some(path.steps.len()),
-                    reason: None,
-                    result_model: equivalent_result_model(
-                        HarnessSolverPath::SquareEndpoint,
-                        a.rows,
-                        b.rows,
-                        &telemetry,
-                        path.steps.len(),
-                        path.matrices.len(),
-                    ),
-                    telemetry,
-                },
-                Err(reason) => WorkerCaseResult {
-                    id: case.id.clone(),
-                    actual_outcome: "panic".to_string(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    steps: Some(path.steps.len()),
-                    reason: Some(format!("invalid equivalent path: {reason}")),
-                    result_model: result_model(
-                        HarnessSolverPath::SquareEndpoint,
-                        a.rows,
-                        b.rows,
-                        ResultResolutionKind::InvalidPath,
-                        Some(path.steps.len()),
-                        Some(path.matrices.len()),
-                        &telemetry,
-                    ),
-                    telemetry,
-                },
-            },
-            DynSseResult::NotEquivalent(reason) => WorkerCaseResult {
+            Err(reason) => WorkerCaseResult {
                 id: case.id.clone(),
-                actual_outcome: "not_equivalent".to_string(),
+                actual_outcome: "panic".to_string(),
                 elapsed_ms: started.elapsed().as_millis(),
-                steps: None,
-                reason: Some(reason),
-                result_model: not_equivalent_result_model(
-                    HarnessSolverPath::SquareEndpoint,
-                    a.rows,
-                    b.rows,
-                    &telemetry,
-                ),
-                telemetry,
-            },
-            DynSseResult::Unknown => WorkerCaseResult {
-                id: case.id.clone(),
-                actual_outcome: "unknown".to_string(),
-                elapsed_ms: started.elapsed().as_millis(),
-                steps: None,
-                reason: None,
+                steps: Some(path.steps.len()),
+                reason: Some(format!("invalid equivalent path: {reason}")),
                 result_model: result_model(
-                    HarnessSolverPath::SquareEndpoint,
+                    solver_path_for_dims(a.rows, b.rows),
                     a.rows,
                     b.rows,
-                    ResultResolutionKind::SearchExhausted,
-                    None,
-                    None,
+                    ResultResolutionKind::InvalidPath,
+                    Some(path.steps.len()),
+                    Some(path.matrices.len()),
                     &telemetry,
                 ),
                 telemetry,
             },
-        }
+        },
+        SearchRunResult::EquivalentByConcreteShift(witness) => WorkerCaseResult {
+            id: case.id.clone(),
+            actual_outcome: "equivalent".to_string(),
+            elapsed_ms: started.elapsed().as_millis(),
+            steps: None,
+            reason: Some("aligned concrete-shift witness".to_string()),
+            result_model: result_model(
+                solver_path_for_dims(a.rows, b.rows),
+                a.rows,
+                b.rows,
+                ResultResolutionKind::ConcreteShiftWitness,
+                Some(witness.shift.lag as usize),
+                None,
+                &telemetry,
+            ),
+            telemetry,
+        },
+        SearchRunResult::NotEquivalent(reason) => WorkerCaseResult {
+            id: case.id.clone(),
+            actual_outcome: "not_equivalent".to_string(),
+            elapsed_ms: started.elapsed().as_millis(),
+            steps: None,
+            reason: Some(reason),
+            result_model: not_equivalent_result_model(
+                solver_path_for_dims(a.rows, b.rows),
+                a.rows,
+                b.rows,
+                &telemetry,
+            ),
+            telemetry,
+        },
+        SearchRunResult::Unknown => WorkerCaseResult {
+            id: case.id.clone(),
+            actual_outcome: "unknown".to_string(),
+            elapsed_ms: started.elapsed().as_millis(),
+            steps: None,
+            reason: None,
+            result_model: result_model(
+                solver_path_for_dims(a.rows, b.rows),
+                a.rows,
+                b.rows,
+                ResultResolutionKind::SearchExhausted,
+                None,
+                None,
+                &telemetry,
+            ),
+            telemetry,
+        },
+    }
+}
+
+fn panic_result(
+    case_id: &str,
+    source_dim: usize,
+    target_dim: usize,
+    elapsed_ms: u128,
+    reason: String,
+) -> WorkerCaseResult {
+    WorkerCaseResult {
+        id: case_id.to_string(),
+        actual_outcome: "panic".to_string(),
+        elapsed_ms,
+        steps: None,
+        reason: Some(reason),
+        result_model: result_model(
+            solver_path_for_dims(source_dim, target_dim),
+            source_dim,
+            target_dim,
+            ResultResolutionKind::Panic,
+            None,
+            None,
+            &SearchTelemetry::default(),
+        ),
+        telemetry: SearchTelemetry::default(),
     }
 }
 
@@ -808,6 +1206,21 @@ fn not_equivalent_result_model(
     )
 }
 
+fn stage_combination_label(config: &JsonSearchConfig) -> String {
+    match config.stage {
+        SearchStage::EndpointSearch => format!("endpoint_search/{:?}", config.search_mode),
+        SearchStage::GuidedRefinement => format!(
+            "guided_refinement/{:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}",
+            config.search_mode,
+            config.guided_refinement.max_shortcut_lag,
+            config.guided_refinement.min_gap,
+            config.guided_refinement.max_gap,
+            config.guided_refinement.rounds
+        ),
+        SearchStage::ShortcutSearch => format!("shortcut_search/{:?}", config.search_mode),
+    }
+}
+
 fn run_harness(
     cases_path: &Path,
     corpus: &CaseCorpus,
@@ -847,6 +1260,7 @@ fn run_harness(
     let mut telemetry_focus_directed_score = 0i64;
 
     for case in scheduled_cases {
+        let resolved = resolve_case(case, cases_path)?;
         let executed = run_case_in_subprocess(&current_exe, cases_path, case)?;
         let passed = case
             .allowed_outcomes
@@ -871,12 +1285,7 @@ fn run_harness(
             current_witness_cases += 1;
             current_witness_lag_total += lag;
         }
-        let endpoint = EndpointSummary {
-            source_dim: case.a.len(),
-            target_dim: case.b.len(),
-            a: case.a.clone(),
-            b: case.b.clone(),
-        };
+        let endpoint = resolved.endpoint.clone();
         let endpoint_key = endpoint_identity_key(&endpoint);
         if endpoint.source_dim != 2 || endpoint.target_dim != 2 {
             generalized_cases += 1;
@@ -915,6 +1324,9 @@ fn run_harness(
             id: case.id.clone(),
             description: case.description.clone(),
             campaign: case.campaign.clone(),
+            endpoint_fixture: resolved.endpoint_fixture,
+            seeded_guide_ids: resolved.seeded_guide_ids,
+            guide_artifact_paths: resolved.guide_artifact_paths,
             endpoint,
             config: case.config.clone(),
             actual_outcome: executed.actual_outcome,
@@ -984,6 +1396,7 @@ fn build_comparison_summaries(cases: &[CaseSummary]) -> Vec<ComparisonSummary> {
             case_id: case.id.clone(),
             description: case.description.clone(),
             campaign: case.campaign.clone(),
+            stage_combination: stage_combination_label(&case.config),
             config: case.config.clone(),
             actual_outcome: case.actual_outcome.clone(),
             result_model: case.result_model.clone(),
@@ -1390,12 +1803,29 @@ fn run_case_in_subprocess(
     cases_path: &Path,
     case: &ResearchCase,
 ) -> Result<WorkerCaseResult, String> {
+    let worker_output_path = env::temp_dir().join(format!(
+        "research-harness-worker-{}-{}.json",
+        std::process::id(),
+        case.id
+    ));
+    let resolved = resolve_case(case, cases_path).ok();
+    let source_dim = resolved
+        .as_ref()
+        .map(|resolved| resolved.endpoint.source_dim)
+        .unwrap_or_else(|| case.a.len());
+    let target_dim = resolved
+        .as_ref()
+        .map(|resolved| resolved.endpoint.target_dim)
+        .unwrap_or_else(|| case.b.len());
+
     let mut child = Command::new(current_exe)
         .arg("--cases")
         .arg(cases_path)
         .arg("--worker-case")
         .arg(&case.id)
-        .stdout(Stdio::piped())
+        .arg("--worker-output")
+        .arg(&worker_output_path)
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("failed to spawn worker for {}: {err}", case.id))?;
@@ -1411,6 +1841,7 @@ fn run_case_in_subprocess(
             let output = child
                 .wait_with_output()
                 .map_err(|err| format!("failed to collect timed out worker {}: {err}", case.id))?;
+            let _ = fs::remove_file(&worker_output_path);
             let reason = stderr_snippet(&output.stderr);
             return Ok(WorkerCaseResult {
                 id: case.id.clone(),
@@ -1419,9 +1850,9 @@ fn run_case_in_subprocess(
                 steps: None,
                 reason: reason.or_else(|| Some(format!("worker exceeded {} ms", case.timeout_ms))),
                 result_model: result_model(
-                    solver_path_for_dims(case.a.len(), case.b.len()),
-                    case.a.len(),
-                    case.b.len(),
+                    solver_path_for_dims(source_dim, target_dim),
+                    source_dim,
+                    target_dim,
                     ResultResolutionKind::Timeout,
                     None,
                     None,
@@ -1441,6 +1872,7 @@ fn run_case_in_subprocess(
                 })?;
 
                 if !status.success() {
+                    let _ = fs::remove_file(&worker_output_path);
                     return Ok(WorkerCaseResult {
                         id: case.id.clone(),
                         actual_outcome: "panic".to_string(),
@@ -1449,9 +1881,9 @@ fn run_case_in_subprocess(
                         reason: stderr_snippet(&output.stderr)
                             .or_else(|| Some(format!("worker exited with status {status}"))),
                         result_model: result_model(
-                            solver_path_for_dims(case.a.len(), case.b.len()),
-                            case.a.len(),
-                            case.b.len(),
+                            solver_path_for_dims(source_dim, target_dim),
+                            source_dim,
+                            target_dim,
                             ResultResolutionKind::Panic,
                             None,
                             None,
@@ -1461,9 +1893,15 @@ fn run_case_in_subprocess(
                     });
                 }
 
-                let stdout = String::from_utf8(output.stdout)
-                    .map_err(|err| format!("worker {} produced non-utf8 stdout: {err}", case.id))?;
-                let parsed: WorkerCaseResult = serde_json::from_str(stdout.trim())
+                let worker_output = fs::read_to_string(&worker_output_path).map_err(|err| {
+                    format!(
+                        "worker {} did not produce readable output {}: {err}",
+                        case.id,
+                        worker_output_path.display()
+                    )
+                })?;
+                let _ = fs::remove_file(&worker_output_path);
+                let parsed: WorkerCaseResult = serde_json::from_str(worker_output.trim())
                     .map_err(|err| format!("worker {} produced invalid json: {err}", case.id))?;
                 return Ok(parsed);
             }
@@ -1562,14 +2000,16 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
             for variant in &comparison.variants {
                 out.push_str(&format!(
-                    "  {}: strategy={} mode={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
+                    "  {}: strategy={} stage_combo={} mode={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
                     variant.case_id,
                     variant
                         .campaign
                         .as_ref()
                         .map(|campaign| campaign.strategy.as_str())
                         .unwrap_or("-"),
+                    variant.stage_combination,
                     variant.config.search_mode,
+                    variant.config.stage,
                     variant.config.max_lag,
                     variant.config.max_intermediate_dim,
                     variant.config.max_entry,
@@ -1647,15 +2087,25 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             case.elapsed_ms
         ));
         out.push_str(&format!(
-            "  endpoints: {}x{} config: mode={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
+            "  endpoints: {}x{} config: mode={:?} stage={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
             case.endpoint.source_dim,
             case.endpoint.target_dim,
             case.config.search_mode,
+            case.config.stage,
             case.config.max_lag,
             case.config.max_intermediate_dim,
             case.config.max_entry,
             case.timeout_ms,
         ));
+        if case.config.stage == SearchStage::GuidedRefinement {
+            out.push_str(&format!(
+                "  guided_refinement: max_shortcut_lag={} min_gap={} max_gap={:?} rounds={}\n",
+                case.config.guided_refinement.max_shortcut_lag,
+                case.config.guided_refinement.min_gap,
+                case.config.guided_refinement.max_gap,
+                case.config.guided_refinement.rounds,
+            ));
+        }
         out.push_str(&format!(
             "  result: solver={:?} resolution={:?} witness_lag={:?} path_matrices={:?} frontier_layers={}\n",
             case.result_model.solver_path,
@@ -1671,6 +2121,15 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             out.push_str(&format!(
                 "  campaign: id={} strategy={} order={}\n",
                 campaign.id, campaign.strategy, campaign.schedule_order
+            ));
+        }
+        if let Some(endpoint_fixture) = &case.endpoint_fixture {
+            out.push_str(&format!("  endpoint_fixture: {}\n", endpoint_fixture));
+        }
+        if !case.seeded_guide_ids.is_empty() || !case.guide_artifact_paths.is_empty() {
+            out.push_str(&format!(
+                "  guide_inputs: seeded={:?} artifacts={:?}\n",
+                case.seeded_guide_ids, case.guide_artifact_paths
             ));
         }
         if let Some(best_known) = &case.best_known_witness {
@@ -1734,6 +2193,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1743,11 +2203,16 @@ mod tests {
             description: "identity 3x3 case".to_string(),
             a: vec![vec![1, 0, 0], vec![0, 1, 0], vec![0, 0, 1]],
             b: vec![vec![1, 0, 0], vec![0, 1, 0], vec![0, 0, 1]],
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
             config: JsonSearchConfig {
                 max_lag: 1,
                 max_intermediate_dim: 3,
                 max_entry: 1,
                 search_mode: SearchMode::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
             },
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
@@ -1763,7 +2228,7 @@ mod tests {
             campaign: None,
         };
 
-        let result = run_case(&case);
+        let result = run_case(&case, Path::new("research/cases.json"));
         assert_eq!(result.actual_outcome, "equivalent");
         assert_eq!(result.steps, Some(0));
         assert_eq!(
@@ -1783,11 +2248,16 @@ mod tests {
             description: "one-step 2x2 to 3x3 case".to_string(),
             a: vec![vec![2, 1], vec![1, 1]],
             b: vec![vec![1, 0, 1], vec![1, 1, 1], vec![1, 1, 1]],
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
             config: JsonSearchConfig {
                 max_lag: 1,
                 max_intermediate_dim: 3,
                 max_entry: 1,
                 search_mode: SearchMode::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
             },
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
@@ -1803,7 +2273,7 @@ mod tests {
             campaign: None,
         };
 
-        let result = run_case(&case);
+        let result = run_case(&case, Path::new("research/cases.json"));
         assert_eq!(result.actual_outcome, "equivalent");
         assert_eq!(result.steps, Some(1));
         assert_eq!(
@@ -1817,6 +2287,136 @@ mod tests {
         assert_eq!(result.result_model.source_dim, 2);
         assert_eq!(result.result_model.target_dim, 3);
         assert_eq!(result.result_model.witness_lag, Some(1));
+    }
+
+    #[test]
+    fn resolve_case_loads_seeded_fixture_guides() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!(
+            "research-harness-fixture-{}-{}",
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&temp_dir).expect("temporary fixture directory should be created");
+        let fixture_path = temp_dir.join("fixtures.json");
+        fs::write(
+            &fixture_path,
+            r#"{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "guided",
+      "a": [[1, 0, 1], [2, 1, 0], [0, 1, 2]],
+      "b": [[2, 0, 1], [1, 1, 0], [0, 2, 1]],
+      "seeded_guides": [
+        {
+          "id": "two-hop",
+          "matrices": [
+            [[1, 0, 1], [2, 1, 0], [0, 1, 2]],
+            [[2, 1, 0], [0, 1, 2], [1, 0, 1]],
+            [[2, 0, 1], [1, 1, 0], [0, 2, 1]]
+          ]
+        }
+      ]
+    }
+  ]
+}"#,
+        )
+        .expect("fixture file should be written");
+
+        let case = ResearchCase {
+            id: "guided-fixture".to_string(),
+            description: "fixture-backed guide".to_string(),
+            a: vec![],
+            b: vec![],
+            endpoint_fixture: Some(format!("{}#guided", fixture_path.display())),
+            seeded_guide_ids: vec!["two-hop".to_string()],
+            guide_artifact_paths: vec![],
+            config: JsonSearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 2,
+                search_mode: SearchMode::GraphOnly,
+                stage: SearchStage::GuidedRefinement,
+                guided_refinement: GuidedRefinementConfig {
+                    max_shortcut_lag: 1,
+                    min_gap: 2,
+                    max_gap: Some(2),
+                    rounds: 1,
+                },
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+        };
+
+        let resolved = resolve_case(&case, &temp_dir.join("cases.json"))
+            .expect("fixture-backed case should resolve");
+        assert_eq!(resolved.endpoint.source_dim, 3);
+        assert_eq!(resolved.guide_artifacts.len(), 1);
+        assert_eq!(resolved.guide_artifacts[0].quality.lag, Some(2));
+
+        fs::remove_dir_all(temp_dir).expect("temporary fixture directory should be removed");
+    }
+
+    #[test]
+    fn run_case_guided_refinement_uses_guide_artifact_inputs() {
+        let case = ResearchCase {
+            id: "guided-artifact".to_string(),
+            description: "guided 3x3 artifact case".to_string(),
+            a: vec![],
+            b: vec![],
+            endpoint_fixture: Some(
+                "research/fixtures/generic_guides.json#guided_permutation_3x3".to_string(),
+            ),
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![
+                "research/guide_artifacts/generic_guided_permutation_3x3.json".to_string(),
+            ],
+            config: JsonSearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 2,
+                search_mode: SearchMode::GraphOnly,
+                stage: SearchStage::GuidedRefinement,
+                guided_refinement: GuidedRefinementConfig {
+                    max_shortcut_lag: 1,
+                    min_gap: 2,
+                    max_gap: Some(2),
+                    rounds: 1,
+                },
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+        };
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "equivalent");
+        assert_eq!(result.steps, Some(1));
+        assert_eq!(result.telemetry.guide_artifacts_accepted, 1);
+        assert_eq!(result.telemetry.guided_segments_improved, 1);
     }
 
     #[test]
@@ -1845,12 +2445,17 @@ mod tests {
                     strategy: "mixed".to_string(),
                     schedule_order: 10,
                 }),
+                endpoint_fixture: None,
+                seeded_guide_ids: vec![],
+                guide_artifact_paths: vec![],
                 endpoint: endpoint.clone(),
                 config: JsonSearchConfig {
                     max_lag: 1,
                     max_intermediate_dim: 2,
                     max_entry: 1,
                     search_mode: SearchMode::Mixed,
+                    stage: SearchStage::EndpointSearch,
+                    guided_refinement: GuidedRefinementConfig::default(),
                 },
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
@@ -1885,12 +2490,17 @@ mod tests {
                     strategy: "graph-only".to_string(),
                     schedule_order: 20,
                 }),
+                endpoint_fixture: None,
+                seeded_guide_ids: vec![],
+                guide_artifact_paths: vec![],
                 endpoint,
                 config: JsonSearchConfig {
                     max_lag: 2,
                     max_intermediate_dim: 2,
                     max_entry: 2,
                     search_mode: SearchMode::GraphOnly,
+                    stage: SearchStage::EndpointSearch,
+                    guided_refinement: GuidedRefinementConfig::default(),
                 },
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
@@ -2027,12 +2637,17 @@ mod tests {
                 strategy: strategy.to_string(),
                 schedule_order: 10,
             }),
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
             endpoint: endpoint.clone(),
             config: JsonSearchConfig {
                 max_lag: 6,
                 max_intermediate_dim: 3,
                 max_entry: 6,
                 search_mode: SearchMode::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
             },
             actual_outcome: "unknown".to_string(),
             allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
@@ -2095,12 +2710,17 @@ mod tests {
                 strategy: strategy.to_string(),
                 schedule_order,
             }),
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
             endpoint: endpoint.clone(),
             config: JsonSearchConfig {
                 max_lag: 4,
                 max_intermediate_dim: 2,
                 max_entry: 4,
                 search_mode: SearchMode::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
             },
             actual_outcome: "equivalent".to_string(),
             allowed_outcomes: vec!["equivalent".to_string()],

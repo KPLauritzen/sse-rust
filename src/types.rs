@@ -188,13 +188,46 @@ pub struct DynSsePath {
 
 impl From<SsePath<2>> for DynSsePath {
     fn from(path: SsePath<2>) -> Self {
+        let SsePath { matrices, steps } = path;
+        if steps.is_empty() {
+            return Self {
+                matrices: matrices
+                    .into_iter()
+                    .map(|matrix| DynMatrix::from_sq(&matrix))
+                    .collect(),
+                steps,
+            };
+        }
+
+        let start = matrices
+            .first()
+            .expect("non-empty-step SsePath should contain a start matrix");
+        let mut dyn_matrices = Vec::with_capacity(steps.len() + 1);
+        dyn_matrices.push(DynMatrix::from_sq(start));
+
+        for step in &steps {
+            let current = step.u.mul(&step.v);
+            debug_assert_eq!(
+                current,
+                *dyn_matrices
+                    .last()
+                    .expect("reconstructed path should have a current matrix"),
+                "SsePath<2> step chain should start from the previously reconstructed matrix"
+            );
+            dyn_matrices.push(step.v.mul(&step.u));
+        }
+
+        if let Some(end) = matrices.last() {
+            debug_assert_eq!(
+                dyn_matrices.last(),
+                Some(&DynMatrix::from_sq(end)),
+                "SsePath<2> stored endpoint should match the reconstructed endpoint"
+            );
+        }
+
         Self {
-            matrices: path
-                .matrices
-                .into_iter()
-                .map(|matrix| DynMatrix::from_sq(&matrix))
-                .collect(),
-            steps: path.steps,
+            matrices: dyn_matrices,
+            steps,
         }
     }
 }
@@ -335,8 +368,9 @@ mod tests {
         DynMatrix, DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility,
         GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance,
         GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, SearchMode,
-        SearchStage,
+        SearchStage, SsePath,
     };
+    use crate::matrix::SqMatrix;
 
     #[test]
     fn test_search_mode_deserializes_snake_and_kebab_case_graph_only() {
@@ -387,6 +421,31 @@ mod tests {
         let json = serde_json::to_string(&artifact).unwrap();
         let decoded: GuideArtifact = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, artifact);
+    }
+
+    #[test]
+    fn test_sse_path_2x2_conversion_reconstructs_rectangular_intermediates() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let step1 = EsseStep {
+            u: DynMatrix::new(2, 3, vec![1, 0, 1, 0, 1, 0]),
+            v: DynMatrix::new(3, 2, vec![1, 0, 1, 1, 1, 1]),
+        };
+        let mid = step1.v.mul(&step1.u);
+        let step2 = EsseStep {
+            u: DynMatrix::new(3, 2, vec![1, 0, 0, 1, 0, 1]),
+            v: DynMatrix::new(2, 3, vec![1, 0, 1, 1, 1, 1]),
+        };
+        let b = step2.v.mul(&step2.u).to_sq::<2>().unwrap();
+        let path = SsePath {
+            matrices: vec![a, b],
+            steps: vec![step1, step2],
+        };
+
+        let dyn_path: DynSsePath = path.into();
+        assert_eq!(dyn_path.matrices.len(), 3);
+        assert_eq!(dyn_path.matrices[0].rows, 2);
+        assert_eq!(dyn_path.matrices[1], mid);
+        assert_eq!(dyn_path.matrices[2].rows, 2);
     }
 
     #[test]
