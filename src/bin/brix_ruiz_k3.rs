@@ -44,6 +44,14 @@ fn main() {
                     .parse()
                     .expect("invalid max entry");
             }
+            "--frontier-mode" => {
+                let value = args.next().expect("--frontier-mode requires a value");
+                frontier_mode = parse_frontier_mode(&value);
+            }
+            "--move-policy" | "--move-family-policy" => {
+                let value = args.next().expect("move-policy flag requires a value");
+                move_family_policy = parse_move_family_policy(&value);
+            }
             "--graph-only" => {
                 move_family_policy = MoveFamilyPolicy::GraphOnly;
             }
@@ -76,7 +84,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam] [--move-policy mixed|graph-only] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
                 );
                 return;
             }
@@ -205,5 +213,21 @@ fn main() {
             layer.next_frontier_nodes,
             layer.total_visited_nodes,
         );
+    }
+}
+
+fn parse_frontier_mode(value: &str) -> FrontierMode {
+    match value {
+        "bfs" => FrontierMode::Bfs,
+        "beam" => FrontierMode::Beam,
+        _ => panic!("invalid --frontier-mode value: {value}"),
+    }
+}
+
+fn parse_move_family_policy(value: &str) -> MoveFamilyPolicy {
+    match value {
+        "mixed" => MoveFamilyPolicy::Mixed,
+        "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
+        _ => panic!("invalid --move-policy value: {value}"),
     }
 }
