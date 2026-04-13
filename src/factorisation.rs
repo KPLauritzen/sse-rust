@@ -1,7 +1,23 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use crate::matrix::{DynMatrix, SqMatrix};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
+
+const VALID_2X3_U_ROW_CACHE_LIMIT: usize = 1024;
+const VALID_3X2_U_ROW_CACHE_LIMIT: usize = 1024;
+
+type Valid2x3URowKey = ([u32; 2], u32);
+type Valid3x2URowKey = ([u32; 3], u32);
+
+thread_local! {
+    static VALID_2X3_U_ROW_CACHE: RefCell<HashMap<Valid2x3URowKey, Vec<[u32; 3]>>> =
+        RefCell::new(HashMap::new());
+    static VALID_3X2_U_ROW_CACHE: RefCell<HashMap<Valid3x2URowKey, Vec<[u32; 2]>>> =
+        RefCell::new(HashMap::new());
+}
 
 /// Enumerate all 2x2 nonneg integer factorisations A = UV where U and V are 2x2
 /// with entries in 0..=max_entry and det(U) > 0.
@@ -98,6 +114,86 @@ where
 pub fn vu_product_2x2(v: &DynMatrix, u: &DynMatrix) -> SqMatrix<2> {
     let vu = v.mul(u);
     vu.to_sq::<2>().expect("VU product should be 2x2")
+}
+
+fn valid_2x3_u_rows_for_target_row(target_row: [u32; 2], max_entry: u32) -> Vec<[u32; 3]> {
+    let key = (target_row, max_entry);
+    if let Some(cached) = VALID_2X3_U_ROW_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return cached;
+    }
+
+    let me = max_entry;
+    let max_target = target_row[0].max(target_row[1]) as u64;
+    let min_row_sum = ((max_target + me as u64 - 1) / me as u64) as u32;
+    let mut valid_rows = Vec::new();
+
+    for u0 in 0..=me {
+        for u1 in 0..=me {
+            for u2 in 0..=me {
+                let row_sum = u0 + u1 + u2;
+                if row_sum < min_row_sum {
+                    continue;
+                }
+                if row_sum == 0 && (target_row[0] > 0 || target_row[1] > 0) {
+                    continue;
+                }
+
+                let row_gcd = gcd3(u0 as u64, u1 as u64, u2 as u64);
+                if row_gcd > 1
+                    && (target_row[0] as u64 % row_gcd != 0 || target_row[1] as u64 % row_gcd != 0)
+                {
+                    continue;
+                }
+
+                valid_rows.push([u0, u1, u2]);
+            }
+        }
+    }
+
+    VALID_2X3_U_ROW_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= VALID_2X3_U_ROW_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, valid_rows.clone());
+    });
+    valid_rows
+}
+
+fn valid_3x2_u_rows_for_target_row(target_row: [u32; 3], max_entry: u32) -> Vec<[u32; 2]> {
+    let key = (target_row, max_entry);
+    if let Some(cached) = VALID_3X2_U_ROW_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return cached;
+    }
+
+    let me = max_entry;
+    let max_target = target_row[0].max(target_row[1]).max(target_row[2]) as u64;
+    let min_row_sum = ((max_target + me as u64 - 1) / me as u64) as u32;
+    let mut valid_rows = Vec::new();
+
+    for u0 in 0..=me {
+        for u1 in 0..=me {
+            if u0 + u1 < min_row_sum {
+                continue;
+            }
+
+            let row_gcd = gcd(u0 as u64, u1 as u64);
+            if row_gcd > 1 && target_row.iter().any(|&value| value as u64 % row_gcd != 0) {
+                continue;
+            }
+
+            valid_rows.push([u0, u1]);
+        }
+    }
+
+    VALID_3X2_U_ROW_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= VALID_3X2_U_ROW_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, valid_rows.clone());
+    });
+    valid_rows
 }
 
 // --- Nonneg integer linear system solvers ---
@@ -306,57 +402,19 @@ fn visit_rect_factorisations_2x3<F>(a: &SqMatrix<2>, max_entry: u32, visit: &mut
 where
     F: FnMut(DynMatrix, DynMatrix),
 {
-    let me = max_entry;
     let a_cols: [[i64; 2]; 2] = [
         [a.data[0][0] as i64, a.data[1][0] as i64],
         [a.data[0][1] as i64, a.data[1][1] as i64],
     ];
-
-    // Minimum row sum for each row of U: since a_{ij} <= row_sum(U_i) * max_entry,
-    // we need row_sum(U_i) >= ceil(max(a_{i0}, a_{i1}) / max_entry).
-    let max_a_row0 = a.data[0][0].max(a.data[0][1]) as u64;
-    let max_a_row1 = a.data[1][0].max(a.data[1][1]) as u64;
-    let min_row_sum_0 = ((max_a_row0 + me as u64 - 1) / me as u64) as u32;
-    let min_row_sum_1 = ((max_a_row1 + me as u64 - 1) / me as u64) as u32;
-
-    let mut valid_row0s = Vec::new();
-    for u00 in 0..=me {
-        for u01 in 0..=me {
-            for u02 in 0..=me {
-                let row0_sum = u00 + u01 + u02;
-                // Row 0 must be able to produce A's entries via V with entries <= max_entry.
-                if row0_sum < min_row_sum_0 {
-                    continue;
-                }
-                // Row 0 all zeros can't produce nonzero A entries.
-                if row0_sum == 0 && (a.data[0][0] > 0 || a.data[0][1] > 0) {
-                    continue;
-                }
-
-                // Constraint propagation: for U·x = A[:,j] to have a nonneg integer
-                // solution, gcd(row0) must divide every A[0,j].
-                let g0 = gcd3(u00 as u64, u01 as u64, u02 as u64);
-                if g0 > 1 && (a.data[0][0] as u64 % g0 != 0 || a.data[0][1] as u64 % g0 != 0) {
-                    continue;
-                }
-
-                valid_row0s.push([u00, u01, u02]);
-            }
-        }
-    }
+    let valid_row0s = valid_2x3_u_rows_for_target_row(a.data[0], max_entry);
+    let valid_row1s = valid_2x3_u_rows_for_target_row(a.data[1], max_entry);
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
             .par_iter()
             .map(|&row0| {
-                enumerate_rect_factorisations_2x3_from_row0(
-                    row0,
-                    &a_cols,
-                    a,
-                    max_entry,
-                    min_row_sum_1,
-                )
+                enumerate_rect_factorisations_2x3_from_row0(row0, &a_cols, &valid_row1s, max_entry)
             })
             .collect();
         for row_results in per_row0 {
@@ -369,13 +427,9 @@ where
     #[cfg(target_arch = "wasm32")]
     {
         for row0 in valid_row0s {
-            for (u, v) in enumerate_rect_factorisations_2x3_from_row0(
-                row0,
-                &a_cols,
-                a,
-                max_entry,
-                min_row_sum_1,
-            ) {
+            for (u, v) in
+                enumerate_rect_factorisations_2x3_from_row0(row0, &a_cols, &valid_row1s, max_entry)
+            {
                 visit(u, v);
             }
         }
@@ -385,64 +439,41 @@ where
 fn enumerate_rect_factorisations_2x3_from_row0(
     row0: [u32; 3],
     a_cols: &[[i64; 2]; 2],
-    a: &SqMatrix<2>,
+    valid_row1s: &[[u32; 3]],
     max_entry: u32,
-    min_row_sum_1: u32,
 ) -> Vec<(DynMatrix, DynMatrix)> {
     let [u00, u01, u02] = row0;
-    let me = max_entry;
     let mut results = Vec::new();
 
-    for u10 in 0..=me {
-        for u11 in 0..=me {
-            for u12 in 0..=me {
-                let row1_sum = u10 + u11 + u12;
-                if row1_sum < min_row_sum_1 {
-                    continue;
-                }
-                if row1_sum == 0 && (a.data[1][0] > 0 || a.data[1][1] > 0) {
-                    continue;
-                }
+    for &[u10, u11, u12] in valid_row1s {
+        let u_rows: [[i64; 3]; 2] = [
+            [u00 as i64, u01 as i64, u02 as i64],
+            [u10 as i64, u11 as i64, u12 as i64],
+        ];
 
-                // Constraint propagation: gcd(row1) must divide every A[1,j].
-                let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
-                if g1 > 1 && (a.data[1][0] as u64 % g1 != 0 || a.data[1][1] as u64 % g1 != 0) {
-                    continue;
-                }
+        // Quick rank check: all 2x2 minors zero -> rank < 2.
+        let d01 = u_rows[0][0] * u_rows[1][1] - u_rows[0][1] * u_rows[1][0];
+        let d02 = u_rows[0][0] * u_rows[1][2] - u_rows[0][2] * u_rows[1][0];
+        let d12 = u_rows[0][1] * u_rows[1][2] - u_rows[0][2] * u_rows[1][1];
+        if d01 == 0 && d02 == 0 && d12 == 0 {
+            continue;
+        }
 
-                let u_rows: [[i64; 3]; 2] = [
-                    [u00 as i64, u01 as i64, u02 as i64],
-                    [u10 as i64, u11 as i64, u12 as i64],
-                ];
+        let col0_solutions = solve_nonneg_2x3(&u_rows, &a_cols[0], max_entry);
+        if col0_solutions.is_empty() {
+            continue;
+        }
+        let col1_solutions = solve_nonneg_2x3(&u_rows, &a_cols[1], max_entry);
+        if col1_solutions.is_empty() {
+            continue;
+        }
 
-                // Quick rank check: all 2x2 minors zero -> rank < 2.
-                let d01 = u_rows[0][0] * u_rows[1][1] - u_rows[0][1] * u_rows[1][0];
-                let d02 = u_rows[0][0] * u_rows[1][2] - u_rows[0][2] * u_rows[1][0];
-                let d12 = u_rows[0][1] * u_rows[1][2] - u_rows[0][2] * u_rows[1][1];
-                if d01 == 0 && d02 == 0 && d12 == 0 {
-                    continue;
-                }
-
-                let col0_solutions = solve_nonneg_2x3(&u_rows, &a_cols[0], max_entry);
-                if col0_solutions.is_empty() {
-                    continue;
-                }
-                let col1_solutions = solve_nonneg_2x3(&u_rows, &a_cols[1], max_entry);
-                if col1_solutions.is_empty() {
-                    continue;
-                }
-
-                let u_mat = DynMatrix::new(2, 3, vec![u00, u01, u02, u10, u11, u12]);
-                for vc0 in &col0_solutions {
-                    for vc1 in &col1_solutions {
-                        let v_mat = DynMatrix::new(
-                            3,
-                            2,
-                            vec![vc0[0], vc1[0], vc0[1], vc1[1], vc0[2], vc1[2]],
-                        );
-                        results.push((u_mat.clone(), v_mat));
-                    }
-                }
+        let u_mat = DynMatrix::new(2, 3, vec![u00, u01, u02, u10, u11, u12]);
+        for vc0 in &col0_solutions {
+            for vc1 in &col1_solutions {
+                let v_mat =
+                    DynMatrix::new(3, 2, vec![vc0[0], vc1[0], vc0[1], vc1[1], vc0[2], vc1[2]]);
+                results.push((u_mat.clone(), v_mat));
             }
         }
     }
@@ -497,31 +528,12 @@ where
     // c_row2[j] = C[2, j] = c_cols[j][2].
     let c_row2: [i64; 3] = [c_cols[0][2], c_cols[1][2], c_cols[2][2]];
 
-    let mut valid_row0s = Vec::new();
-    for u00 in 0..=me {
-        for u01 in 0..=me {
-            if u00 + u01 < min_row_sum[0] {
-                continue;
-            }
-
-            // Constraint propagation: gcd(row0) must divide every C[0, j].
-            let g0 = gcd(u00 as u64, u01 as u64);
-            if g0 > 1 {
-                let mut skip = false;
-                for j in 0..3 {
-                    if c_cols[j][0] as u64 % g0 != 0 {
-                        skip = true;
-                        break;
-                    }
-                }
-                if skip {
-                    continue;
-                }
-            }
-
-            valid_row0s.push([u00, u01]);
-        }
-    }
+    let valid_row0s =
+        valid_3x2_u_rows_for_target_row([c.get(0, 0), c.get(0, 1), c.get(0, 2)], max_entry);
+    let valid_row1s =
+        valid_3x2_u_rows_for_target_row([c.get(1, 0), c.get(1, 1), c.get(1, 2)], max_entry);
+    let valid_row2s =
+        valid_3x2_u_rows_for_target_row([c.get(2, 0), c.get(2, 1), c.get(2, 2)], max_entry);
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -532,6 +544,8 @@ where
                     row0,
                     &c_cols,
                     &c_row2,
+                    &valid_row1s,
+                    &valid_row2s,
                     max_entry,
                     me_i64,
                     min_row_sum,
@@ -552,6 +566,8 @@ where
                 row0,
                 &c_cols,
                 &c_row2,
+                &valid_row1s,
+                &valid_row2s,
                 max_entry,
                 me_i64,
                 min_row_sum,
@@ -566,174 +582,128 @@ fn enumerate_factorisations_3x3_to_2_from_row0(
     row0: [u32; 2],
     c_cols: &[[i64; 3]; 3],
     c_row2: &[i64; 3],
+    valid_row1s: &[[u32; 2]],
+    valid_row2s: &[[u32; 2]],
     max_entry: u32,
     me_i64: i64,
     min_row_sum: [u32; 3],
 ) -> Vec<(DynMatrix, DynMatrix)> {
     let [u00, u01] = row0;
-    let me = max_entry;
     let mut results = Vec::new();
 
-    for u10 in 0..=me {
-        for u11 in 0..=me {
-            if u10 + u11 < min_row_sum[1] {
+    for &[u10, u11] in valid_row1s {
+        let det01 = u00 as i64 * u11 as i64 - u01 as i64 * u10 as i64;
+
+        if det01 != 0 {
+            let mut v_cols = [[0i64; 2]; 3];
+            let mut v_valid = true;
+            for j in 0..3 {
+                let b0 = c_cols[j][0];
+                let b1 = c_cols[j][1];
+                let v0_num = (u11 as i64) * b0 - (u01 as i64) * b1;
+                let v1_num = (u00 as i64) * b1 - (u10 as i64) * b0;
+                if v0_num % det01 != 0 || v1_num % det01 != 0 {
+                    v_valid = false;
+                    break;
+                }
+                let v0 = v0_num / det01;
+                let v1 = v1_num / det01;
+                if v0 < 0 || v0 > me_i64 || v1 < 0 || v1 > me_i64 {
+                    v_valid = false;
+                    break;
+                }
+                v_cols[j] = [v0, v1];
+            }
+            if !v_valid {
                 continue;
             }
 
-            let g1 = gcd(u10 as u64, u11 as u64);
-            if g1 > 1 {
-                let mut skip = false;
-                for j in 0..3 {
-                    if c_cols[j][1] as u64 % g1 != 0 {
-                        skip = true;
-                        break;
-                    }
-                }
-                if skip {
-                    continue;
-                }
-            }
-
-            let det01 = u00 as i64 * u11 as i64 - u01 as i64 * u10 as i64;
-
-            if det01 != 0 {
-                let mut v_cols = [[0i64; 2]; 3];
-                let mut v_valid = true;
-                for j in 0..3 {
-                    let b0 = c_cols[j][0];
-                    let b1 = c_cols[j][1];
-                    let v0_num = (u11 as i64) * b0 - (u01 as i64) * b1;
-                    let v1_num = (u00 as i64) * b1 - (u10 as i64) * b0;
-                    if v0_num % det01 != 0 || v1_num % det01 != 0 {
-                        v_valid = false;
-                        break;
-                    }
-                    let v0 = v0_num / det01;
-                    let v1 = v1_num / det01;
-                    if v0 < 0 || v0 > me_i64 || v1 < 0 || v1 > me_i64 {
-                        v_valid = false;
-                        break;
-                    }
-                    v_cols[j] = [v0, v1];
-                }
-                if !v_valid {
-                    continue;
-                }
-
-                let v_rows: [[i64; 2]; 3] = [
-                    [v_cols[0][0], v_cols[0][1]],
-                    [v_cols[1][0], v_cols[1][1]],
-                    [v_cols[2][0], v_cols[2][1]],
-                ];
-                if let Some([u20, u21]) = solve_overdetermined_3x2(&v_rows, c_row2, max_entry) {
-                    if u20 + u21 >= min_row_sum[2] {
-                        let u_mat = DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
-                        let v_mat = DynMatrix::new(
-                            2,
-                            3,
-                            vec![
-                                v_cols[0][0] as u32,
-                                v_cols[1][0] as u32,
-                                v_cols[2][0] as u32,
-                                v_cols[0][1] as u32,
-                                v_cols[1][1] as u32,
-                                v_cols[2][1] as u32,
-                            ],
-                        );
-                        results.push((u_mat, v_mat));
-                    }
-                } else {
-                    let m01 = v_rows[0][0] * v_rows[1][1] - v_rows[0][1] * v_rows[1][0];
-                    let m02 = v_rows[0][0] * v_rows[2][1] - v_rows[0][1] * v_rows[2][0];
-                    let m12 = v_rows[1][0] * v_rows[2][1] - v_rows[1][1] * v_rows[2][0];
-                    if m01 == 0 && m02 == 0 && m12 == 0 {
-                        for u20 in 0..=me {
-                            for u21 in 0..=me {
-                                if u20 + u21 < min_row_sum[2] {
-                                    continue;
-                                }
-                                let mut ok = true;
-                                for j in 0..3 {
-                                    if (u20 as i64) * v_cols[j][0] + (u21 as i64) * v_cols[j][1]
-                                        != c_cols[j][2]
-                                    {
-                                        ok = false;
-                                        break;
-                                    }
-                                }
-                                if ok {
-                                    let u_mat =
-                                        DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
-                                    let v_mat = DynMatrix::new(
-                                        2,
-                                        3,
-                                        vec![
-                                            v_cols[0][0] as u32,
-                                            v_cols[1][0] as u32,
-                                            v_cols[2][0] as u32,
-                                            v_cols[0][1] as u32,
-                                            v_cols[1][1] as u32,
-                                            v_cols[2][1] as u32,
-                                        ],
-                                    );
-                                    results.push((u_mat, v_mat));
-                                }
-                            }
-                        }
-                    }
+            let v_rows: [[i64; 2]; 3] = [
+                [v_cols[0][0], v_cols[0][1]],
+                [v_cols[1][0], v_cols[1][1]],
+                [v_cols[2][0], v_cols[2][1]],
+            ];
+            if let Some([u20, u21]) = solve_overdetermined_3x2(&v_rows, c_row2, max_entry) {
+                if u20 + u21 >= min_row_sum[2] {
+                    let u_mat = DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
+                    let v_mat = DynMatrix::new(
+                        2,
+                        3,
+                        vec![
+                            v_cols[0][0] as u32,
+                            v_cols[1][0] as u32,
+                            v_cols[2][0] as u32,
+                            v_cols[0][1] as u32,
+                            v_cols[1][1] as u32,
+                            v_cols[2][1] as u32,
+                        ],
+                    );
+                    results.push((u_mat, v_mat));
                 }
             } else {
-                for u20 in 0..=me {
-                    for u21 in 0..=me {
-                        if u20 + u21 < min_row_sum[2] {
-                            continue;
-                        }
-
-                        let g2 = gcd(u20 as u64, u21 as u64);
-                        if g2 > 1 {
-                            let mut skip = false;
-                            for j in 0..3 {
-                                if c_cols[j][2] as u64 % g2 != 0 {
-                                    skip = true;
-                                    break;
-                                }
-                            }
-                            if skip {
-                                continue;
+                let m01 = v_rows[0][0] * v_rows[1][1] - v_rows[0][1] * v_rows[1][0];
+                let m02 = v_rows[0][0] * v_rows[2][1] - v_rows[0][1] * v_rows[2][0];
+                let m12 = v_rows[1][0] * v_rows[2][1] - v_rows[1][1] * v_rows[2][0];
+                if m01 == 0 && m02 == 0 && m12 == 0 {
+                    for &[u20, u21] in valid_row2s {
+                        let mut ok = true;
+                        for j in 0..3 {
+                            if (u20 as i64) * v_cols[j][0] + (u21 as i64) * v_cols[j][1]
+                                != c_cols[j][2]
+                            {
+                                ok = false;
+                                break;
                             }
                         }
-
-                        let u_rows: [[i64; 2]; 3] = [
-                            [u00 as i64, u01 as i64],
-                            [u10 as i64, u11 as i64],
-                            [u20 as i64, u21 as i64],
-                        ];
-
-                        let d02 = u_rows[0][0] * u_rows[2][1] - u_rows[0][1] * u_rows[2][0];
-                        let d12 = u_rows[1][0] * u_rows[2][1] - u_rows[1][1] * u_rows[2][0];
-                        if d02 == 0 && d12 == 0 {
-                            continue;
+                        if ok {
+                            let u_mat = DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
+                            let v_mat = DynMatrix::new(
+                                2,
+                                3,
+                                vec![
+                                    v_cols[0][0] as u32,
+                                    v_cols[1][0] as u32,
+                                    v_cols[2][0] as u32,
+                                    v_cols[0][1] as u32,
+                                    v_cols[1][1] as u32,
+                                    v_cols[2][1] as u32,
+                                ],
+                            );
+                            results.push((u_mat, v_mat));
                         }
-
-                        let v0 = match solve_overdetermined_3x2(&u_rows, &c_cols[0], max_entry) {
-                            Some(v) => v,
-                            None => continue,
-                        };
-                        let v1 = match solve_overdetermined_3x2(&u_rows, &c_cols[1], max_entry) {
-                            Some(v) => v,
-                            None => continue,
-                        };
-                        let v2 = match solve_overdetermined_3x2(&u_rows, &c_cols[2], max_entry) {
-                            Some(v) => v,
-                            None => continue,
-                        };
-
-                        let u_mat = DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
-                        let v_mat =
-                            DynMatrix::new(2, 3, vec![v0[0], v1[0], v2[0], v0[1], v1[1], v2[1]]);
-                        results.push((u_mat, v_mat));
                     }
                 }
+            }
+        } else {
+            for &[u20, u21] in valid_row2s {
+                let u_rows: [[i64; 2]; 3] = [
+                    [u00 as i64, u01 as i64],
+                    [u10 as i64, u11 as i64],
+                    [u20 as i64, u21 as i64],
+                ];
+
+                let d02 = u_rows[0][0] * u_rows[2][1] - u_rows[0][1] * u_rows[2][0];
+                let d12 = u_rows[1][0] * u_rows[2][1] - u_rows[1][1] * u_rows[2][0];
+                if d02 == 0 && d12 == 0 {
+                    continue;
+                }
+
+                let v0 = match solve_overdetermined_3x2(&u_rows, &c_cols[0], max_entry) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let v1 = match solve_overdetermined_3x2(&u_rows, &c_cols[1], max_entry) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let v2 = match solve_overdetermined_3x2(&u_rows, &c_cols[2], max_entry) {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+                let u_mat = DynMatrix::new(3, 2, vec![u00, u01, u10, u11, u20, u21]);
+                let v_mat = DynMatrix::new(2, 3, vec![v0[0], v1[0], v2[0], v0[1], v1[1], v2[1]]);
+                results.push((u_mat, v_mat));
             }
         }
     }
