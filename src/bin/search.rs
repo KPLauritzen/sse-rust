@@ -177,6 +177,8 @@ where
                        --guided-max-shortcut-lag N max lag for one guided shortcut search (default: 3)\n\
                        --guided-min-gap N       minimum guide gap to consider for refinement (default: 2)\n\
                        --guided-max-gap N       maximum guide gap to consider for refinement\n\
+                       --guided-segment-timeout SECS\n\
+                                               max wall-clock seconds for one guided segment search\n\
                        --guided-rounds N        number of refinement rounds per guide (default: 1)\n\
                        --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
                        --write-guide-artifact PATH\n\
@@ -223,6 +225,10 @@ where
             }
             "--guided-max-gap" => {
                 guided_refinement.max_gap = Some(next_parsed(&mut args, "--guided-max-gap")?);
+            }
+            "--guided-segment-timeout" => {
+                guided_refinement.segment_timeout_secs =
+                    Some(next_parsed(&mut args, "--guided-segment-timeout")?);
             }
             "--guided-rounds" => {
                 guided_refinement.rounds = next_parsed(&mut args, "--guided-rounds")?;
@@ -638,6 +644,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.write_guide_artifact.as_deref(), Some("guide.json"));
+    }
+
+    #[test]
+    fn parse_cli_accepts_guided_segment_timeout_flag() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--guided-segment-timeout".to_string(),
+                "10".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.guided_refinement.segment_timeout_secs, Some(10));
     }
 
     #[test]

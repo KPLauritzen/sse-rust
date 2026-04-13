@@ -1210,12 +1210,13 @@ fn stage_combination_label(config: &JsonSearchConfig) -> String {
     match config.stage {
         SearchStage::EndpointSearch => format!("endpoint_search/{:?}", config.search_mode),
         SearchStage::GuidedRefinement => format!(
-            "guided_refinement/{:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}",
+            "guided_refinement/{:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}/segment_timeout_secs={:?}",
             config.search_mode,
             config.guided_refinement.max_shortcut_lag,
             config.guided_refinement.min_gap,
             config.guided_refinement.max_gap,
-            config.guided_refinement.rounds
+            config.guided_refinement.rounds,
+            config.guided_refinement.segment_timeout_secs,
         ),
         SearchStage::ShortcutSearch => format!("shortcut_search/{:?}", config.search_mode),
     }
@@ -2099,11 +2100,12 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
         ));
         if case.config.stage == SearchStage::GuidedRefinement {
             out.push_str(&format!(
-                "  guided_refinement: max_shortcut_lag={} min_gap={} max_gap={:?} rounds={}\n",
+                "  guided_refinement: max_shortcut_lag={} min_gap={} max_gap={:?} rounds={} segment_timeout_secs={:?}\n",
                 case.config.guided_refinement.max_shortcut_lag,
                 case.config.guided_refinement.min_gap,
                 case.config.guided_refinement.max_gap,
                 case.config.guided_refinement.rounds,
+                case.config.guided_refinement.segment_timeout_secs,
             ));
         }
         out.push_str(&format!(
@@ -2346,6 +2348,7 @@ mod tests {
                     min_gap: 2,
                     max_gap: Some(2),
                     rounds: 1,
+                    segment_timeout_secs: None,
                 },
             },
             timeout_ms: 1_000,
@@ -2396,6 +2399,7 @@ mod tests {
                     min_gap: 2,
                     max_gap: Some(2),
                     rounds: 1,
+                    segment_timeout_secs: None,
                 },
             },
             timeout_ms: 1_000,
