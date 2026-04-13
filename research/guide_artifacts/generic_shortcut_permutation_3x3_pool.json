@@ -1,0 +1,137 @@
+{
+  "artifacts": [
+    {
+      "artifact_id": "generic_guided_permutation_3x3_direct",
+      "endpoints": {
+        "source": {
+          "rows": 3,
+          "cols": 3,
+          "data": [1, 0, 1, 2, 1, 0, 0, 1, 2]
+        },
+        "target": {
+          "rows": 3,
+          "cols": 3,
+          "data": [2, 0, 1, 1, 1, 0, 0, 2, 1]
+        }
+      },
+      "kind": "full_path",
+      "path": {
+        "matrices": [
+          {
+            "rows": 3,
+            "cols": 3,
+            "data": [1, 0, 1, 2, 1, 0, 0, 1, 2]
+          },
+          {
+            "rows": 3,
+            "cols": 3,
+            "data": [2, 0, 1, 1, 1, 0, 0, 2, 1]
+          }
+        ],
+        "steps": [
+          {
+            "u": {
+              "rows": 3,
+              "cols": 3,
+              "data": [1, 1, 0, 0, 2, 1, 2, 0, 1]
+            },
+            "v": {
+              "rows": 3,
+              "cols": 3,
+              "data": [0, 0, 1, 1, 0, 0, 0, 1, 0]
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "source_kind": "fixture",
+        "label": "direct permutation guide",
+        "source_ref": "research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json"
+      },
+      "validation": "witness_validated",
+      "compatibility": {
+        "supported_stages": ["shortcut_search"],
+        "max_endpoint_dim": 4
+      },
+      "quality": {
+        "lag": 1,
+        "cost": 1
+      }
+    },
+    {
+      "artifact_id": "generic_guided_permutation_3x3_two_hop",
+      "endpoints": {
+        "source": {
+          "rows": 3,
+          "cols": 3,
+          "data": [1, 0, 1, 2, 1, 0, 0, 1, 2]
+        },
+        "target": {
+          "rows": 3,
+          "cols": 3,
+          "data": [2, 0, 1, 1, 1, 0, 0, 2, 1]
+        }
+      },
+      "kind": "full_path",
+      "path": {
+        "matrices": [
+          {
+            "rows": 3,
+            "cols": 3,
+            "data": [1, 0, 1, 2, 1, 0, 0, 1, 2]
+          },
+          {
+            "rows": 3,
+            "cols": 3,
+            "data": [2, 1, 0, 0, 1, 2, 1, 0, 1]
+          },
+          {
+            "rows": 3,
+            "cols": 3,
+            "data": [2, 0, 1, 1, 1, 0, 0, 2, 1]
+          }
+        ],
+        "steps": [
+          {
+            "u": {
+              "rows": 3,
+              "cols": 3,
+              "data": [1, 0, 1, 0, 1, 2, 2, 1, 0]
+            },
+            "v": {
+              "rows": 3,
+              "cols": 3,
+              "data": [0, 0, 1, 0, 1, 0, 1, 0, 0]
+            }
+          },
+          {
+            "u": {
+              "rows": 3,
+              "cols": 3,
+              "data": [2, 0, 1, 0, 2, 1, 1, 1, 0]
+            },
+            "v": {
+              "rows": 3,
+              "cols": 3,
+              "data": [1, 0, 0, 0, 0, 1, 0, 1, 0]
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "source_kind": "fixture",
+        "label": "two-hop permutation guide",
+        "source_ref": "research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json"
+      },
+      "validation": "witness_validated",
+      "compatibility": {
+        "supported_stages": ["guided_refinement"],
+        "max_endpoint_dim": 4
+      },
+      "quality": {
+        "lag": 2,
+        "cost": 2
+      }
+    }
+  ]
+}

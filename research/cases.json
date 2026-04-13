@@ -225,6 +225,166 @@
       }
     },
     {
+      "id": "guided_permutation_3x3_shortcut_seeded",
+      "description": "Shortcut-search comparison case: seed the generic 3x3 endpoint pair from a fixture-backed guide.",
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "seeded_guide_ids": ["two_hop_permutation"],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "search_mode": "graph-only",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 2,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 1,
+          "rounds": 1,
+          "max_total_segment_attempts": 16
+        }
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 165,
+        "not_equivalent": -1650,
+        "unknown": -1650,
+        "timeout": -2650,
+        "panic": -2650
+      },
+      "tags": ["correctness", "non-2x2", "guided-stage", "shortcut-stage", "comparison", "seeded-fixture"],
+      "campaign": {
+        "id": "guided_permutation_3x3",
+        "strategy": "shortcut_search_seeded",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "guided_permutation_3x3_shortcut_artifact",
+      "description": "Shortcut-search comparison case: reuse a legacy full-path guide artifact for the same 3x3 endpoints.",
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "guide_artifact_paths": ["research/guide_artifacts/generic_guided_permutation_3x3.json"],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "search_mode": "graph-only",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 2,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 1,
+          "rounds": 1,
+          "max_total_segment_attempts": 16
+        }
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 165,
+        "not_equivalent": -1650,
+        "unknown": -1650,
+        "timeout": -2650,
+        "panic": -2650
+      },
+      "tags": ["correctness", "non-2x2", "guided-stage", "shortcut-stage", "comparison", "artifact-fixture"],
+      "campaign": {
+        "id": "guided_permutation_3x3",
+        "strategy": "shortcut_search_artifact",
+        "schedule_order": 40
+      }
+    },
+    {
+      "id": "guided_permutation_3x3_shortcut_pool_max1",
+      "description": "Shortcut-search comparison case: load a mixed legacy-plus-shortcut guide pool but admit only the best-ranked guide.",
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "guide_artifact_paths": ["research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json"],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "search_mode": "graph-only",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 2,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 1,
+          "rounds": 1,
+          "max_total_segment_attempts": 16
+        }
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 170,
+        "not_equivalent": -1700,
+        "unknown": -1700,
+        "timeout": -2700,
+        "panic": -2700
+      },
+      "tags": ["correctness", "non-2x2", "guided-stage", "shortcut-stage", "comparison", "artifact-fixture", "guide-pool"],
+      "campaign": {
+        "id": "guided_permutation_3x3",
+        "strategy": "shortcut_search_pool_max1",
+        "schedule_order": 50
+      }
+    },
+    {
+      "id": "guided_permutation_3x3_shortcut_pool_max2",
+      "description": "Shortcut-search comparison case: admit two ranked guides from the same mixed legacy-plus-shortcut guide pool.",
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "guide_artifact_paths": ["research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json"],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "search_mode": "graph-only",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 2,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 2,
+          "rounds": 1,
+          "max_total_segment_attempts": 16
+        }
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 170,
+        "not_equivalent": -1700,
+        "unknown": -1700,
+        "timeout": -2700,
+        "panic": -2700
+      },
+      "tags": ["correctness", "non-2x2", "guided-stage", "shortcut-stage", "comparison", "artifact-fixture", "guide-pool"],
+      "campaign": {
+        "id": "guided_permutation_3x3",
+        "strategy": "shortcut_search_pool_max2",
+        "schedule_order": 60
+      }
+    },
+    {
       "id": "guided_permutation_4x4_endpoint",
       "description": "Baseline staged comparison case: the endpoint-search stage should solve a non-2x2 4x4 permutation pair directly.",
       "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_4x4",
@@ -452,6 +612,46 @@
         "id": "brix_ruiz_k3",
         "strategy": "guided_refinement_seeded",
         "schedule_order": 25
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_shortcut_seeded",
+      "description": "Shortcut-search comparison case: route the old bounded Brix-Ruiz seeded shortcut entry point through the generic stage surface.",
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "seeded_guide_ids": ["endpoint_16_path"],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 4,
+        "max_entry": 5,
+        "search_mode": "mixed",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 6,
+          "min_gap": 2,
+          "max_gap": 6,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 1,
+          "rounds": 1,
+          "max_total_segment_attempts": 64
+        }
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 325,
+        "not_equivalent": -3000,
+        "unknown": -3000,
+        "timeout": -4000,
+        "panic": -4000
+      },
+      "tags": ["hard-positive", "target", "guided-stage", "shortcut-stage", "seeded-fixture", "comparison"],
+      "campaign": {
+        "id": "brix_ruiz_k3",
+        "strategy": "shortcut_search_seeded",
+        "schedule_order": 27
       }
     },
     {

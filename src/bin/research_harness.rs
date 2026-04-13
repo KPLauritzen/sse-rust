@@ -1195,12 +1195,17 @@ fn stage_combination_label(config: &JsonSearchConfig) -> String {
             config.guided_refinement.segment_timeout_secs,
         ),
         SearchStage::ShortcutSearch => format!(
-            "shortcut_search/{:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}",
+            "shortcut_search/{:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}/guided_shortcut_lag={}/guided_min_gap={}/guided_max_gap={:?}/guided_rounds={}/guided_segment_timeout_secs={:?}",
             config.search_mode,
             config.shortcut_search.max_guides,
             config.shortcut_search.rounds,
             config.shortcut_search.max_total_segment_attempts,
             config.shortcut_search.artifacts.emit_promoted_guides,
+            config.guided_refinement.max_shortcut_lag,
+            config.guided_refinement.min_gap,
+            config.guided_refinement.max_gap,
+            config.guided_refinement.rounds,
+            config.guided_refinement.segment_timeout_secs,
         ),
     }
 }
@@ -2420,6 +2425,66 @@ mod tests {
     }
 
     #[test]
+    fn run_case_shortcut_search_uses_guide_pool_inputs() {
+        let case = ResearchCase {
+            id: "shortcut-artifact-pool".to_string(),
+            description: "shortcut 3x3 artifact pool case".to_string(),
+            a: vec![],
+            b: vec![],
+            endpoint_fixture: Some(
+                "research/fixtures/generic_guides.json#guided_permutation_3x3".to_string(),
+            ),
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![
+                "research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json".to_string(),
+            ],
+            config: JsonSearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 2,
+                search_mode: SearchMode::GraphOnly,
+                stage: SearchStage::ShortcutSearch,
+                guided_refinement: GuidedRefinementConfig {
+                    max_shortcut_lag: 1,
+                    min_gap: 2,
+                    max_gap: Some(2),
+                    rounds: 1,
+                    segment_timeout_secs: None,
+                },
+                shortcut_search: ShortcutSearchConfig {
+                    max_guides: 2,
+                    rounds: 1,
+                    max_total_segment_attempts: 16,
+                    ..ShortcutSearchConfig::default()
+                },
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+        };
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "equivalent");
+        assert_eq!(result.steps, Some(1));
+        assert_eq!(result.telemetry.shortcut_search.guide_artifacts_loaded, 2);
+        assert_eq!(result.telemetry.shortcut_search.guide_artifacts_accepted, 2);
+        assert_eq!(result.telemetry.shortcut_search.unique_guides, 2);
+        assert_eq!(
+            result.telemetry.shortcut_search.initial_working_set_guides,
+            2
+        );
+    }
+
+    #[test]
     fn comparison_groups_collect_same_endpoint_variants() {
         let endpoint = EndpointSummary {
             source_dim: 2,
@@ -2534,6 +2599,27 @@ mod tests {
         let comparisons = build_comparison_summaries(&cases);
         assert_eq!(comparisons.len(), 1);
         assert_eq!(comparisons[0].variants.len(), 2);
+    }
+
+    #[test]
+    fn research_corpus_keeps_non_2x2_square_comparison_coverage() {
+        let cases_path = Path::new("research/cases.json");
+        let corpus = load_corpus(cases_path).expect("research corpus should load");
+        let mut groups = BTreeMap::<String, (usize, usize, usize)>::new();
+
+        for case in &corpus.cases {
+            let resolved = resolve_case(case, cases_path).expect("case should resolve");
+            let endpoint = resolved.endpoint;
+            let key = endpoint_identity_key(&endpoint);
+            let entry = groups
+                .entry(key)
+                .or_insert((endpoint.source_dim, endpoint.target_dim, 0));
+            entry.2 += 1;
+        }
+
+        assert!(groups.values().any(|(source_dim, target_dim, count)| {
+            *source_dim == *target_dim && *source_dim > 2 && *count > 1
+        }));
     }
 
     #[test]
