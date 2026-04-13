@@ -137,6 +137,11 @@ path = "src/bin/profile_sq3_breakdown.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "analyze_path_signal_corpus"
+path = "src/bin/analyze_path_signal_corpus.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "replay_graph_path_scores"
 path = "src/bin/replay_graph_path_scores.rs"
 required-features = ["research-tools"]
