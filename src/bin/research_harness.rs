@@ -11,10 +11,10 @@ use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::search::{execute_search_request, validate_sse_path_dyn};
 use sse_core::types::{
-    DynSsePath, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
+    DynSsePath, FrontierMode, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
     GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
-    GuidedRefinementConfig, SearchConfig, SearchMode, SearchRequest, SearchRunResult, SearchStage,
-    SearchTelemetry, ShortcutSearchConfig,
+    GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig,
 };
 
 #[derive(Debug)]
@@ -78,7 +78,7 @@ struct JsonSearchConfig {
     max_intermediate_dim: usize,
     max_entry: u32,
     #[serde(default = "default_search_mode")]
-    search_mode: SearchMode,
+    search_mode: MoveFamilyPolicy,
     #[serde(default)]
     stage: SearchStage,
     #[serde(default)]
@@ -137,8 +137,8 @@ struct ResolvedCase {
     guide_artifacts: Vec<GuideArtifact>,
 }
 
-fn default_search_mode() -> SearchMode {
-    SearchMode::Mixed
+fn default_search_mode() -> MoveFamilyPolicy {
+    MoveFamilyPolicy::Mixed
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -664,7 +664,9 @@ fn materialize_seeded_guide_artifact(
                 max_lag: 1,
                 max_intermediate_dim: max_dim,
                 max_entry,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                beam_width: None,
             },
             stage: SearchStage::EndpointSearch,
             guide_artifacts: Vec::new(),
@@ -925,7 +927,9 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
             max_lag: case.config.max_lag,
             max_intermediate_dim: case.config.max_intermediate_dim,
             max_entry: case.config.max_entry,
-            search_mode: case.config.search_mode,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: case.config.search_mode,
+            beam_width: None,
         },
         stage: case.config.stage,
         guide_artifacts: resolved.guide_artifacts,
@@ -2209,7 +2213,7 @@ mod tests {
                 max_lag: 1,
                 max_intermediate_dim: 3,
                 max_entry: 1,
-                search_mode: SearchMode::Mixed,
+                search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2255,7 +2259,7 @@ mod tests {
                 max_lag: 1,
                 max_intermediate_dim: 3,
                 max_entry: 1,
-                search_mode: SearchMode::Mixed,
+                search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2340,7 +2344,7 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 2,
-                search_mode: SearchMode::GraphOnly,
+                search_mode: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
                     max_shortcut_lag: 1,
@@ -2392,7 +2396,7 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 2,
-                search_mode: SearchMode::GraphOnly,
+                search_mode: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
                     max_shortcut_lag: 1,
@@ -2442,7 +2446,7 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 2,
-                search_mode: SearchMode::GraphOnly,
+                search_mode: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::ShortcutSearch,
                 guided_refinement: GuidedRefinementConfig {
                     max_shortcut_lag: 1,
@@ -2518,7 +2522,7 @@ mod tests {
                     max_lag: 1,
                     max_intermediate_dim: 2,
                     max_entry: 1,
-                    search_mode: SearchMode::Mixed,
+                    search_mode: MoveFamilyPolicy::Mixed,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
                     shortcut_search: ShortcutSearchConfig::default(),
@@ -2564,7 +2568,7 @@ mod tests {
                     max_lag: 2,
                     max_intermediate_dim: 2,
                     max_entry: 2,
-                    search_mode: SearchMode::GraphOnly,
+                    search_mode: MoveFamilyPolicy::GraphOnly,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
                     shortcut_search: ShortcutSearchConfig::default(),
@@ -2733,7 +2737,7 @@ mod tests {
                 max_lag: 6,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::Mixed,
+                search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2807,7 +2811,7 @@ mod tests {
                 max_lag: 4,
                 max_intermediate_dim: 2,
                 max_entry: 4,
-                search_mode: SearchMode::Mixed,
+                search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),

@@ -14,7 +14,10 @@ use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
     SearchRootRecord, SearchStartRecord,
 };
-use crate::types::{SearchDirection, SearchMode, SearchRunResult, SearchStage, SearchTelemetry};
+use crate::types::{
+    FrontierMode, MoveFamilyPolicy, SearchConfig, SearchDirection, SearchRunResult, SearchStage,
+    SearchTelemetry,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SqliteGraphRecorder {
@@ -135,8 +138,10 @@ impl SqliteGraphRecorder {
                     max_intermediate_dim,
                     max_entry,
                     search_mode,
+                    frontier_mode,
+                    move_family_policy,
                     stage
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     started_unix_ms,
                     a_id,
@@ -146,7 +151,9 @@ impl SqliteGraphRecorder {
                     start.request.config.max_lag as i64,
                     start.request.config.max_intermediate_dim as i64,
                     start.request.config.max_entry as i64,
-                    search_mode_label(start.request.config.search_mode),
+                    search_mode_label(&start.request.config),
+                    frontier_mode_label(start.request.config.frontier_mode),
+                    move_family_policy_label(start.request.config.move_family_policy),
                     search_stage_label(start.request.stage),
                 ],
             )
@@ -435,6 +442,8 @@ fn initialise_schema(conn: &Connection) -> Result<(), String> {
             max_intermediate_dim INTEGER NOT NULL,
             max_entry INTEGER NOT NULL,
             search_mode TEXT NOT NULL,
+            frontier_mode TEXT,
+            move_family_policy TEXT,
             stage TEXT NOT NULL,
             outcome TEXT,
             reason TEXT,
@@ -478,6 +487,8 @@ fn initialise_schema(conn: &Connection) -> Result<(), String> {
     .map_err(|err| format!("failed to initialise sqlite schema: {err}"))?;
 
     let mut has_stage_column = false;
+    let mut has_frontier_mode_column = false;
+    let mut has_move_family_policy_column = false;
     let mut stmt = conn
         .prepare("PRAGMA table_info(search_runs)")
         .map_err(|err| format!("failed to inspect search_runs schema: {err}"))?;
@@ -493,7 +504,10 @@ fn initialise_schema(conn: &Connection) -> Result<(), String> {
             .map_err(|err| format!("failed to read search_runs column name: {err}"))?;
         if column_name == "stage" {
             has_stage_column = true;
-            break;
+        } else if column_name == "frontier_mode" {
+            has_frontier_mode_column = true;
+        } else if column_name == "move_family_policy" {
+            has_move_family_policy_column = true;
         }
     }
     if !has_stage_column {
@@ -502,6 +516,17 @@ fn initialise_schema(conn: &Connection) -> Result<(), String> {
             [],
         )
         .map_err(|err| format!("failed to add stage column to search_runs: {err}"))?;
+    }
+    if !has_frontier_mode_column {
+        conn.execute("ALTER TABLE search_runs ADD COLUMN frontier_mode TEXT", [])
+            .map_err(|err| format!("failed to add frontier_mode column to search_runs: {err}"))?;
+    }
+    if !has_move_family_policy_column {
+        conn.execute(
+            "ALTER TABLE search_runs ADD COLUMN move_family_policy TEXT",
+            [],
+        )
+        .map_err(|err| format!("failed to add move_family_policy column to search_runs: {err}"))?;
     }
     Ok(())
 }
@@ -585,10 +610,25 @@ fn unix_timestamp_ms() -> i64 {
         .as_millis() as i64
 }
 
-fn search_mode_label(mode: SearchMode) -> &'static str {
+fn search_mode_label(config: &SearchConfig) -> &'static str {
+    match (config.frontier_mode, config.move_family_policy) {
+        (FrontierMode::Bfs, MoveFamilyPolicy::Mixed) => "mixed",
+        (FrontierMode::Bfs, MoveFamilyPolicy::GraphOnly) => "graph_only",
+        (FrontierMode::Beam, _) => "beam",
+    }
+}
+
+fn frontier_mode_label(mode: FrontierMode) -> &'static str {
     match mode {
-        SearchMode::Mixed => "mixed",
-        SearchMode::GraphOnly => "graph_only",
+        FrontierMode::Bfs => "bfs",
+        FrontierMode::Beam => "beam",
+    }
+}
+
+fn move_family_policy_label(policy: MoveFamilyPolicy) -> &'static str {
+    match policy {
+        MoveFamilyPolicy::Mixed => "mixed",
+        MoveFamilyPolicy::GraphOnly => "graph_only",
     }
 }
 
@@ -644,7 +684,9 @@ mod tests {
                 max_lag: 4,
                 max_intermediate_dim: 3,
                 max_entry: 4,
-                search_mode: SearchMode::Mixed,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+                beam_width: None,
             };
 
             let (_result, _telemetry) =
@@ -670,13 +712,54 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
+        let (search_mode, frontier_mode, move_family_policy): (
+            String,
+            Option<String>,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT search_mode, frontier_mode, move_family_policy FROM search_runs LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
 
         assert_eq!(run_count, 1);
         assert!(matrix_count >= 2);
         assert!(node_count >= 1);
         assert!(edge_count >= 1);
         assert!(!outcome.is_empty());
+        assert_eq!(search_mode, "mixed");
+        assert_eq!(frontier_mode.as_deref(), Some("bfs"));
+        assert_eq!(move_family_policy.as_deref(), Some("mixed"));
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sqlite_graph_legacy_search_mode_label_stays_backward_compatible() {
+        let beam_graph_only = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+            frontier_mode: FrontierMode::Beam,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: Some(8),
+        };
+
+        assert_eq!(search_mode_label(&SearchConfig::default()), "mixed");
+        assert_eq!(
+            search_mode_label(&SearchConfig {
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                ..SearchConfig::default()
+            }),
+            "graph_only"
+        );
+        assert_eq!(search_mode_label(&beam_graph_only), "beam");
+        assert_eq!(frontier_mode_label(beam_graph_only.frontier_mode), "beam");
+        assert_eq!(
+            move_family_policy_label(beam_graph_only.move_family_policy),
+            "graph_only"
+        );
     }
 }

@@ -13,8 +13,9 @@ use sse_core::search::{
 #[cfg(not(target_arch = "wasm32"))]
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
-    GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig, SearchConfig,
-    SearchMode, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
+    FrontierMode, GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig,
+    MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
+    ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
 };
 
 #[derive(Debug)]
@@ -182,7 +183,10 @@ where
                        --max-lag N              max elementary SSE steps (default: 4)\n\
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
-                       --search-mode MODE       mixed | graph-only (default: mixed)\n\
+                       --frontier-mode MODE     bfs | beam (default: bfs)\n\
+                       --move-policy POLICY     mixed | graph-only (default: mixed)\n\
+                       --search-mode MODE       legacy shortcut: mixed | graph-only | beam\n\
+                       --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
                                               (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
@@ -217,13 +221,24 @@ where
             "--max-entry" => {
                 config.max_entry = next_parsed(&mut args, "--max-entry")?;
             }
+            "--frontier-mode" => {
+                let value = args.next().ok_or("--frontier-mode requires a value")?;
+                config.frontier_mode = parse_frontier_mode(&value)?;
+            }
+            "--move-policy" | "--move-family-policy" => {
+                let value = args.next().ok_or(format!("{arg} requires a value"))?;
+                config.move_family_policy = parse_move_policy(&value)?;
+            }
             "--search-mode" => {
                 let value = args.next().ok_or("--search-mode requires a value")?;
-                config.search_mode = match value.as_str() {
-                    "mixed" => SearchMode::Mixed,
-                    "graph-only" | "graph_only" => SearchMode::GraphOnly,
-                    _ => return Err(format!("unknown search mode: {value}")),
-                };
+                apply_legacy_search_mode(&mut config, &value)?;
+            }
+            "--beam-width" => {
+                let width: usize = next_parsed(&mut args, "--beam-width")?;
+                if width == 0 {
+                    return Err("--beam-width must be at least 1".to_string());
+                }
+                config.beam_width = Some(width);
             }
             "--stage" => {
                 let value = args.next().ok_or("--stage requires a value")?;
@@ -304,6 +319,12 @@ where
 
     let a = a.ok_or("missing matrix A (first positional argument)")?;
     let b = b.ok_or("missing matrix B (second positional argument)")?;
+    if config.frontier_mode == FrontierMode::Beam && config.beam_width.is_none() {
+        config.beam_width = Some(DEFAULT_BEAM_WIDTH);
+    }
+    if config.frontier_mode != FrontierMode::Beam && config.beam_width.is_some() {
+        return Err("--beam-width requires --frontier-mode beam".to_string());
+    }
 
     Ok(Cli {
         a,
@@ -321,6 +342,41 @@ where
         visited_db,
         write_guide_artifact,
     })
+}
+
+fn parse_frontier_mode(value: &str) -> Result<FrontierMode, String> {
+    match value {
+        "bfs" => Ok(FrontierMode::Bfs),
+        "beam" => Ok(FrontierMode::Beam),
+        _ => Err(format!("unknown frontier mode: {value}")),
+    }
+}
+
+fn parse_move_policy(value: &str) -> Result<MoveFamilyPolicy, String> {
+    match value {
+        "mixed" => Ok(MoveFamilyPolicy::Mixed),
+        "graph-only" | "graph_only" => Ok(MoveFamilyPolicy::GraphOnly),
+        _ => Err(format!("unknown move policy: {value}")),
+    }
+}
+
+fn apply_legacy_search_mode(config: &mut SearchConfig, value: &str) -> Result<(), String> {
+    match value {
+        "mixed" => {
+            config.frontier_mode = FrontierMode::Bfs;
+            config.move_family_policy = MoveFamilyPolicy::Mixed;
+        }
+        "graph-only" | "graph_only" => {
+            config.frontier_mode = FrontierMode::Bfs;
+            config.move_family_policy = MoveFamilyPolicy::GraphOnly;
+        }
+        "beam" => {
+            config.frontier_mode = FrontierMode::Beam;
+            config.move_family_policy = MoveFamilyPolicy::Mixed;
+        }
+        _ => return Err(format!("unknown search mode: {value}")),
+    }
+    Ok(())
 }
 
 fn start_cpu_profile(enabled: bool) -> Result<Option<CpuProfileGuard>, String> {
@@ -729,7 +785,9 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 mod tests {
     use super::{parse_cli, parse_matrix, run_with_args};
     use rusqlite::Connection;
-    use sse_core::types::{GuideArtifact, GuideArtifactPayload, SearchStage};
+    use sse_core::types::{
+        FrontierMode, GuideArtifact, GuideArtifactPayload, MoveFamilyPolicy, SearchStage,
+    };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -822,6 +880,115 @@ mod tests {
         assert_eq!(cli.shortcut_search.rounds, 2);
         assert_eq!(cli.shortcut_search.max_total_segment_attempts, 16);
         assert!(cli.shortcut_search.artifacts.emit_promoted_guides);
+    }
+
+    #[test]
+    fn parse_cli_supports_all_frontier_and_move_policy_combinations() {
+        let cases = [
+            (
+                "bfs",
+                "mixed",
+                FrontierMode::Bfs,
+                MoveFamilyPolicy::Mixed,
+                None,
+            ),
+            (
+                "bfs",
+                "graph-only",
+                FrontierMode::Bfs,
+                MoveFamilyPolicy::GraphOnly,
+                None,
+            ),
+            (
+                "beam",
+                "mixed",
+                FrontierMode::Beam,
+                MoveFamilyPolicy::Mixed,
+                Some("7"),
+            ),
+            (
+                "beam",
+                "graph-only",
+                FrontierMode::Beam,
+                MoveFamilyPolicy::GraphOnly,
+                Some("9"),
+            ),
+        ];
+
+        for (frontier, move_policy, expected_frontier, expected_move_policy, beam_width) in cases {
+            let mut args = vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--frontier-mode".to_string(),
+                frontier.to_string(),
+                "--move-policy".to_string(),
+                move_policy.to_string(),
+            ];
+            if let Some(width) = beam_width {
+                args.push("--beam-width".to_string());
+                args.push(width.to_string());
+            }
+            let cli = parse_cli(args.into_iter()).unwrap();
+
+            assert_eq!(cli.config.frontier_mode, expected_frontier);
+            assert_eq!(cli.config.move_family_policy, expected_move_policy);
+            assert_eq!(
+                cli.config.beam_width,
+                beam_width.map(|value| value.parse().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn parse_cli_accepts_legacy_search_mode_beam() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--search-mode".to_string(),
+                "beam".to_string(),
+                "--beam-width".to_string(),
+                "7".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.config.frontier_mode, FrontierMode::Beam);
+        assert_eq!(cli.config.move_family_policy, MoveFamilyPolicy::Mixed);
+        assert_eq!(cli.config.beam_width, Some(7));
+    }
+
+    #[test]
+    fn parse_cli_rejects_zero_beam_width() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--beam-width".to_string(),
+                "0".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "--beam-width must be at least 1");
+    }
+
+    #[test]
+    fn parse_cli_rejects_beam_width_without_beam_mode() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--beam-width".to_string(),
+                "7".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "--beam-width requires --frontier-mode beam");
     }
 
     #[test]

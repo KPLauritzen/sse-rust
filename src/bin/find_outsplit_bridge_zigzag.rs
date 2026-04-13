@@ -4,7 +4,7 @@ use sse_core::factorisation::enumerate_factorisations_3x3_to_2;
 use sse_core::graph_moves::{enumerate_outsplits_2x2_to_3x3, OutsplitWitness};
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SearchMode, SseResult};
+use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SseResult};
 
 fn main() {
     let mut case = String::from("brix_k3");
@@ -73,7 +73,9 @@ fn main() {
         max_lag: search_max_lag,
         max_intermediate_dim: search_max_dim,
         max_entry: search_max_entry,
-        search_mode: SearchMode::Mixed,
+        frontier_mode: FrontierMode::Bfs,
+        move_family_policy: MoveFamilyPolicy::Mixed,
+        beam_width: None,
     };
 
     let a_bridges = compute_bridge_map(&enumerate_outsplits_2x2_to_3x3(&a), bridge_max_entry);

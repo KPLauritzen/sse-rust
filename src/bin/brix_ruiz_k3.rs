@@ -5,7 +5,9 @@ use std::time::Instant;
 
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SearchMode, SseResult};
+use sse_core::types::{
+    FrontierMode, MoveFamilyPolicy, SearchConfig, SseResult, DEFAULT_BEAM_WIDTH,
+};
 
 fn main() {
     let a = SqMatrix::new([[1, 3], [2, 1]]);
@@ -14,7 +16,9 @@ fn main() {
     let mut max_lag = 7usize;
     let mut max_intermediate_dim = 4usize;
     let mut max_entry = 10u32;
-    let mut search_mode = SearchMode::Mixed;
+    let mut frontier_mode = FrontierMode::Bfs;
+    let mut move_family_policy = MoveFamilyPolicy::Mixed;
+    let mut beam_width = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -40,38 +44,79 @@ fn main() {
                     .parse()
                     .expect("invalid max entry");
             }
+            "--frontier-mode" => {
+                let value = args.next().expect("--frontier-mode requires a value");
+                frontier_mode = parse_frontier_mode(&value);
+            }
+            "--move-policy" | "--move-family-policy" => {
+                let value = args.next().expect("move-policy flag requires a value");
+                move_family_policy = parse_move_family_policy(&value);
+            }
             "--graph-only" => {
-                search_mode = SearchMode::GraphOnly;
+                move_family_policy = MoveFamilyPolicy::GraphOnly;
             }
             "--search-mode" => {
                 let mode = args.next().expect("--search-mode requires a value");
-                search_mode = match mode.as_str() {
-                    "mixed" => SearchMode::Mixed,
-                    "graph-only" => SearchMode::GraphOnly,
+                match mode.as_str() {
+                    "mixed" => {
+                        frontier_mode = FrontierMode::Bfs;
+                        move_family_policy = MoveFamilyPolicy::Mixed;
+                    }
+                    "graph-only" => {
+                        frontier_mode = FrontierMode::Bfs;
+                        move_family_policy = MoveFamilyPolicy::GraphOnly;
+                    }
+                    "beam" => {
+                        frontier_mode = FrontierMode::Beam;
+                        move_family_policy = MoveFamilyPolicy::Mixed;
+                    }
                     _ => panic!("invalid --search-mode value: {mode}"),
-                };
+                }
+            }
+            "--beam-width" => {
+                let width = args
+                    .next()
+                    .expect("--beam-width requires a value")
+                    .parse::<usize>()
+                    .expect("invalid beam width");
+                assert!(width > 0, "--beam-width must be at least 1");
+                beam_width = Some(width);
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--graph-only] [--search-mode mixed|graph-only]"
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam] [--move-policy mixed|graph-only] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
                 );
                 return;
             }
             _ => panic!("unknown argument: {arg}"),
         }
     }
+    if frontier_mode == FrontierMode::Beam && beam_width.is_none() {
+        beam_width = Some(DEFAULT_BEAM_WIDTH);
+    }
+    assert!(
+        frontier_mode == FrontierMode::Beam || beam_width.is_none(),
+        "--beam-width requires beam frontier"
+    );
 
     let config = SearchConfig {
         max_lag,
         max_intermediate_dim,
         max_entry,
-        search_mode,
+        frontier_mode,
+        move_family_policy,
+        beam_width,
     };
 
     println!("Brix-Ruiz k=3: A = {:?}, B = {:?}", a, b);
     println!(
-        "Config: max_lag={}, max_intermediate_dim={}, max_entry={}, search_mode={:?}",
-        config.max_lag, config.max_intermediate_dim, config.max_entry, config.search_mode
+        "Config: max_lag={}, max_intermediate_dim={}, max_entry={}, frontier_mode={:?}, move_family_policy={:?}, beam_width={:?}",
+        config.max_lag,
+        config.max_intermediate_dim,
+        config.max_entry,
+        config.frontier_mode,
+        config.move_family_policy,
+        config.beam_width
     );
     println!();
 
@@ -168,5 +213,21 @@ fn main() {
             layer.next_frontier_nodes,
             layer.total_visited_nodes,
         );
+    }
+}
+
+fn parse_frontier_mode(value: &str) -> FrontierMode {
+    match value {
+        "bfs" => FrontierMode::Bfs,
+        "beam" => FrontierMode::Beam,
+        _ => panic!("invalid --frontier-mode value: {value}"),
+    }
+}
+
+fn parse_move_family_policy(value: &str) -> MoveFamilyPolicy {
+    match value {
+        "mixed" => MoveFamilyPolicy::Mixed,
+        "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
+        _ => panic!("invalid --move-policy value: {value}"),
     }
 }
