@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     time \
     pkg-config \
     cmake \
+    python3 \
     python3.13 \
+    python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Embed network init script (sets up iptables firewall, then drops privileges)

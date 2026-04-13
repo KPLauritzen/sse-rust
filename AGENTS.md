@@ -2,6 +2,7 @@
 - Use reasonable timeouts for potentially explosive search/probe commands; start with small bounds and increase only after the telemetry looks manageable.
 - Commit your changes to git often. Before you ask the user for feedback or additional input. 
 - When messaging other agents via `workmux`, prefer multiline file-based sends (`workmux send -f ...`) and make sure the file contains a real line break. In this repo's current setup, inline one-line sends to Codex panes can insert text without submitting it, while multiline file-based sends submit reliably.
+- To rebuild the sandbox image for this repo, use `docker build -t my-sandbox -f Dockerfile.sandbox .`. Do not use `workmux sandbox build`; in this setup it rebuilds workmux's embedded default image instead of the repo's `Dockerfile.sandbox`.
 
 ## Project Goals
 
