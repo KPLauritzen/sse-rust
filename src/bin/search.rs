@@ -10,6 +10,7 @@ use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
     GuideArtifact, GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig,
     SearchConfig, SearchMode, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
+    ShortcutSearchConfig,
 };
 
 #[derive(Debug)]
@@ -20,6 +21,7 @@ struct Cli {
     stage: SearchStage,
     guide_artifact_paths: Vec<String>,
     guided_refinement: GuidedRefinementConfig,
+    shortcut_search: ShortcutSearchConfig,
     json: bool,
     telemetry: bool,
     visited_db: Option<String>,
@@ -59,6 +61,7 @@ where
         stage: cli.stage,
         guide_artifacts,
         guided_refinement: cli.guided_refinement.clone(),
+        shortcut_search: cli.shortcut_search.clone(),
     };
 
     if let Some(path) = cli.visited_db.as_deref() {
@@ -152,6 +155,7 @@ where
     let mut stage = SearchStage::EndpointSearch;
     let mut guide_artifact_paths = Vec::new();
     let mut guided_refinement = GuidedRefinementConfig::default();
+    let mut shortcut_search = ShortcutSearchConfig::default();
     let mut json = false;
     let mut telemetry = false;
     let mut visited_db = None;
@@ -173,7 +177,7 @@ where
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --search-mode MODE       mixed | graph-only (default: mixed)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
-                                              (shortcut-search is currently unintegrated; default: endpoint-search)\n\
+                                              (shortcut-search currently exposes only the Phase 1 boundary; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
                        --guided-max-shortcut-lag N max lag for one guided shortcut search (default: 3)\n\
                        --guided-min-gap N       minimum guide gap to consider for refinement (default: 2)\n\
@@ -181,6 +185,12 @@ where
                        --guided-segment-timeout SECS\n\
                                                max wall-clock seconds for one guided segment search\n\
                        --guided-rounds N        number of refinement rounds per guide (default: 1)\n\
+                       --shortcut-max-guides N  cap the initial shortcut guide working set (default: 32)\n\
+                       --shortcut-rounds N      cap outer shortcut rounds (default: 5)\n\
+                       --shortcut-max-total-segment-attempts N\n\
+                                              cap total segment attempts across the stage (default: 128)\n\
+                       --shortcut-emit-promoted-guides\n\
+                                              request promoted guide artifacts on the generic output surface\n\
                        --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
                        --write-guide-artifact PATH\n\
                                                write a reusable full_path guide artifact JSON file\n\
@@ -234,6 +244,19 @@ where
             "--guided-rounds" => {
                 guided_refinement.rounds = next_parsed(&mut args, "--guided-rounds")?;
             }
+            "--shortcut-max-guides" => {
+                shortcut_search.max_guides = next_parsed(&mut args, "--shortcut-max-guides")?;
+            }
+            "--shortcut-rounds" => {
+                shortcut_search.rounds = next_parsed(&mut args, "--shortcut-rounds")?;
+            }
+            "--shortcut-max-total-segment-attempts" => {
+                shortcut_search.max_total_segment_attempts =
+                    next_parsed(&mut args, "--shortcut-max-total-segment-attempts")?;
+            }
+            "--shortcut-emit-promoted-guides" => {
+                shortcut_search.artifacts.emit_promoted_guides = true;
+            }
             "--visited-db" => {
                 visited_db = Some(args.next().ok_or("--visited-db requires a path")?);
             }
@@ -273,6 +296,7 @@ where
         stage,
         guide_artifact_paths,
         guided_refinement,
+        shortcut_search,
         json,
         telemetry,
         visited_db,
@@ -481,6 +505,51 @@ fn print_telemetry(telemetry: &SearchTelemetry) {
         "  guided refinement rounds: {}",
         telemetry.guided_refinement_rounds
     );
+    println!(
+        "  shortcut guides loaded: {}",
+        telemetry.shortcut_search.guide_artifacts_loaded
+    );
+    println!(
+        "  shortcut guides accepted: {}",
+        telemetry.shortcut_search.guide_artifacts_accepted
+    );
+    println!(
+        "  shortcut unique guides: {}",
+        telemetry.shortcut_search.unique_guides
+    );
+    println!(
+        "  shortcut working set guides: {}",
+        telemetry.shortcut_search.initial_working_set_guides
+    );
+    println!(
+        "  shortcut segment attempts: {}",
+        telemetry.shortcut_search.segment_attempts
+    );
+    println!(
+        "  shortcut segment improvements: {}",
+        telemetry.shortcut_search.segment_improvements
+    );
+    println!(
+        "  shortcut promoted guides: {}",
+        telemetry.shortcut_search.promoted_guides
+    );
+    println!(
+        "  shortcut emitted guides: {}",
+        telemetry.shortcut_search.emitted_guide_artifacts
+    );
+    println!(
+        "  shortcut rounds completed: {}",
+        telemetry.shortcut_search.rounds_completed
+    );
+    println!(
+        "  shortcut best lag: {:?} -> {:?}",
+        telemetry.shortcut_search.best_lag_start,
+        telemetry.shortcut_search.best_lag_end
+    );
+    println!(
+        "  shortcut stop reason: {:?}",
+        telemetry.shortcut_search.stop_reason
+    );
 }
 
 fn print_json(
@@ -661,6 +730,33 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.guided_refinement.segment_timeout_secs, Some(10));
+    }
+
+    #[test]
+    fn parse_cli_accepts_shortcut_boundary_flags() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--stage".to_string(),
+                "shortcut-search".to_string(),
+                "--shortcut-max-guides".to_string(),
+                "8".to_string(),
+                "--shortcut-rounds".to_string(),
+                "2".to_string(),
+                "--shortcut-max-total-segment-attempts".to_string(),
+                "16".to_string(),
+                "--shortcut-emit-promoted-guides".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.stage, SearchStage::ShortcutSearch);
+        assert_eq!(cli.shortcut_search.max_guides, 8);
+        assert_eq!(cli.shortcut_search.rounds, 2);
+        assert_eq!(cli.shortcut_search.max_total_segment_attempts, 16);
+        assert!(cli.shortcut_search.artifacts.emit_promoted_guides);
     }
 
     #[test]

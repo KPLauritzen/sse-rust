@@ -20,7 +20,7 @@ use crate::types::{
     GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
     GuideArtifactValidation, GuidedRefinementConfig, SearchConfig, SearchDirection,
     SearchLayerTelemetry, SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, SsePath, SseResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -136,6 +136,7 @@ fn search_request(
         stage,
         guide_artifacts: Vec::new(),
         guided_refinement: GuidedRefinementConfig::default(),
+        shortcut_search: ShortcutSearchConfig::default(),
     }
 }
 
@@ -170,10 +171,31 @@ pub fn execute_search_request_and_observer(
             }
         }
         SearchStage::GuidedRefinement => search_guided_refinement_with_observer(request, observer),
-        SearchStage::ShortcutSearch => {
-            Err("shortcut_search is not integrated into the generic solver yet".to_string())
-        }
+        SearchStage::ShortcutSearch => search_shortcut_search_with_observer(request, observer),
     }
+}
+
+fn search_shortcut_search_with_observer(
+    request: &SearchRequest,
+    _observer: Option<&mut dyn SearchObserver>,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    if !request.source.is_square() || !request.target.is_square() {
+        return Err("shortcut_search requires square source and target matrices".to_string());
+    }
+    if request.shortcut_search.max_guides == 0 {
+        return Err("shortcut_search requires max_guides >= 1".to_string());
+    }
+    if request.shortcut_search.rounds == 0 {
+        return Err("shortcut_search requires rounds >= 1".to_string());
+    }
+    if request.shortcut_search.max_total_segment_attempts == 0 {
+        return Err("shortcut_search requires max_total_segment_attempts >= 1".to_string());
+    }
+
+    Err(
+        "shortcut_search Phase 1 defines the stage boundary only; the iterative guide-pool loop is not implemented yet"
+            .to_string(),
+    )
 }
 
 fn emit_started(
@@ -3222,6 +3244,7 @@ mod tests {
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("direct-guide", guide)],
             guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
         };
 
         let (result, telemetry) = execute_search_request(&request).unwrap();
@@ -3267,6 +3290,7 @@ mod tests {
                 rounds: 1,
                 segment_timeout_secs: None,
             },
+            shortcut_search: ShortcutSearchConfig::default(),
         };
 
         let (result, telemetry) = execute_search_request(&request).unwrap();
@@ -3312,6 +3336,7 @@ mod tests {
                 rounds: 1,
                 segment_timeout_secs: Some(0),
             },
+            shortcut_search: ShortcutSearchConfig::default(),
         };
 
         let (result, telemetry) = execute_search_request(&request).unwrap();
@@ -3324,6 +3349,43 @@ mod tests {
         }
         assert_eq!(telemetry.guided_segments_considered, 1);
         assert_eq!(telemetry.guided_segments_improved, 0);
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_accepts_square_endpoint_shapes_before_stub_exit() {
+        let a = DynMatrix::new(
+            4,
+            4,
+            vec![1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 2, 0, 1, 0, 0, 1],
+        );
+        let request = SearchRequest {
+            source: a.clone(),
+            target: a,
+            config: default_config(),
+            stage: SearchStage::ShortcutSearch,
+            guide_artifacts: Vec::new(),
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        };
+
+        let err = execute_search_request(&request).unwrap_err();
+        assert!(err.contains("Phase 1 defines the stage boundary only"));
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_rejects_rectangular_endpoints() {
+        let request = SearchRequest {
+            source: DynMatrix::new(2, 3, vec![1, 0, 1, 0, 1, 0]),
+            target: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            config: default_config(),
+            stage: SearchStage::ShortcutSearch,
+            guide_artifacts: Vec::new(),
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        };
+
+        let err = execute_search_request(&request).unwrap_err();
+        assert_eq!(err, "shortcut_search requires square source and target matrices");
     }
 
     #[test]

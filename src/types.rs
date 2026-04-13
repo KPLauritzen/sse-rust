@@ -126,6 +126,59 @@ impl Default for GuidedRefinementConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutGuideRankingPolicy {
+    #[default]
+    LagCostScoreThenStable,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutPromotionPolicy {
+    #[default]
+    ImprovedOnly,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShortcutSearchArtifactOutputConfig {
+    /// Request that improved full-path guides be emitted on the generic surface.
+    pub emit_promoted_guides: bool,
+    /// Compatibility tags to attach to emitted guides. Empty means stage-agnostic.
+    pub supported_stages: Vec<SearchStage>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShortcutSearchConfig {
+    /// Hard cap on guides admitted to the initial ranked working set.
+    pub max_guides: usize,
+    /// Stable ranking policy for guide-pool admission.
+    pub ranking: ShortcutGuideRankingPolicy,
+    /// Maximum outer shortcut-search rounds.
+    pub rounds: usize,
+    /// Hard cap across all segment attempts in one stage invocation.
+    pub max_total_segment_attempts: usize,
+    /// Promotion rule for improved guides between rounds.
+    pub promotion: ShortcutPromotionPolicy,
+    /// Output policy for promoted guides produced by the stage.
+    pub artifacts: ShortcutSearchArtifactOutputConfig,
+}
+
+impl Default for ShortcutSearchConfig {
+    fn default() -> Self {
+        Self {
+            max_guides: 32,
+            ranking: ShortcutGuideRankingPolicy::LagCostScoreThenStable,
+            rounds: 5,
+            max_total_segment_attempts: 128,
+            promotion: ShortcutPromotionPolicy::ImprovedOnly,
+            artifacts: ShortcutSearchArtifactOutputConfig::default(),
+        }
+    }
+}
+
 /// Configuration for the SSE search.
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -160,6 +213,7 @@ pub struct SearchRequest {
     pub stage: SearchStage,
     pub guide_artifacts: Vec<GuideArtifact>,
     pub guided_refinement: GuidedRefinementConfig,
+    pub shortcut_search: ShortcutSearchConfig,
 }
 
 /// One elementary SSE step: A = UV, B = VU.
@@ -333,6 +387,43 @@ pub struct SearchLayerTelemetry {
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutSearchStopReason {
+    GuidePoolExhausted,
+    NoImprovementRound,
+    MaxRoundsReached,
+    MaxSegmentAttemptsReached,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ShortcutSearchRoundTelemetry {
+    pub round_index: usize,
+    pub working_set_guides: usize,
+    pub starting_best_lag: Option<usize>,
+    pub ending_best_lag: Option<usize>,
+    pub segment_attempts: usize,
+    pub segment_improvements: usize,
+    pub promoted_guides: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ShortcutSearchTelemetry {
+    pub guide_artifacts_loaded: usize,
+    pub guide_artifacts_accepted: usize,
+    pub unique_guides: usize,
+    pub initial_working_set_guides: usize,
+    pub segment_attempts: usize,
+    pub segment_improvements: usize,
+    pub promoted_guides: usize,
+    pub emitted_guide_artifacts: usize,
+    pub rounds_completed: usize,
+    pub best_lag_start: Option<usize>,
+    pub best_lag_end: Option<usize>,
+    pub stop_reason: Option<ShortcutSearchStopReason>,
+    pub rounds: Vec<ShortcutSearchRoundTelemetry>,
+}
+
 /// Aggregate telemetry for a full `search_sse_2x2` invocation.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SearchTelemetry {
@@ -361,6 +452,7 @@ pub struct SearchTelemetry {
     pub guided_segments_considered: usize,
     pub guided_segments_improved: usize,
     pub guided_refinement_rounds: usize,
+    pub shortcut_search: ShortcutSearchTelemetry,
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
     pub layers: Vec<SearchLayerTelemetry>,
 }
@@ -371,7 +463,8 @@ mod tests {
         DynMatrix, DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility,
         GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance,
         GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, SearchMode,
-        SearchStage, SsePath,
+        SearchStage, ShortcutGuideRankingPolicy, ShortcutPromotionPolicy, ShortcutSearchConfig,
+        SsePath,
     };
     use crate::matrix::SqMatrix;
 
@@ -472,5 +565,43 @@ mod tests {
         assert_eq!(config.max_gap, Some(2));
         assert_eq!(config.rounds, 1);
         assert_eq!(config.segment_timeout_secs, None);
+    }
+
+    #[test]
+    fn test_shortcut_search_config_defaults() {
+        let config = ShortcutSearchConfig::default();
+        assert_eq!(config.max_guides, 32);
+        assert_eq!(
+            config.ranking,
+            ShortcutGuideRankingPolicy::LagCostScoreThenStable
+        );
+        assert_eq!(config.rounds, 5);
+        assert_eq!(config.max_total_segment_attempts, 128);
+        assert_eq!(config.promotion, ShortcutPromotionPolicy::ImprovedOnly);
+        assert!(!config.artifacts.emit_promoted_guides);
+        assert!(config.artifacts.supported_stages.is_empty());
+    }
+
+    #[test]
+    fn test_shortcut_search_config_deserializes_missing_artifact_stage_list() {
+        let config: ShortcutSearchConfig = serde_json::from_str(
+            r#"{
+                "max_guides": 8,
+                "ranking": "lag_cost_score_then_stable",
+                "rounds": 2,
+                "max_total_segment_attempts": 16,
+                "promotion": "improved_only",
+                "artifacts": {
+                    "emit_promoted_guides": true
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.max_guides, 8);
+        assert_eq!(config.rounds, 2);
+        assert_eq!(config.max_total_segment_attempts, 16);
+        assert!(config.artifacts.emit_promoted_guides);
+        assert!(config.artifacts.supported_stages.is_empty());
     }
 }

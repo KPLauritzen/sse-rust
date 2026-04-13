@@ -13,7 +13,7 @@ use sse_core::types::{
     DynSsePath, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
     GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
     GuidedRefinementConfig, SearchConfig, SearchMode, SearchRequest, SearchRunResult, SearchStage,
-    SearchTelemetry,
+    SearchTelemetry, ShortcutSearchConfig,
 };
 
 #[derive(Debug)]
@@ -82,6 +82,8 @@ struct JsonSearchConfig {
     stage: SearchStage,
     #[serde(default)]
     guided_refinement: GuidedRefinementConfig,
+    #[serde(default)]
+    shortcut_search: ShortcutSearchConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -695,6 +697,7 @@ fn materialize_seeded_guide_artifact(
             stage: SearchStage::EndpointSearch,
             guide_artifacts: Vec::new(),
             guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
         };
         let (result, _telemetry) = execute_search_request(&request).map_err(|err| {
             format!(
@@ -955,6 +958,7 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
         stage: case.config.stage,
         guide_artifacts: resolved.guide_artifacts,
         guided_refinement: case.config.guided_refinement.clone(),
+        shortcut_search: case.config.shortcut_search.clone(),
     };
 
     let (result, telemetry) = match execute_search_request(&request) {
@@ -1218,7 +1222,14 @@ fn stage_combination_label(config: &JsonSearchConfig) -> String {
             config.guided_refinement.rounds,
             config.guided_refinement.segment_timeout_secs,
         ),
-        SearchStage::ShortcutSearch => format!("shortcut_search/{:?}", config.search_mode),
+        SearchStage::ShortcutSearch => format!(
+            "shortcut_search/{:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}",
+            config.search_mode,
+            config.shortcut_search.max_guides,
+            config.shortcut_search.rounds,
+            config.shortcut_search.max_total_segment_attempts,
+            config.shortcut_search.artifacts.emit_promoted_guides,
+        ),
     }
 }
 
@@ -2107,6 +2118,15 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
                 case.config.guided_refinement.rounds,
                 case.config.guided_refinement.segment_timeout_secs,
             ));
+        } else if case.config.stage == SearchStage::ShortcutSearch {
+            out.push_str(&format!(
+                "  shortcut_search: max_guides={} rounds={} max_total_segment_attempts={} emit_promoted_guides={} emitted_supported_stages={:?}\n",
+                case.config.shortcut_search.max_guides,
+                case.config.shortcut_search.rounds,
+                case.config.shortcut_search.max_total_segment_attempts,
+                case.config.shortcut_search.artifacts.emit_promoted_guides,
+                case.config.shortcut_search.artifacts.supported_stages,
+            ));
         }
         out.push_str(&format!(
             "  result: solver={:?} resolution={:?} witness_lag={:?} path_matrices={:?} frontier_layers={}\n",
@@ -2215,6 +2235,7 @@ mod tests {
                 search_mode: SearchMode::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
             },
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
@@ -2260,6 +2281,7 @@ mod tests {
                 search_mode: SearchMode::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
             },
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
@@ -2350,6 +2372,7 @@ mod tests {
                     rounds: 1,
                     segment_timeout_secs: None,
                 },
+                shortcut_search: ShortcutSearchConfig::default(),
             },
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
@@ -2401,6 +2424,7 @@ mod tests {
                     rounds: 1,
                     segment_timeout_secs: None,
                 },
+                shortcut_search: ShortcutSearchConfig::default(),
             },
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
@@ -2453,14 +2477,15 @@ mod tests {
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
                 endpoint: endpoint.clone(),
-                config: JsonSearchConfig {
-                    max_lag: 1,
-                    max_intermediate_dim: 2,
-                    max_entry: 1,
-                    search_mode: SearchMode::Mixed,
-                    stage: SearchStage::EndpointSearch,
-                    guided_refinement: GuidedRefinementConfig::default(),
-                },
+	                config: JsonSearchConfig {
+	                    max_lag: 1,
+	                    max_intermediate_dim: 2,
+	                    max_entry: 1,
+	                    search_mode: SearchMode::Mixed,
+	                    stage: SearchStage::EndpointSearch,
+	                    guided_refinement: GuidedRefinementConfig::default(),
+	                    shortcut_search: ShortcutSearchConfig::default(),
+	                },
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
                 target_outcome: Some("equivalent".to_string()),
@@ -2498,14 +2523,15 @@ mod tests {
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
                 endpoint,
-                config: JsonSearchConfig {
-                    max_lag: 2,
-                    max_intermediate_dim: 2,
-                    max_entry: 2,
-                    search_mode: SearchMode::GraphOnly,
-                    stage: SearchStage::EndpointSearch,
-                    guided_refinement: GuidedRefinementConfig::default(),
-                },
+	                config: JsonSearchConfig {
+	                    max_lag: 2,
+	                    max_intermediate_dim: 2,
+	                    max_entry: 2,
+	                    search_mode: SearchMode::GraphOnly,
+	                    stage: SearchStage::EndpointSearch,
+	                    guided_refinement: GuidedRefinementConfig::default(),
+	                    shortcut_search: ShortcutSearchConfig::default(),
+	                },
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
                 target_outcome: Some("equivalent".to_string()),
@@ -2652,6 +2678,7 @@ mod tests {
                 search_mode: SearchMode::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
             },
             actual_outcome: "unknown".to_string(),
             allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
@@ -2718,14 +2745,15 @@ mod tests {
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
             endpoint: endpoint.clone(),
-            config: JsonSearchConfig {
-                max_lag: 4,
-                max_intermediate_dim: 2,
-                max_entry: 4,
-                search_mode: SearchMode::Mixed,
-                stage: SearchStage::EndpointSearch,
-                guided_refinement: GuidedRefinementConfig::default(),
-            },
+	            config: JsonSearchConfig {
+	                max_lag: 4,
+	                max_intermediate_dim: 2,
+	                max_entry: 4,
+	                search_mode: SearchMode::Mixed,
+	                stage: SearchStage::EndpointSearch,
+	                guided_refinement: GuidedRefinementConfig::default(),
+	                shortcut_search: ShortcutSearchConfig::default(),
+	            },
             actual_outcome: "equivalent".to_string(),
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
