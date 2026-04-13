@@ -6,7 +6,10 @@ use crate::aligned::{
 };
 use crate::factorisation::visit_all_factorisations_with_family;
 use crate::graph_moves::enumerate_graph_move_successors;
-use crate::invariants::check_invariants_2x2;
+use crate::invariants::{
+    check_invariants_2x2, matches_mid_search_invariants_2x2, precompute_mid_search_invariants_2x2,
+    MidSearchInvariantTarget2x2,
+};
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
@@ -569,6 +572,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     // Precompute spectral invariants for pruning intermediates.
     let source_trace = a.trace();
     let source_det = a.det();
+    let mid_search_invariants = precompute_mid_search_invariants_2x2(a);
 
     for layer_index in 0..config.max_lag {
         let next_fwd_depth = fwd_frontier
@@ -635,6 +639,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             config.search_mode,
             source_trace,
             source_det,
+            &mid_search_invariants,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -995,6 +1000,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
 
     let source_trace = a.trace();
     let source_det = a.det();
+    let mid_search_invariants = precompute_mid_search_invariants_2x2(a);
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = 2;
     let mut fwd_candidates_per_node = 1.0f64;
@@ -1109,7 +1115,12 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 if successor.orig_matrix.max_entry() > config.max_entry {
                     continue;
                 }
-                if !is_spectrally_consistent(&successor.orig_matrix, source_trace, source_det) {
+                if !passes_mid_search_pruning_2x2(
+                    &successor.orig_matrix,
+                    source_trace,
+                    source_det,
+                    &mid_search_invariants,
+                ) {
                     layer.pruned_by_spectrum += 1;
                     continue;
                 }
@@ -1618,6 +1629,7 @@ fn expand_frontier_layer(
     search_mode: SearchMode,
     source_trace: u64,
     source_det: i64,
+    mid_search_invariants: &MidSearchInvariantTarget2x2,
 ) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
@@ -1640,7 +1652,12 @@ fn expand_frontier_layer(
 
         for successor in graph_successors.nodes {
             let next = successor.orig_matrix;
-            if !is_spectrally_consistent(&next, source_trace, source_det) {
+            if !passes_mid_search_pruning_2x2(
+                &next,
+                source_trace,
+                source_det,
+                mid_search_invariants,
+            ) {
                 stats.pruned_by_spectrum += 1;
                 continue;
             }
@@ -1676,7 +1693,12 @@ fn expand_frontier_layer(
 
                     // Spectral pruning: nonzero eigenvalues are preserved by SSE,
                     // so every intermediate must have the same nonzero spectrum.
-                    if !is_spectrally_consistent(&next, source_trace, source_det) {
+                    if !passes_mid_search_pruning_2x2(
+                        &next,
+                        source_trace,
+                        source_det,
+                        mid_search_invariants,
+                    ) {
                         stats.pruned_by_spectrum += 1;
                         return;
                     }
@@ -1966,6 +1988,16 @@ fn visited_union_size(
 /// Check whether a candidate intermediate matrix has a nonzero spectrum
 /// consistent with the source matrix. SSE preserves nonzero eigenvalues,
 /// so any intermediate in a valid chain must pass this check.
+fn passes_mid_search_pruning_2x2(
+    candidate: &DynMatrix,
+    source_trace: u64,
+    source_det: i64,
+    target: &MidSearchInvariantTarget2x2,
+) -> bool {
+    is_spectrally_consistent(candidate, source_trace, source_det)
+        && matches_mid_search_invariants_2x2(candidate, target)
+}
+
 fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) -> bool {
     if !vu.is_square() {
         return true; // non-square shouldn't happen, don't filter
@@ -2420,6 +2452,7 @@ mod tests {
         let a_canon = a_dyn.canonical_perm();
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
+        let mid_search_invariants = precompute_mid_search_invariants_2x2(&a);
 
         let (expansions, stats) = expand_frontier_layer(
             &[a_canon],
@@ -2429,6 +2462,7 @@ mod tests {
             SearchMode::Mixed,
             a.trace(),
             a.det(),
+            &mid_search_invariants,
         );
 
         assert!(!expansions.is_empty());
@@ -2442,6 +2476,7 @@ mod tests {
         let a_canon = a_dyn.canonical_perm();
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
+        let mid_search_invariants = precompute_mid_search_invariants_2x2(&a);
 
         let (single_expansions, _) = expand_frontier_layer(
             std::slice::from_ref(&a_canon),
@@ -2451,6 +2486,7 @@ mod tests {
             SearchMode::Mixed,
             a.trace(),
             a.det(),
+            &mid_search_invariants,
         );
         let (duplicate_frontier_expansions, _) = expand_frontier_layer(
             &[a_canon.clone(), a_canon],
@@ -2460,6 +2496,7 @@ mod tests {
             SearchMode::Mixed,
             a.trace(),
             a.det(),
+            &mid_search_invariants,
         );
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
