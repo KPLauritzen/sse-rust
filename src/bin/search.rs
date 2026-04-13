@@ -728,6 +728,7 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 #[cfg(test)]
 mod tests {
     use super::{parse_cli, parse_matrix, run_with_args};
+    use rusqlite::Connection;
     use sse_core::types::{GuideArtifact, GuideArtifactPayload, SearchStage};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -925,6 +926,39 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[test]
+    fn run_with_args_writes_visited_db() {
+        let output_path = temp_sqlite_path("visited-db");
+
+        let exit_code = run_with_args(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--visited-db".to_string(),
+                output_path.display().to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+        assert!(output_path.exists());
+
+        let conn = Connection::open(&output_path).unwrap();
+        let run_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM search_runs", [], |row| row.get(0))
+            .unwrap();
+        let node_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM run_nodes", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(run_count, 1);
+        assert_eq!(node_count, 1);
+
+        drop(conn);
+        cleanup_sqlite_artifacts(&output_path);
+    }
+
     fn temp_output_path(label: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -934,5 +968,22 @@ mod tests {
             "sse-core-search-{label}-{}-{nonce}.json",
             std::process::id()
         ))
+    }
+
+    fn temp_sqlite_path(label: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::current_dir().unwrap().join(format!(
+            "sse-core-search-{label}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
+    }
+
+    fn cleanup_sqlite_artifacts(path: &std::path::Path) {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(format!("{}-wal", path.display()));
+        let _ = fs::remove_file(format!("{}-shm", path.display()));
     }
 }

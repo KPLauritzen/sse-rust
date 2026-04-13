@@ -1,6 +1,8 @@
 /target
 /research/results.tsv
 /research/runs/
+/tmp/*
+!/tmp/.gitkeep
 
 # Beads / Dolt files (added by bd init)
 .beads
