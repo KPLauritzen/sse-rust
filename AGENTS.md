@@ -5,6 +5,7 @@
 - To rebuild the sandbox image for this repo, use `docker build -t my-sandbox -f Dockerfile.sandbox .`. Do not use `workmux sandbox build`; in this setup it rebuilds workmux's embedded default image instead of the repo's `Dockerfile.sandbox`.
 - In this repo's `Dockerfile.sandbox`, the container sets `WORKMUX_SANDBOX=container`. Use that as the positive signal that you are inside the workmux sandbox.
 - In this setup, some commands can still be proxied to the host by workmux host-command plumbing. Treat host paths like `/tmp` carefully: a command run via host tooling may write to host `/tmp`, not the sandbox's `/tmp`. When you need artifacts visible from both sides, prefer writing into the worktree.
+- Use the repo-local `tmp/` directory for scratch artifacts that need to be visible from both sandboxed commands and host-executed tooling. It is intentionally gitignored except for `tmp/.gitkeep`.
 
 ## Project Goals
 
