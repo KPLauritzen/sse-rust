@@ -1,19 +1,23 @@
 use std::process::ExitCode;
+use std::{fs, path::Path};
 
-use sse_core::matrix::{DynMatrix, SqMatrix};
-use sse_core::search::{
-    search_sse_2x2_with_telemetry, search_sse_2x2_with_telemetry_and_observer,
-    search_sse_with_telemetry_dyn, search_sse_with_telemetry_dyn_and_observer,
-};
+use sse_core::matrix::DynMatrix;
+use sse_core::search::{execute_search_request, execute_search_request_and_observer};
 #[cfg(not(target_arch = "wasm32"))]
 use sse_core::sqlite_graph::SqliteGraphRecorder;
-use sse_core::types::{DynSseResult, SearchConfig, SearchMode, SearchTelemetry, SseResult};
+use sse_core::types::{
+    GuideArtifact, GuidedRefinementConfig, SearchConfig, SearchMode, SearchRequest,
+    SearchRunResult, SearchStage, SearchTelemetry,
+};
 
 #[derive(Debug)]
 struct Cli {
     a: DynMatrix,
     b: DynMatrix,
     config: SearchConfig,
+    stage: SearchStage,
+    guide_artifact_paths: Vec<String>,
+    guided_refinement: GuidedRefinementConfig,
     json: bool,
     telemetry: bool,
     visited_db: Option<String>,
@@ -31,53 +35,51 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = parse_cli(std::env::args().skip(1))?;
-    let a_sq = cli.a.to_sq::<2>();
-    let b_sq = cli.b.to_sq::<2>();
+    let mut guide_artifacts = Vec::new();
+    for path in &cli.guide_artifact_paths {
+        guide_artifacts.extend(load_guide_artifacts(path)?);
+    }
+    if cli.stage == SearchStage::GuidedRefinement && guide_artifacts.is_empty() {
+        return Err("guided_refinement requires at least one --guide-artifacts file".to_string());
+    }
+    let request = SearchRequest {
+        source: cli.a.clone(),
+        target: cli.b.clone(),
+        config: cli.config.clone(),
+        stage: cli.stage,
+        guide_artifacts,
+        guided_refinement: cli.guided_refinement.clone(),
+    };
 
     if let Some(path) = cli.visited_db.as_deref() {
-        if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let mut recorder = SqliteGraphRecorder::new(path)?;
-                let (result, telemetry) = search_sse_2x2_with_telemetry_and_observer(
-                    a,
-                    b,
-                    &cli.config,
-                    Some(&mut recorder),
-                );
-                if let Some(err) = recorder.error() {
-                    return Err(format!("failed to persist visited graph to {path}: {err}"));
-                }
-                if cli.json {
-                    print_json_2x2(a, b, &result, &telemetry, cli.telemetry);
-                } else {
-                    print_pretty_2x2(a, b, &result, &telemetry, cli.telemetry);
-                }
-                return exit_code_2x2(result);
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                return Err("--visited-db is not supported on wasm32 targets".to_string());
-            }
-        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut recorder = SqliteGraphRecorder::new(path)?;
-            let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
-                &cli.a,
-                &cli.b,
-                &cli.config,
-                Some(&mut recorder),
-            );
+            let (result, telemetry) =
+                execute_search_request_and_observer(&request, Some(&mut recorder))?;
             if let Some(err) = recorder.error() {
                 return Err(format!("failed to persist visited graph to {path}: {err}"));
             }
             if cli.json {
-                print_json_dyn(&cli.a, &cli.b, &result, &telemetry, cli.telemetry);
+                print_json(
+                    &cli.a,
+                    &cli.b,
+                    cli.stage,
+                    &result,
+                    &telemetry,
+                    cli.telemetry,
+                );
             } else {
-                print_pretty_dyn(&cli.a, &cli.b, &result, &telemetry, cli.telemetry);
+                print_pretty(
+                    &cli.a,
+                    &cli.b,
+                    cli.stage,
+                    &result,
+                    &telemetry,
+                    cli.telemetry,
+                );
             }
-            return exit_code_dyn(result);
+            return Ok(exit_code(&result));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -85,38 +87,36 @@ fn run() -> Result<ExitCode, String> {
         }
     }
 
-    if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
-        let (result, telemetry) = search_sse_2x2_with_telemetry(a, b, &cli.config);
-        if cli.json {
-            print_json_2x2(a, b, &result, &telemetry, cli.telemetry);
-        } else {
-            print_pretty_2x2(a, b, &result, &telemetry, cli.telemetry);
-        }
-        exit_code_2x2(result)
+    let (result, telemetry) = execute_search_request(&request)?;
+    if cli.json {
+        print_json(
+            &cli.a,
+            &cli.b,
+            cli.stage,
+            &result,
+            &telemetry,
+            cli.telemetry,
+        );
     } else {
-        let (result, telemetry) = search_sse_with_telemetry_dyn(&cli.a, &cli.b, &cli.config);
-        if cli.json {
-            print_json_dyn(&cli.a, &cli.b, &result, &telemetry, cli.telemetry);
-        } else {
-            print_pretty_dyn(&cli.a, &cli.b, &result, &telemetry, cli.telemetry);
+        print_pretty(
+            &cli.a,
+            &cli.b,
+            cli.stage,
+            &result,
+            &telemetry,
+            cli.telemetry,
+        );
+    }
+    Ok(exit_code(&result))
+}
+
+fn exit_code(result: &SearchRunResult) -> ExitCode {
+    match result {
+        SearchRunResult::Equivalent(_) | SearchRunResult::EquivalentByConcreteShift(_) => {
+            ExitCode::SUCCESS
         }
-        exit_code_dyn(result)
-    }
-}
-
-fn exit_code_2x2(result: SseResult<2>) -> Result<ExitCode, String> {
-    match result {
-        SseResult::Equivalent(_) | SseResult::EquivalentByConcreteShift(_) => Ok(ExitCode::SUCCESS),
-        SseResult::NotEquivalent(_) => Ok(ExitCode::from(1)),
-        SseResult::Unknown => Ok(ExitCode::from(3)),
-    }
-}
-
-fn exit_code_dyn(result: DynSseResult) -> Result<ExitCode, String> {
-    match result {
-        DynSseResult::Equivalent(_) => Ok(ExitCode::SUCCESS),
-        DynSseResult::NotEquivalent(_) => Ok(ExitCode::from(1)),
-        DynSseResult::Unknown => Ok(ExitCode::from(3)),
+        SearchRunResult::NotEquivalent(_) => ExitCode::from(1),
+        SearchRunResult::Unknown => ExitCode::from(3),
     }
 }
 
@@ -127,6 +127,9 @@ where
     let mut a: Option<DynMatrix> = None;
     let mut b: Option<DynMatrix> = None;
     let mut config = SearchConfig::default();
+    let mut stage = SearchStage::EndpointSearch;
+    let mut guide_artifact_paths = Vec::new();
+    let mut guided_refinement = GuidedRefinementConfig::default();
     let mut json = false;
     let mut telemetry = false;
     let mut visited_db = None;
@@ -146,7 +149,13 @@ where
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --search-mode MODE       mixed | graph-only (default: mixed)\n\
-                       --visited-db PATH        write visited nodes and SSE edges to a sqlite db (2x2 endpoints only)\n\
+                       --stage STAGE            endpoint-search | guided-refinement (default: endpoint-search)\n\
+                       --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
+                       --guided-max-shortcut-lag N max lag for one guided shortcut search (default: 3)\n\
+                       --guided-min-gap N       minimum guide gap to consider for refinement (default: 2)\n\
+                       --guided-max-gap N       maximum guide gap to consider for refinement\n\
+                       --guided-rounds N        number of refinement rounds per guide (default: 1)\n\
+                       --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
                        --json                   output JSON instead of human-readable text\n\
                        --telemetry              include search telemetry in output"
                     .to_string());
@@ -167,6 +176,31 @@ where
                     "graph-only" | "graph_only" => SearchMode::GraphOnly,
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
+            }
+            "--stage" => {
+                let value = args.next().ok_or("--stage requires a value")?;
+                stage = match value.as_str() {
+                    "endpoint-search" | "endpoint_search" => SearchStage::EndpointSearch,
+                    "guided-refinement" | "guided_refinement" => SearchStage::GuidedRefinement,
+                    "shortcut-search" | "shortcut_search" => SearchStage::ShortcutSearch,
+                    _ => return Err(format!("unknown stage: {value}")),
+                };
+            }
+            "--guide-artifacts" => {
+                guide_artifact_paths.push(args.next().ok_or("--guide-artifacts requires a path")?);
+            }
+            "--guided-max-shortcut-lag" => {
+                guided_refinement.max_shortcut_lag =
+                    next_parsed(&mut args, "--guided-max-shortcut-lag")?;
+            }
+            "--guided-min-gap" => {
+                guided_refinement.min_gap = next_parsed(&mut args, "--guided-min-gap")?;
+            }
+            "--guided-max-gap" => {
+                guided_refinement.max_gap = Some(next_parsed(&mut args, "--guided-max-gap")?);
+            }
+            "--guided-rounds" => {
+                guided_refinement.rounds = next_parsed(&mut args, "--guided-rounds")?;
             }
             "--visited-db" => {
                 visited_db = Some(args.next().ok_or("--visited-db requires a path")?);
@@ -198,6 +232,9 @@ where
         a,
         b,
         config,
+        stage,
+        guide_artifact_paths,
+        guided_refinement,
         json,
         telemetry,
         visited_db,
@@ -268,57 +305,21 @@ fn parse_entries(s: &str) -> Result<Vec<u32>, String> {
         .collect()
 }
 
-fn print_pretty_2x2(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    result: &SseResult<2>,
-    telemetry: &SearchTelemetry,
-    show_telemetry: bool,
-) {
-    println!("A = {:?}", a);
-    println!("B = {:?}", b);
-    println!();
-
-    match result {
-        SseResult::Equivalent(path) => {
-            println!("Result: EQUIVALENT ({} step(s))", path.steps.len());
-            println!();
-            for (i, step) in path.steps.iter().enumerate() {
-                println!("Step {}:", i + 1);
-                println!("  U = {}", format_dyn_matrix(&step.u));
-                println!("  V = {}", format_dyn_matrix(&step.v));
-            }
-        }
-        SseResult::EquivalentByConcreteShift(_witness) => {
-            println!("Result: EQUIVALENT (concrete shift witness)");
-        }
-        SseResult::NotEquivalent(reason) => {
-            println!("Result: NOT EQUIVALENT");
-            println!("Reason: {reason}");
-        }
-        SseResult::Unknown => {
-            println!("Result: UNKNOWN (search exhausted)");
-        }
-    }
-
-    if show_telemetry {
-        print_telemetry(telemetry);
-    }
-}
-
-fn print_pretty_dyn(
+fn print_pretty(
     a: &DynMatrix,
     b: &DynMatrix,
-    result: &DynSseResult,
+    stage: SearchStage,
+    result: &SearchRunResult,
     telemetry: &SearchTelemetry,
     show_telemetry: bool,
 ) {
+    println!("Stage = {:?}", stage);
     println!("A = {}", format_dyn_matrix(a));
     println!("B = {}", format_dyn_matrix(b));
     println!();
 
     match result {
-        DynSseResult::Equivalent(path) => {
+        SearchRunResult::Equivalent(path) => {
             println!("Result: EQUIVALENT ({} step(s))", path.steps.len());
             println!();
             for (i, step) in path.steps.iter().enumerate() {
@@ -327,11 +328,14 @@ fn print_pretty_dyn(
                 println!("  V = {}", format_dyn_matrix(&step.v));
             }
         }
-        DynSseResult::NotEquivalent(reason) => {
+        SearchRunResult::EquivalentByConcreteShift(_witness) => {
+            println!("Result: EQUIVALENT (concrete shift witness)");
+        }
+        SearchRunResult::NotEquivalent(reason) => {
             println!("Result: NOT EQUIVALENT");
             println!("Reason: {reason}");
         }
-        DynSseResult::Unknown => {
+        SearchRunResult::Unknown => {
             println!("Result: UNKNOWN (search exhausted)");
         }
     }
@@ -360,51 +364,38 @@ fn print_telemetry(telemetry: &SearchTelemetry) {
     println!("  discovered nodes: {}", telemetry.discovered_nodes);
     println!("  total visited nodes: {}", telemetry.total_visited_nodes);
     println!("  max frontier size: {}", telemetry.max_frontier_size);
-}
-
-fn print_json_2x2(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    result: &SseResult<2>,
-    telemetry: &SearchTelemetry,
-    show_telemetry: bool,
-) {
-    let (outcome, steps, reason) = match result {
-        SseResult::Equivalent(path) => (
-            "equivalent",
-            Some(
-                path.steps
-                    .iter()
-                    .map(step_json)
-                    .collect::<Vec<serde_json::Value>>(),
-            ),
-            None,
-        ),
-        SseResult::EquivalentByConcreteShift(_) => ("equivalent_by_concrete_shift", None, None),
-        SseResult::NotEquivalent(reason) => ("not_equivalent", None, Some(reason.clone())),
-        SseResult::Unknown => ("unknown", None, None),
-    };
-
-    print_json_value(
-        serde_json::json!(a.data),
-        serde_json::json!(b.data),
-        outcome,
-        steps,
-        reason,
-        telemetry,
-        show_telemetry,
+    println!(
+        "  guide artifacts considered: {}",
+        telemetry.guide_artifacts_considered
+    );
+    println!(
+        "  guide artifacts accepted: {}",
+        telemetry.guide_artifacts_accepted
+    );
+    println!(
+        "  guided segments considered: {}",
+        telemetry.guided_segments_considered
+    );
+    println!(
+        "  guided segments improved: {}",
+        telemetry.guided_segments_improved
+    );
+    println!(
+        "  guided refinement rounds: {}",
+        telemetry.guided_refinement_rounds
     );
 }
 
-fn print_json_dyn(
+fn print_json(
     a: &DynMatrix,
     b: &DynMatrix,
-    result: &DynSseResult,
+    stage: SearchStage,
+    result: &SearchRunResult,
     telemetry: &SearchTelemetry,
     show_telemetry: bool,
 ) {
     let (outcome, steps, reason) = match result {
-        DynSseResult::Equivalent(path) => (
+        SearchRunResult::Equivalent(path) => (
             "equivalent",
             Some(
                 path.steps
@@ -414,13 +405,17 @@ fn print_json_dyn(
             ),
             None,
         ),
-        DynSseResult::NotEquivalent(reason) => ("not_equivalent", None, Some(reason.clone())),
-        DynSseResult::Unknown => ("unknown", None, None),
+        SearchRunResult::EquivalentByConcreteShift(_) => {
+            ("equivalent_by_concrete_shift", None, None)
+        }
+        SearchRunResult::NotEquivalent(reason) => ("not_equivalent", None, Some(reason.clone())),
+        SearchRunResult::Unknown => ("unknown", None, None),
     };
 
     print_json_value(
         serde_json::json!(dyn_matrix_to_vecs(a)),
         serde_json::json!(dyn_matrix_to_vecs(b)),
+        stage,
         outcome,
         steps,
         reason,
@@ -432,6 +427,7 @@ fn print_json_dyn(
 fn print_json_value(
     a: serde_json::Value,
     b: serde_json::Value,
+    stage: SearchStage,
     outcome: &str,
     steps: Option<Vec<serde_json::Value>>,
     reason: Option<String>,
@@ -441,6 +437,7 @@ fn print_json_value(
     let mut obj = serde_json::json!({
         "a": a,
         "b": b,
+        "stage": stage,
         "outcome": outcome,
     });
 
@@ -483,6 +480,35 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
     (0..m.rows)
         .map(|r| (0..m.cols).map(|c| m.data[r * m.cols + c]).collect())
         .collect()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum GuideArtifactFile {
+    Artifact(GuideArtifact),
+    Artifacts(Vec<GuideArtifact>),
+    Envelope { artifacts: Vec<GuideArtifact> },
+}
+
+fn load_guide_artifacts(path: impl AsRef<Path>) -> Result<Vec<GuideArtifact>, String> {
+    let path = path.as_ref();
+    let json = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read guide artifacts from {}: {err}",
+            path.display()
+        )
+    })?;
+    let parsed: GuideArtifactFile = serde_json::from_str(&json).map_err(|err| {
+        format!(
+            "failed to parse guide artifacts from {} as JSON: {err}",
+            path.display()
+        )
+    })?;
+    Ok(match parsed {
+        GuideArtifactFile::Artifact(artifact) => vec![artifact],
+        GuideArtifactFile::Artifacts(artifacts) => artifacts,
+        GuideArtifactFile::Envelope { artifacts } => artifacts,
+    })
 }
 
 #[cfg(test)]

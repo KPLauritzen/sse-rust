@@ -190,7 +190,7 @@ impl<const N: usize> SqMatrix64<N> {
 
 // --- Dynamic rectangular matrix ---
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DynMatrix {
     pub rows: usize,
     pub cols: usize,

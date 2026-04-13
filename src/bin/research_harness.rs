@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sse_core::matrix::DynMatrix;
 use sse_core::matrix::SqMatrix;
-use sse_core::search::{search_sse_2x2_with_telemetry, search_sse_with_telemetry_dyn};
+use sse_core::search::{
+    search_sse_2x2_with_telemetry, search_sse_with_telemetry_dyn, validate_sse_path_2x2,
+    validate_sse_path_dyn,
+};
 use sse_core::types::{
     DynSsePath, DynSseResult, SearchConfig, SearchMode, SearchTelemetry, SsePath, SseResult,
 };
@@ -695,70 +698,6 @@ fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
         dim,
         rows.iter().flat_map(|row| row.iter().copied()).collect(),
     ))
-}
-
-fn validate_sse_path_2x2(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    path: &SsePath<2>,
-) -> Result<(), String> {
-    validate_sse_path_dyn(
-        &DynMatrix::from_sq(a),
-        &DynMatrix::from_sq(b),
-        &path.clone().into(),
-    )
-}
-
-fn validate_sse_path_dyn(a: &DynMatrix, b: &DynMatrix, path: &DynSsePath) -> Result<(), String> {
-    if path.steps.is_empty() {
-        if path.matrices.len() != 1 {
-            return Err(format!(
-                "empty-step path should contain exactly one square matrix, got {}",
-                path.matrices.len()
-            ));
-        }
-        if path.matrices[0] != *a || path.matrices[0] != *b {
-            return Err("empty-step path does not match the input matrices".to_string());
-        }
-        return Ok(());
-    }
-
-    let first = &path.steps[0];
-    let first_uv = first.u.mul(&first.v);
-    if first_uv != *a {
-        return Err("first step does not start at A".to_string());
-    }
-
-    let last = path.steps.last().expect("non-empty path has a last step");
-    let last_vu = last.v.mul(&last.u);
-    if last_vu != *b {
-        return Err("last step does not end at B".to_string());
-    }
-
-    for (idx, window) in path.steps.windows(2).enumerate() {
-        let left = window[0].v.mul(&window[0].u);
-        let right = window[1].u.mul(&window[1].v);
-        if left != right {
-            return Err(format!(
-                "step chain breaks between indices {} and {}",
-                idx,
-                idx + 1
-            ));
-        }
-    }
-
-    if let Some(first_matrix) = path.matrices.first() {
-        if *first_matrix != *a {
-            return Err("path.matrices does not start at A".to_string());
-        }
-    }
-    if let Some(last_matrix) = path.matrices.last() {
-        if *last_matrix != *b {
-            return Err("path.matrices does not end at B".to_string());
-        }
-    }
-
-    Ok(())
 }
 
 fn result_model(
