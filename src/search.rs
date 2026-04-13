@@ -28,6 +28,7 @@ struct FrontierExpansion {
     next_orig: DynMatrix,
     step: EsseStep,
     move_family: &'static str,
+    same_future_past_signature: Option<SameFuturePastSignature>,
 }
 
 #[derive(Clone, Default)]
@@ -38,6 +39,7 @@ struct FrontierExpansionStats {
     candidates_generated: usize,
     pruned_by_size: usize,
     pruned_by_spectrum: usize,
+    same_future_past_collisions: usize,
     move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
 }
 
@@ -50,6 +52,23 @@ struct ApproxSignature {
     row_supports: Vec<u8>,
     col_supports: Vec<u8>,
 }
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct SameFuturePastClassSignature {
+    multiplicity: usize,
+    entry_sum: u32,
+    support: u8,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct SameFuturePastSignature {
+    dim: usize,
+    entry_sum: u64,
+    row_classes: Vec<SameFuturePastClassSignature>,
+    col_classes: Vec<SameFuturePastClassSignature>,
+}
+
+const SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD: usize = 8;
 
 #[derive(Clone, Copy, Default)]
 struct FrontierOverlapSignal {
@@ -327,6 +346,8 @@ pub fn search_sse_with_telemetry_dyn(
                 telemetry.collisions_with_seen += collisions_with_seen;
                 telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
                 telemetry.approximate_other_side_hits += approximate_other_side_hits;
+                telemetry.same_future_past_collisions +=
+                    expansion_stats.same_future_past_collisions;
                 telemetry.discovered_nodes += discovered_nodes;
                 let dead_end_nodes = current_frontier
                     .len()
@@ -351,6 +372,7 @@ pub fn search_sse_with_telemetry_dyn(
                     collisions_with_seen,
                     collisions_with_other_frontier,
                     approximate_other_side_hits,
+                    same_future_past_collisions: expansion_stats.same_future_past_collisions,
                     discovered_nodes,
                     dead_end_nodes,
                     enqueued_nodes,
@@ -394,6 +416,7 @@ pub fn search_sse_with_telemetry_dyn(
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
+        telemetry.same_future_past_collisions += expansion_stats.same_future_past_collisions;
         let overlap_signal = FrontierOverlapSignal::from_layer(
             expansion_stats.frontier_nodes,
             approximate_other_side_hits,
@@ -427,6 +450,7 @@ pub fn search_sse_with_telemetry_dyn(
             collisions_with_seen,
             collisions_with_other_frontier,
             approximate_other_side_hits,
+            same_future_past_collisions: expansion_stats.same_future_past_collisions,
             discovered_nodes,
             dead_end_nodes,
             enqueued_nodes,
@@ -751,6 +775,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 telemetry.collisions_with_seen += collisions_with_seen;
                 telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
                 telemetry.approximate_other_side_hits += approximate_other_side_hits;
+                telemetry.same_future_past_collisions +=
+                    expansion_stats.same_future_past_collisions;
                 telemetry.discovered_nodes += discovered_nodes;
                 let dead_end_nodes = current_frontier
                     .len()
@@ -797,6 +823,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     collisions_with_seen,
                     collisions_with_other_frontier,
                     approximate_other_side_hits,
+                    same_future_past_collisions: expansion_stats.same_future_past_collisions,
                     discovered_nodes,
                     dead_end_nodes,
                     enqueued_nodes,
@@ -861,6 +888,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
+        telemetry.same_future_past_collisions += expansion_stats.same_future_past_collisions;
         let overlap_signal = FrontierOverlapSignal::from_layer(
             expansion_stats.frontier_nodes,
             approximate_other_side_hits,
@@ -897,6 +925,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             collisions_with_seen,
             collisions_with_other_frontier,
             approximate_other_side_hits,
+            same_future_past_collisions: expansion_stats.same_future_past_collisions,
             discovered_nodes,
             dead_end_nodes,
             enqueued_nodes,
@@ -1083,6 +1112,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
+        let mut same_future_past_seen = HashSet::new();
 
         for (current_canon, successors) in computed {
             let current_orig = orig
@@ -1142,6 +1172,17 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                     continue;
                 }
 
+                if current_frontier_len >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD
+                    && successor.matrix.rows >= 3
+                {
+                    if let Some(signature) = same_future_past_signature(&successor.matrix) {
+                        if !same_future_past_seen.insert(signature) {
+                            layer.same_future_past_collisions += 1;
+                            continue;
+                        }
+                    }
+                }
+
                 parent.insert(
                     successor.matrix.clone(),
                     Some((current_canon.clone(), successor.step.clone())),
@@ -1171,6 +1212,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                         telemetry.collisions_with_seen += layer.collisions_with_seen;
                         telemetry.collisions_with_other_frontier +=
                             layer.collisions_with_other_frontier;
+                        telemetry.same_future_past_collisions += layer.same_future_past_collisions;
                         telemetry.discovered_nodes += layer.discovered_nodes;
                         telemetry.dead_end_nodes += layer.dead_end_nodes;
                         telemetry.enqueued_nodes += layer.enqueued_nodes;
@@ -1258,6 +1300,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         telemetry.candidates_after_pruning += layer.candidates_after_pruning;
         telemetry.collisions_with_seen += layer.collisions_with_seen;
         telemetry.collisions_with_other_frontier += layer.collisions_with_other_frontier;
+        telemetry.same_future_past_collisions += layer.same_future_past_collisions;
         telemetry.discovered_nodes += layer.discovered_nodes;
         telemetry.dead_end_nodes += layer.dead_end_nodes;
         telemetry.enqueued_nodes += layer.enqueued_nodes;
@@ -1390,6 +1433,7 @@ fn search_graph_only_dyn_with_telemetry(
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
+        let mut same_future_past_seen = HashSet::new();
 
         for (current_canon, successors) in computed {
             layer.candidates_generated += successors.candidates;
@@ -1432,6 +1476,17 @@ fn search_graph_only_dyn_with_telemetry(
                     continue;
                 }
 
+                if current_frontier_len >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD
+                    && successor.matrix.rows >= 3
+                {
+                    if let Some(signature) = same_future_past_signature(&successor.matrix) {
+                        if !same_future_past_seen.insert(signature) {
+                            layer.same_future_past_collisions += 1;
+                            continue;
+                        }
+                    }
+                }
+
                 parent.insert(
                     successor.matrix.clone(),
                     Some((current_canon.clone(), successor.step.clone())),
@@ -1456,6 +1511,7 @@ fn search_graph_only_dyn_with_telemetry(
                         telemetry.collisions_with_seen += layer.collisions_with_seen;
                         telemetry.collisions_with_other_frontier +=
                             layer.collisions_with_other_frontier;
+                        telemetry.same_future_past_collisions += layer.same_future_past_collisions;
                         telemetry.discovered_nodes += layer.discovered_nodes;
                         layer.dead_end_nodes =
                             current_frontier_len.saturating_sub(parents_with_progress.len());
@@ -1505,6 +1561,7 @@ fn search_graph_only_dyn_with_telemetry(
         telemetry.candidates_after_pruning += layer.candidates_after_pruning;
         telemetry.collisions_with_seen += layer.collisions_with_seen;
         telemetry.collisions_with_other_frontier += layer.collisions_with_other_frontier;
+        telemetry.same_future_past_collisions += layer.same_future_past_collisions;
         telemetry.discovered_nodes += layer.discovered_nodes;
         telemetry.dead_end_nodes += layer.dead_end_nodes;
         telemetry.enqueued_nodes += layer.enqueued_nodes;
@@ -1646,15 +1703,18 @@ fn expand_frontier_layer(
                 stats.pruned_by_spectrum += 1;
                 continue;
             }
-            if !seen_successors.insert(successor.matrix.clone()) {
+            let next_canon = successor.matrix;
+            if !seen_successors.insert(next_canon.clone()) {
                 continue;
             }
+            let same_future_past_signature = same_future_past_signature(&next_canon);
             expansions.push(FrontierExpansion {
                 parent_canon: current_canon.clone(),
-                next_canon: successor.matrix,
+                next_canon,
                 next_orig: next,
                 step: successor.step,
                 move_family: successor.family,
+                same_future_past_signature,
             });
         }
 
@@ -1694,6 +1754,7 @@ fn expand_frontier_layer(
                         next_orig: next,
                         step,
                         move_family,
+                        same_future_past_signature: None,
                     });
                 },
             );
@@ -1712,7 +1773,11 @@ fn expand_frontier_layer(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        let deduped = deduplicate_expansions(expansions);
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(
+            expansions,
+            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
+        );
+        stats.same_future_past_collisions = same_future_past_collisions;
         record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
         (deduped, stats)
     }
@@ -1725,7 +1790,11 @@ fn expand_frontier_layer(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        let deduped = deduplicate_expansions(expansions);
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(
+            expansions,
+            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
+        );
+        stats.same_future_past_collisions = same_future_past_collisions;
         record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
         (deduped, stats)
     }
@@ -1765,15 +1834,18 @@ fn expand_frontier_layer_dyn(
                 stats.pruned_by_spectrum += 1;
                 continue;
             }
-            if !seen_successors.insert(successor.matrix.clone()) {
+            let next_canon = successor.matrix;
+            if !seen_successors.insert(next_canon.clone()) {
                 continue;
             }
+            let same_future_past_signature = same_future_past_signature(&next_canon);
             expansions.push(FrontierExpansion {
                 parent_canon: current_canon.clone(),
-                next_canon: successor.matrix,
+                next_canon,
                 next_orig: next,
                 step: successor.step,
                 move_family: successor.family,
+                same_future_past_signature,
             });
         }
 
@@ -1810,6 +1882,7 @@ fn expand_frontier_layer_dyn(
                         next_orig: next,
                         step,
                         move_family,
+                        same_future_past_signature: None,
                     });
                 },
             );
@@ -1828,7 +1901,11 @@ fn expand_frontier_layer_dyn(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        let deduped = deduplicate_expansions(expansions);
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(
+            expansions,
+            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
+        );
+        stats.same_future_past_collisions = same_future_past_collisions;
         record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
         (deduped, stats)
     }
@@ -1841,21 +1918,40 @@ fn expand_frontier_layer_dyn(
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
-        let deduped = deduplicate_expansions(expansions);
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(
+            expansions,
+            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
+        );
+        stats.same_future_past_collisions = same_future_past_collisions;
         record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
         (deduped, stats)
     }
 }
 
-fn deduplicate_expansions(expansions: Vec<FrontierExpansion>) -> Vec<FrontierExpansion> {
+fn deduplicate_expansions(
+    expansions: Vec<FrontierExpansion>,
+    enable_same_future_past_representatives: bool,
+) -> (Vec<FrontierExpansion>, usize) {
     let mut seen = HashSet::new();
+    let mut same_future_past_seen = HashSet::new();
     let mut deduped = Vec::with_capacity(expansions.len());
+    let mut same_future_past_collisions = 0usize;
     for expansion in expansions {
-        if seen.insert(expansion.next_canon.clone()) {
-            deduped.push(expansion);
+        if seen.contains(&expansion.next_canon) {
+            continue;
         }
+        if enable_same_future_past_representatives && expansion.next_canon.rows >= 3 {
+            if let Some(signature) = expansion.same_future_past_signature.as_ref() {
+                if !same_future_past_seen.insert(signature.clone()) {
+                    same_future_past_collisions += 1;
+                    continue;
+                }
+            }
+        }
+        seen.insert(expansion.next_canon.clone());
+        deduped.push(expansion);
     }
-    deduped
+    (deduped, same_future_past_collisions)
 }
 
 fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &FrontierExpansionStats) {
@@ -1904,6 +2000,58 @@ fn approx_signature(m: &DynMatrix) -> ApproxSignature {
         row_supports,
         col_supports,
     }
+}
+
+fn same_future_past_signature(m: &DynMatrix) -> Option<SameFuturePastSignature> {
+    if !m.is_square() {
+        return None;
+    }
+
+    let mut entry_sum = 0u64;
+    let mut row_vectors = Vec::with_capacity(m.rows);
+    for row in 0..m.rows {
+        let mut values = Vec::with_capacity(m.cols);
+        for col in 0..m.cols {
+            let value = m.get(row, col);
+            entry_sum += value as u64;
+            values.push(value);
+        }
+        row_vectors.push(values);
+    }
+
+    let mut col_vectors = Vec::with_capacity(m.cols);
+    for col in 0..m.cols {
+        let mut values = Vec::with_capacity(m.rows);
+        for row in 0..m.rows {
+            values.push(m.get(row, col));
+        }
+        col_vectors.push(values);
+    }
+
+    Some(SameFuturePastSignature {
+        dim: m.rows,
+        entry_sum,
+        row_classes: duplicate_vector_classes(&row_vectors),
+        col_classes: duplicate_vector_classes(&col_vectors),
+    })
+}
+
+fn duplicate_vector_classes(vectors: &[Vec<u32>]) -> Vec<SameFuturePastClassSignature> {
+    let mut multiplicities = BTreeMap::<Vec<u32>, usize>::new();
+    for values in vectors {
+        *multiplicities.entry(values.clone()).or_default() += 1;
+    }
+
+    let mut classes = multiplicities
+        .into_iter()
+        .map(|(values, multiplicity)| SameFuturePastClassSignature {
+            multiplicity,
+            entry_sum: values.iter().copied().sum(),
+            support: values.iter().filter(|&&value| value > 0).count() as u8,
+        })
+        .collect::<Vec<_>>();
+    classes.sort_unstable();
+    classes
 }
 
 fn move_family_telemetry_mut<'a>(
@@ -2524,6 +2672,65 @@ mod tests {
         let a = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 2, 1, 0, 1]);
         let b = DynMatrix::new(3, 3, vec![1, 0, 2, 0, 2, 1, 1, 1, 0]);
         assert_eq!(approx_signature(&a), approx_signature(&b));
+    }
+
+    #[test]
+    fn test_same_future_past_signature_matches_duplicate_class_profiles() {
+        let a = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 1, 1]);
+        let b = DynMatrix::new(3, 3, vec![1, 0, 1, 1, 0, 1, 0, 1, 1]);
+
+        assert_eq!(
+            same_future_past_signature(&a),
+            same_future_past_signature(&b)
+        );
+    }
+
+    #[test]
+    fn test_same_future_past_representative_selection_only_collapses_graph_moves() {
+        let parent = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let graph_a = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 1, 1]);
+        let graph_b = DynMatrix::new(3, 3, vec![1, 0, 1, 1, 0, 1, 0, 1, 1]);
+        let factorised = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 1, 1, 0, 1]);
+        let graph_a_signature = same_future_past_signature(&graph_a);
+        let graph_b_signature = same_future_past_signature(&graph_b);
+        let dummy_step = EsseStep {
+            u: DynMatrix::new(1, 1, vec![1]),
+            v: DynMatrix::new(1, 1, vec![1]),
+        };
+        let expansions = vec![
+            FrontierExpansion {
+                parent_canon: parent.clone(),
+                next_canon: graph_a.clone(),
+                next_orig: graph_a,
+                step: dummy_step.clone(),
+                move_family: "graph_a",
+                same_future_past_signature: graph_a_signature,
+            },
+            FrontierExpansion {
+                parent_canon: parent.clone(),
+                next_canon: graph_b.clone(),
+                next_orig: graph_b.clone(),
+                step: dummy_step.clone(),
+                move_family: "graph_b",
+                same_future_past_signature: graph_b_signature,
+            },
+            FrontierExpansion {
+                parent_canon: parent,
+                next_canon: factorised.clone(),
+                next_orig: factorised,
+                step: dummy_step,
+                move_family: "factorised",
+                same_future_past_signature: None,
+            },
+        ];
+
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(expansions, true);
+
+        assert_eq!(same_future_past_collisions, 1);
+        assert_eq!(deduped.len(), 2);
+        assert!(deduped
+            .iter()
+            .any(|expansion| expansion.move_family == "factorised"));
     }
 
     // --- Literature examples ---

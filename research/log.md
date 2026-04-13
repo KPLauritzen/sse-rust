@@ -199,3 +199,6 @@
 
 - `main-search-graph-hash` Swapped the main `src/search.rs` visited/frontier maps to `AHashMap`/`AHashSet`.
   Kept. Profiling the in-harness graph-only `brix_ruiz_k3` case showed large-state bookkeeping dominating runtime; the faster hash tables cut that case from about `9.6s` to `8.75s` and reduced total harness time from `11.37s` to `10.51s` with identical outcomes.
+
+- `2026-04-13-same-future-past-graph-reps` Added same-future/past quotient signatures and used them for layer-local graph representative selection.
+  Kept. Mixed probes were unchanged, but `brix_ruiz_k3_graph_only` collapsed `431401` graph successors under the new quotient and the saved harness run dropped from `12827 ms` to `12563 ms` overall.
