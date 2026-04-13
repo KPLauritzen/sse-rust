@@ -23,6 +23,9 @@ This repo now uses three documentation layers with different jobs:
   proposes promoting refinement and shortcutting into the main solver/CLI so
   the hard `k = 3` and `k >= 4` search cases become first-class product
   behavior rather than sidecar-only workflows.
+- [`rfc-shortcut-search-stage.md`](rfc-shortcut-search-stage.md) proposes the
+  missing generic `shortcut_search` stage as an artifact-driven outer loop
+  built on top of `guided_refinement`.
 
 ## Rules Of Thumb
 
