@@ -4,12 +4,12 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/nudge-workmux-agent.sh <handle> [iterations] [sleep_seconds] [message]
+Usage: scripts/nudge-workmux-agent.sh <handle> [iterations] [sleep_seconds] [message...]
 
 Defaults:
   iterations:    12
   sleep_seconds: 600
-  message:       continue working
+  message:       a multiline continue-working instruction
 
 Example:
   scripts/nudge-workmux-agent.sh optimize-program-md-longrun
@@ -25,7 +25,12 @@ fi
 handle="${1:-}"
 iterations="${2:-12}"
 sleep_seconds="${3:-600}"
-message="${4:-continue working}"
+shift $(( $# >= 3 ? 3 : $# ))
+if (( $# > 0 )); then
+  message="$*"
+else
+  message=$'Continue working.\nIf you think you are done, pick the next highest-leverage optimization step from research/program.md and keep going without waiting for user input.\nPrefer profiling and measurement first so you cut in the right place.'
+fi
 
 if [[ -z "$handle" ]]; then
   usage >&2
