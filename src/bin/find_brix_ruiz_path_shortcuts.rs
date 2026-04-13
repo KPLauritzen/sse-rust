@@ -1,3 +1,6 @@
+// Retired from Cargo targets in RFC Phase 6.
+// Kept in-tree as a historical reference for older research notes.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;

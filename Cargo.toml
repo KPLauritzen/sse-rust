@@ -45,11 +45,6 @@ inherits = "release"
 lto = true
 
 [[bin]]
-name = "brix_ruiz_k3"
-path = "src/bin/brix_ruiz_k3.rs"
-required-features = ["research-tools"]
-
-[[bin]]
 name = "check_lind_marcus_path"
 path = "src/bin/check_lind_marcus_path.rs"
 required-features = ["research-tools"]
@@ -67,16 +62,6 @@ required-features = ["research-tools"]
 [[bin]]
 name = "find_balanced"
 path = "src/bin/find_balanced.rs"
-required-features = ["research-tools"]
-
-[[bin]]
-name = "find_brix_ruiz_graph_path"
-path = "src/bin/find_brix_ruiz_graph_path.rs"
-required-features = ["research-tools"]
-
-[[bin]]
-name = "find_brix_ruiz_path_shortcuts"
-path = "src/bin/find_brix_ruiz_path_shortcuts.rs"
 required-features = ["research-tools"]
 
 [[bin]]

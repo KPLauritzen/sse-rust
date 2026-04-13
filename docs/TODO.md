@@ -24,8 +24,9 @@ The hard benchmark remains the Brix-Ruiz family, especially `k=3` and above.
 ## Status Corrections
 
 - `graph-only` mode is already implemented in the main solver.
-  `SearchMode` exists, `search_sse_2x2` dispatches to a graph-only path, and the
-  `brix_ruiz_k3` binary exposes `--graph-only` / `--search-mode`.
+  `SearchMode` exists, `search_sse_2x2` dispatches to a graph-only path, the
+  `search` CLI exposes `--search-mode`, and the harness carries explicit
+  `brix_ruiz_k3_graph_only` coverage.
 
 - Matrix-level concrete-shift work is no longer "missing".
   [`src/aligned.rs`](../src/aligned.rs) now contains aligned, balanced, and
@@ -53,15 +54,14 @@ What is already done:
 
 - a real search-mode switch exists,
 - graph-only search runs through the main solver,
+- the harness already compares `mixed` and `graph-only` Brix-Ruiz cases in the
+  normal research workflow,
 - Lind-Marcus waypoint reproduction exists as a dedicated graph-only tool,
 - an ignored regression asserts graph-only search finds the known
   `brix_ruiz_k3` path.
 
 What is still missing:
 
-- add explicit harness comparisons for `mixed` vs `graph-only`,
-- record those comparisons in the normal research workflow rather than only in
-  sidecar tools and logs,
 - decide whether graph-only remains a diagnostic mode or becomes a first-class
   benchmark target.
 
