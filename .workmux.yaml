@@ -210,6 +210,8 @@ sandbox:
   extra_mounts:
     - host_path: .beads
       writable: true
+    - host_path: target
+      writable: true
 #   backend: lima
 #   # host_commands: ["just", "cargo", "npm"]
 #   # container:
