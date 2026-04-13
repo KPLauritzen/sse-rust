@@ -192,6 +192,7 @@ The generic design should keep that lesson explicit:
 
 - segment budgets are a core control surface,
 - guide-pool size is a core control surface,
+- total segment-attempt budget is a core control surface,
 - and per-round stopping conditions are a core control surface.
 
 ## Proposal
@@ -206,6 +207,7 @@ stages, plus a shortcut-specific configuration that controls:
 - number of shortcut rounds,
 - per-guide rounds,
 - per-segment timeout,
+- maximum total segment attempts,
 - per-round promotion policy,
 - and optional artifact output targets.
 
@@ -243,11 +245,31 @@ The first version should support:
 - a `--guide-artifact-dir DIR` style input for loading many artifacts,
 - and one or more output paths or directories for improved artifacts.
 
-Guide identity should be generic.
-At minimum the implementation should deduplicate by endpoint identity plus a
-path signature that is stable enough to suppress obvious duplicate witnesses.
+Compatibility should be explicit for the first version.
+`shortcut_search` should accept:
 
-Quality metadata such as lag should drive ranking.
+- stage-agnostic full-path artifacts,
+- artifacts tagged for `shortcut_search`,
+- and legacy full-path artifacts tagged for `guided_refinement`, because the
+  current exported guide pool is still produced in that form.
+
+The first implementation should not require a pre-migration step before the
+existing guide-artifact pool can seed `shortcut_search`.
+Once `shortcut_search` can emit artifacts itself, newly written artifacts
+should either be stage-agnostic or explicitly tagged for both
+`guided_refinement` and `shortcut_search`.
+
+Guide identity should also be concrete for the first version.
+At minimum the implementation should:
+
+- treat endpoint identity as exact requested endpoint identity after
+  orientation and re-anchoring,
+- deduplicate guides by the re-anchored full-path matrix sequence, so reversed
+  or otherwise equivalent imports collapse to one canonical witness,
+- rank guides first by effective lag, then by any explicit cost/score metadata,
+  then by a stable deterministic tie-breaker such as artifact ID or input path,
+- and treat missing lag metadata as "compute lag from the witness" rather than
+  as an undefined ranking case.
 
 ### 4. Add Stage-Level Budgets And Stopping Conditions
 
@@ -258,10 +280,16 @@ At minimum:
 - per-segment timeout,
 - maximum guides processed,
 - maximum rounds,
+- maximum total segment attempts across the whole invocation,
 - and a stop condition when one full round yields no promoted improvements.
 
 The design should assume these budgets are part of normal operation, not only
 emergency guardrails.
+
+For the first generic version, the total segment-attempt bound should be the
+hard global cap.
+Combined with per-segment timeout, that gives one invocation a predictable
+worst-case cost even when guide promotion grows the pool.
 
 ### 5. Expose Progress And Outcome Telemetry
 
@@ -335,6 +363,8 @@ The solver stage should only own one bounded invocation.
 ### Phase 2: Implement Filesystem Guide-Pool Reuse
 
 - load guide artifacts from repeated files plus directories,
+- accept legacy `guided_refinement` full-path artifacts as valid
+  `shortcut_search` seeds,
 - normalize and deduplicate compatible guides,
 - rank them by simple quality rules,
 - and emit improved artifacts generically.
@@ -350,6 +380,8 @@ The solver stage should only own one bounded invocation.
 
 - add fixture-driven shortcut-search cases,
 - compare guide-pool sizes and reuse policies,
+- require at least one non-`2x2` square case in the normal harness comparison
+  flow so endpoint-agnostic behavior has a real regression surface,
 - and reproduce the old bounded Brix-Ruiz shortcut workflow through generic
   stage inputs rather than a family-specific sidecar.
 
