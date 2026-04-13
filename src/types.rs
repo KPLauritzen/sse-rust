@@ -385,6 +385,17 @@ pub struct SearchMoveFamilyTelemetry {
     pub approximate_other_side_hits: usize,
 }
 
+/// Wall-clock timing breakdown for one frontier expansion layer.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct SearchLayerTimingTelemetry {
+    pub total_nanos: u64,
+    pub expand_compute_nanos: u64,
+    pub expand_accumulate_nanos: u64,
+    pub dedup_nanos: u64,
+    pub merge_nanos: u64,
+    pub finalize_nanos: u64,
+}
+
 /// Telemetry captured for one frontier expansion layer.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SearchLayerTelemetry {
@@ -406,6 +417,7 @@ pub struct SearchLayerTelemetry {
     pub enqueued_nodes: usize,
     pub next_frontier_nodes: usize,
     pub total_visited_nodes: usize,
+    pub timing: SearchLayerTimingTelemetry,
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
 }
 
