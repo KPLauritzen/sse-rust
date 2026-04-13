@@ -191,3 +191,8 @@
 
 - `2026-04-12-1656-row-candidate-cache` Cached valid `U` row candidates by target row and reused them for both outer and inner rectangular loops.
   Kept. It preserved the full baseline score while cutting saved-artifact runtime from `26522 ms` to `20277 ms`.
+
+## 2026-04-13
+
+- `worktree` Surveyed Boyle-Kim-Roush, Bilich-Dor-On-Ruiz, Eilers-Ruiz, Eilers-Kiming, Brix, and Brix-Ruiz for bounded solver ideas.
+  Ranked six concrete experiments in `research/notes/2026-04-13-solver-literature-ideas.md`, with quotient-state compression and narrow diagonal-refactorization at the top because they fit the recent cache win/failure pattern and the current frontier-growth bottleneck.
