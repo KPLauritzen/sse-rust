@@ -1,4 +1,4 @@
-# RFC: Generalize The Main Solver And Integrate Guided Search Stages
+# RFC 001: Generalize The Main Solver And Integrate Guided Search Stages
 
 ## Status
 

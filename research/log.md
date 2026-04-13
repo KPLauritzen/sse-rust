@@ -205,3 +205,6 @@
 
 - `2026-04-13-0403-drop-spectrum-prune` Removed redundant mid-search spectrum checks from the main expansion loops after `pprof` showed the hot path was spending time in candidate screening that never actually pruned.
   Kept. The saved harness artifact stayed identical on score and outcomes while dropping total runtime from `14658 ms` to `10601 ms`; `brix_ruiz_k3_graph_only` fell to `9030 ms` and mixed `brix_ruiz_k3` to `458 ms`.
+
+- `guided-segment-timeout` Added generic per-segment timeout support to guided refinement.
+  Kept. `GuidedRefinementConfig` and the `search` CLI now expose an optional `segment_timeout_secs` / `--guided-segment-timeout`, and the generic guided-refinement segment search enforces it with 256-node frontier chunk checks so one hard shortcut attempt no longer monopolizes a run.

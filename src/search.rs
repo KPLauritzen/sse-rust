@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::time::{Duration, Instant};
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
@@ -11,11 +12,15 @@ use crate::graph_moves::enumerate_graph_move_successors;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
+    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
+    SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry,
-    SearchMode, SearchMoveFamilyTelemetry, SearchTelemetry, SsePath, SseResult,
+    DynSsePath, DynSseResult, EsseStep, GuideArtifact, GuideArtifactCompatibility,
+    GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
+    GuideArtifactValidation, GuidedRefinementConfig, SearchConfig, SearchDirection,
+    SearchLayerTelemetry, SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -69,6 +74,7 @@ struct SameFuturePastSignature {
 }
 
 const SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD: usize = 8;
+const TIMED_SEARCH_FRONTIER_CHUNK_SIZE: usize = 256;
 
 #[derive(Clone, Copy, Default)]
 struct FrontierOverlapSignal {
@@ -117,6 +123,607 @@ pub fn search_sse_2x2_with_telemetry(
     search_sse_2x2_with_telemetry_and_observer(a, b, config, None)
 }
 
+fn search_request(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    stage: SearchStage,
+) -> SearchRequest {
+    SearchRequest {
+        source: a.clone(),
+        target: b.clone(),
+        config: config.clone(),
+        stage,
+        guide_artifacts: Vec::new(),
+        guided_refinement: GuidedRefinementConfig::default(),
+    }
+}
+
+/// Execute one search request across the staged solver boundary.
+pub fn execute_search_request(
+    request: &SearchRequest,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    execute_search_request_and_observer(request, None)
+}
+
+/// Execute one search request and optionally stream observer events.
+pub fn execute_search_request_and_observer(
+    request: &SearchRequest,
+    observer: Option<&mut dyn SearchObserver>,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    match request.stage {
+        SearchStage::EndpointSearch => {
+            let a_sq = request.source.to_sq::<2>();
+            let b_sq = request.target.to_sq::<2>();
+            if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
+                let (result, telemetry) =
+                    search_sse_2x2_with_telemetry_and_observer(a, b, &request.config, observer);
+                Ok((result.into(), telemetry))
+            } else {
+                let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
+                    &request.source,
+                    &request.target,
+                    &request.config,
+                    observer,
+                );
+                Ok((result.into(), telemetry))
+            }
+        }
+        SearchStage::GuidedRefinement => search_guided_refinement_with_observer(request, observer),
+        SearchStage::ShortcutSearch => {
+            Err("shortcut_search is not integrated into the generic solver yet".to_string())
+        }
+    }
+}
+
+fn emit_started(
+    observer: &mut Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    a_canonical: &DynMatrix,
+    b_canonical: &DynMatrix,
+) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Started(SearchStartRecord {
+            request: request.clone(),
+            source_canonical: a_canonical.clone(),
+            target_canonical: b_canonical.clone(),
+        }));
+    }
+}
+
+fn emit_roots(observer: &mut Option<&mut dyn SearchObserver>, roots: &[SearchRootRecord]) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Roots(roots.to_vec()));
+    }
+}
+
+fn emit_layer(observer: &mut Option<&mut dyn SearchObserver>, records: &[SearchEdgeRecord]) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Layer(records.to_vec()));
+    }
+}
+
+fn emit_finished(
+    observer: &mut Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    result: SearchRunResult,
+    telemetry: &SearchTelemetry,
+) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Finished(SearchFinishedRecord {
+            request: request.clone(),
+            result,
+            telemetry: telemetry.clone(),
+        }));
+    }
+}
+
+fn finish_search_2x2(
+    mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    result: SseResult<2>,
+    telemetry: SearchTelemetry,
+) -> (SseResult<2>, SearchTelemetry) {
+    emit_finished(&mut observer, request, result.clone().into(), &telemetry);
+    (result, telemetry)
+}
+
+fn finish_search_dyn(
+    mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    result: DynSseResult,
+    telemetry: SearchTelemetry,
+) -> (DynSseResult, SearchTelemetry) {
+    emit_finished(&mut observer, request, result.clone().into(), &telemetry);
+    (result, telemetry)
+}
+
+#[derive(Clone)]
+struct GuidedEdge {
+    from: usize,
+    to: usize,
+    lag: usize,
+    path: DynSsePath,
+}
+
+/// Validate a 2x2 witness path against its endpoints.
+pub fn validate_sse_path_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    path: &SsePath<2>,
+) -> Result<(), String> {
+    validate_sse_path_dyn(
+        &DynMatrix::from_sq(a),
+        &DynMatrix::from_sq(b),
+        &path.clone().into(),
+    )
+}
+
+/// Validate a dynamic witness path against its endpoints.
+pub fn validate_sse_path_dyn(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    path: &DynSsePath,
+) -> Result<(), String> {
+    if path.matrices.len() != path.steps.len() + 1 {
+        return Err(format!(
+            "path contains {} matrices but {} steps",
+            path.matrices.len(),
+            path.steps.len()
+        ));
+    }
+
+    if path.steps.is_empty() {
+        if path.matrices.len() != 1 {
+            return Err(format!(
+                "empty-step path should contain exactly one matrix, got {}",
+                path.matrices.len()
+            ));
+        }
+        if path.matrices[0] != *a || path.matrices[0] != *b {
+            return Err("empty-step path does not match the endpoint matrices".to_string());
+        }
+        return Ok(());
+    }
+
+    if path.matrices.first() != Some(a) {
+        return Err("path.matrices does not start at A".to_string());
+    }
+    if path.matrices.last() != Some(b) {
+        return Err("path.matrices does not end at B".to_string());
+    }
+
+    for (idx, step) in path.steps.iter().enumerate() {
+        let uv = step.u.mul(&step.v);
+        let vu = step.v.mul(&step.u);
+        if uv != path.matrices[idx] {
+            return Err(format!("step {idx} does not start at path.matrices[{idx}]"));
+        }
+        if vu != path.matrices[idx + 1] {
+            return Err(format!(
+                "step {idx} does not end at path.matrices[{}]",
+                idx + 1
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Build a reusable `full_path` guide artifact from a validated witness path.
+pub fn build_full_path_guide_artifact(
+    source: &DynMatrix,
+    target: &DynMatrix,
+    path: &DynSsePath,
+) -> Result<GuideArtifact, String> {
+    validate_sse_path_dyn(source, target, path)?;
+    Ok(GuideArtifact {
+        artifact_id: None,
+        endpoints: GuideArtifactEndpoints {
+            source: source.clone(),
+            target: target.clone(),
+        },
+        payload: GuideArtifactPayload::FullPath { path: path.clone() },
+        provenance: GuideArtifactProvenance::default(),
+        validation: GuideArtifactValidation::WitnessValidated,
+        compatibility: GuideArtifactCompatibility::default(),
+        quality: GuideArtifactQuality {
+            lag: Some(path.steps.len()),
+            cost: Some(path.steps.len()),
+            score: None,
+        },
+    })
+}
+
+fn search_guided_refinement_with_observer(
+    request: &SearchRequest,
+    mut observer: Option<&mut dyn SearchObserver>,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    if request.guided_refinement.max_shortcut_lag == 0 {
+        return Err("guided_refinement requires max_shortcut_lag >= 1".to_string());
+    }
+    if request.guided_refinement.min_gap < 2 {
+        return Err("guided_refinement requires min_gap >= 2".to_string());
+    }
+    if request.guided_refinement.rounds == 0 {
+        return Err("guided_refinement requires rounds >= 1".to_string());
+    }
+
+    let mut prepared_guides = Vec::new();
+    for artifact in &request.guide_artifacts {
+        let Some(path) = prepare_full_path_guide(request, artifact)? else {
+            continue;
+        };
+        prepared_guides.push(path);
+    }
+
+    if prepared_guides.is_empty() {
+        return Err(
+            "guided_refinement requires at least one compatible full_path guide artifact"
+                .to_string(),
+        );
+    }
+
+    let mut telemetry = SearchTelemetry {
+        guide_artifacts_considered: request.guide_artifacts.len(),
+        guide_artifacts_accepted: prepared_guides.len(),
+        ..SearchTelemetry::default()
+    };
+    let source_canonical = request.source.canonical_perm();
+    let target_canonical = request.target.canonical_perm();
+    emit_started(&mut observer, request, &source_canonical, &target_canonical);
+
+    let mut best: Option<DynSsePath> = None;
+    for path in prepared_guides {
+        let refined = refine_guide_path(request, &path, &mut telemetry);
+        if refined.steps.len() < best.as_ref().map_or(usize::MAX, |path| path.steps.len())
+            || (best.is_some()
+                && refined.steps.len() == best.as_ref().unwrap().steps.len()
+                && refined.matrices.len() < best.as_ref().unwrap().matrices.len())
+        {
+            best = Some(refined);
+        } else if best.is_none() {
+            best = Some(refined);
+        }
+    }
+
+    let best = best.expect("prepared guides should produce a candidate path");
+    let result = SearchRunResult::Equivalent(best);
+    emit_finished(&mut observer, request, result.clone(), &telemetry);
+    Ok((result, telemetry))
+}
+
+fn prepare_full_path_guide(
+    request: &SearchRequest,
+    artifact: &GuideArtifact,
+) -> Result<Option<DynSsePath>, String> {
+    if !guide_artifact_supports_stage(artifact, request.stage) {
+        return Ok(None);
+    }
+
+    if let Some(max_endpoint_dim) = artifact.compatibility.max_endpoint_dim {
+        if request.source.rows > max_endpoint_dim || request.target.rows > max_endpoint_dim {
+            return Ok(None);
+        }
+    }
+
+    let GuideArtifactPayload::FullPath { path } = &artifact.payload;
+    validate_sse_path_dyn(&artifact.endpoints.source, &artifact.endpoints.target, path).map_err(
+        |err| {
+            format!(
+                "guide artifact {} is not a valid full-path witness: {err}",
+                artifact_label(artifact)
+            )
+        },
+    )?;
+
+    let oriented = if endpoint_identity_matches(
+        &artifact.endpoints.source,
+        &artifact.endpoints.target,
+        &request.source,
+        &request.target,
+    ) {
+        path.clone()
+    } else if endpoint_identity_matches(
+        &artifact.endpoints.target,
+        &artifact.endpoints.source,
+        &request.source,
+        &request.target,
+    ) {
+        reverse_dyn_sse_path(path)
+    } else {
+        return Ok(None);
+    };
+
+    let reanchored =
+        reanchor_dyn_sse_path(&oriented, &request.source, &request.target).map_err(|err| {
+            format!(
+                "guide artifact {} cannot be re-anchored: {err}",
+                artifact_label(artifact)
+            )
+        })?;
+    validate_sse_path_dyn(&request.source, &request.target, &reanchored).map_err(|err| {
+        format!(
+            "guide artifact {} does not validate against the requested endpoints: {err}",
+            artifact_label(artifact)
+        )
+    })?;
+    Ok(Some(reanchored))
+}
+
+fn guide_artifact_supports_stage(artifact: &GuideArtifact, stage: SearchStage) -> bool {
+    artifact.compatibility.supported_stages.is_empty()
+        || artifact.compatibility.supported_stages.contains(&stage)
+}
+
+fn artifact_label(artifact: &GuideArtifact) -> &str {
+    artifact
+        .artifact_id
+        .as_deref()
+        .or(artifact.provenance.label.as_deref())
+        .unwrap_or("<unnamed>")
+}
+
+fn endpoint_identity_matches(
+    source_a: &DynMatrix,
+    target_a: &DynMatrix,
+    source_b: &DynMatrix,
+    target_b: &DynMatrix,
+) -> bool {
+    matrices_share_endpoint_identity(source_a, source_b)
+        && matrices_share_endpoint_identity(target_a, target_b)
+}
+
+fn matrices_share_endpoint_identity(left: &DynMatrix, right: &DynMatrix) -> bool {
+    left.rows == right.rows
+        && left.cols == right.cols
+        && left.is_square()
+        && right.is_square()
+        && left.canonical_perm() == right.canonical_perm()
+}
+
+fn reverse_dyn_sse_path(path: &DynSsePath) -> DynSsePath {
+    DynSsePath {
+        matrices: path.matrices.iter().cloned().rev().collect(),
+        steps: path
+            .steps
+            .iter()
+            .rev()
+            .map(|step| EsseStep {
+                u: step.v.clone(),
+                v: step.u.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn reanchor_dyn_sse_path(
+    path: &DynSsePath,
+    source: &DynMatrix,
+    target: &DynMatrix,
+) -> Result<DynSsePath, String> {
+    let mut path = path.clone();
+    if path.matrices.is_empty() {
+        return Err("guide path contains no matrices".to_string());
+    }
+
+    if path.matrices.first() != Some(source) {
+        let first = path
+            .matrices
+            .first()
+            .expect("non-empty path should have a first matrix")
+            .clone();
+        let step = permutation_step_between(source, &first).ok_or_else(|| {
+            "guide start is not permutation-compatible with the request".to_string()
+        })?;
+        path.steps.insert(0, step);
+        path.matrices.insert(0, source.clone());
+    }
+
+    if path.matrices.last() != Some(target) {
+        let last = path
+            .matrices
+            .last()
+            .expect("non-empty path should have a last matrix")
+            .clone();
+        let step = permutation_step_between(&last, target).ok_or_else(|| {
+            "guide end is not permutation-compatible with the request".to_string()
+        })?;
+        path.steps.push(step);
+        path.matrices.push(target.clone());
+    }
+
+    Ok(path)
+}
+
+fn refine_guide_path(
+    request: &SearchRequest,
+    initial: &DynSsePath,
+    telemetry: &mut SearchTelemetry,
+) -> DynSsePath {
+    let mut current = initial.clone();
+    for _ in 0..request.guided_refinement.rounds {
+        telemetry.guided_refinement_rounds += 1;
+        let next = refine_guide_path_once(
+            &current,
+            &request.config,
+            &request.guided_refinement,
+            telemetry,
+        );
+        if next.steps.len() >= current.steps.len() {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
+fn refine_guide_path_once(
+    guide: &DynSsePath,
+    base_config: &SearchConfig,
+    guided_config: &GuidedRefinementConfig,
+    telemetry: &mut SearchTelemetry,
+) -> DynSsePath {
+    if guide.steps.is_empty() {
+        return guide.clone();
+    }
+
+    let mut edges = Vec::with_capacity(guide.steps.len());
+    for idx in 0..guide.steps.len() {
+        edges.push(GuidedEdge {
+            from: idx,
+            to: idx + 1,
+            lag: 1,
+            path: DynSsePath {
+                matrices: vec![guide.matrices[idx].clone(), guide.matrices[idx + 1].clone()],
+                steps: vec![guide.steps[idx].clone()],
+            },
+        });
+    }
+
+    let max_gap = guided_config.max_gap.unwrap_or(guide.steps.len());
+    for start in 0..guide.steps.len() {
+        let min_end = start + guided_config.min_gap;
+        if min_end >= guide.matrices.len() {
+            continue;
+        }
+        let max_end = (start + max_gap).min(guide.steps.len());
+        for end in min_end..=max_end {
+            let gap = end - start;
+            let lag_cap = guided_config.max_shortcut_lag.min(gap - 1);
+            if lag_cap == 0 {
+                continue;
+            }
+
+            telemetry.guided_segments_considered += 1;
+            let mut config = base_config.clone();
+            config.max_lag = lag_cap;
+            let deadline = guided_config
+                .segment_timeout_secs
+                .map(Duration::from_secs)
+                .map(|timeout| Instant::now() + timeout);
+            let (result, segment_telemetry) = search_sse_with_telemetry_dyn_with_deadline(
+                &guide.matrices[start],
+                &guide.matrices[end],
+                &config,
+                deadline,
+            );
+            merge_search_telemetry(telemetry, &segment_telemetry);
+            if let DynSseResult::Equivalent(path) = result {
+                if path.steps.len() < gap {
+                    telemetry.guided_segments_improved += 1;
+                    edges.push(GuidedEdge {
+                        from: start,
+                        to: end,
+                        lag: path.steps.len(),
+                        path,
+                    });
+                }
+            }
+        }
+    }
+
+    let Some(best_route) = shortest_guided_path(guide.matrices.len(), &edges) else {
+        return guide.clone();
+    };
+    stitch_guided_route(&best_route)
+}
+
+fn merge_search_telemetry(into: &mut SearchTelemetry, from: &SearchTelemetry) {
+    into.invariant_filtered |= from.invariant_filtered;
+    into.permutation_shortcut |= from.permutation_shortcut;
+    into.canonical_shortcut |= from.canonical_shortcut;
+    into.concrete_shift_shortcut |= from.concrete_shift_shortcut;
+    into.frontier_nodes_expanded += from.frontier_nodes_expanded;
+    into.factorisation_calls += from.factorisation_calls;
+    into.factorisations_enumerated += from.factorisations_enumerated;
+    into.candidates_generated += from.candidates_generated;
+    into.pruned_by_size += from.pruned_by_size;
+    into.pruned_by_spectrum += from.pruned_by_spectrum;
+    into.candidates_after_pruning += from.candidates_after_pruning;
+    into.collisions_with_seen += from.collisions_with_seen;
+    into.collisions_with_other_frontier += from.collisions_with_other_frontier;
+    into.approximate_other_side_hits += from.approximate_other_side_hits;
+    into.same_future_past_collisions += from.same_future_past_collisions;
+    into.discovered_nodes += from.discovered_nodes;
+    into.dead_end_nodes += from.dead_end_nodes;
+    into.enqueued_nodes += from.enqueued_nodes;
+    into.max_frontier_size = into.max_frontier_size.max(from.max_frontier_size);
+    into.total_visited_nodes += from.total_visited_nodes;
+    for (family, family_telemetry) in &from.move_family_telemetry {
+        let entry = into
+            .move_family_telemetry
+            .entry(family.clone())
+            .or_default();
+        entry.candidates_generated += family_telemetry.candidates_generated;
+        entry.candidates_after_pruning += family_telemetry.candidates_after_pruning;
+        entry.discovered_nodes += family_telemetry.discovered_nodes;
+        entry.exact_meets += family_telemetry.exact_meets;
+        entry.approximate_other_side_hits += family_telemetry.approximate_other_side_hits;
+    }
+    into.layers.extend(from.layers.clone());
+}
+
+fn shortest_guided_path(node_count: usize, edges: &[GuidedEdge]) -> Option<Vec<GuidedEdge>> {
+    if node_count == 0 {
+        return None;
+    }
+    if node_count == 1 {
+        return Some(Vec::new());
+    }
+
+    let mut best_cost = vec![usize::MAX; node_count];
+    let mut best_prev: Vec<Option<usize>> = vec![None; node_count];
+    let mut best_edge: Vec<Option<usize>> = vec![None; node_count];
+    best_cost[0] = 0;
+
+    for node in 0..node_count {
+        if best_cost[node] == usize::MAX {
+            continue;
+        }
+        for (idx, edge) in edges
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.from == node)
+        {
+            let candidate = best_cost[node] + edge.lag;
+            if candidate < best_cost[edge.to] {
+                best_cost[edge.to] = candidate;
+                best_prev[edge.to] = Some(node);
+                best_edge[edge.to] = Some(idx);
+            }
+        }
+    }
+
+    if best_cost[node_count - 1] == usize::MAX {
+        return None;
+    }
+
+    let mut route = Vec::new();
+    let mut current = node_count - 1;
+    while current != 0 {
+        let edge_idx = best_edge[current].expect("reachable node should have an incoming edge");
+        route.push(edges[edge_idx].clone());
+        current = best_prev[current].expect("reachable node should have a predecessor");
+    }
+    route.reverse();
+    Some(route)
+}
+
+fn stitch_guided_route(route: &[GuidedEdge]) -> DynSsePath {
+    let mut matrices = Vec::new();
+    let mut steps = Vec::new();
+    for (idx, edge) in route.iter().enumerate() {
+        if idx == 0 {
+            matrices.extend(edge.path.matrices.iter().cloned());
+        } else {
+            matrices.extend(edge.path.matrices.iter().skip(1).cloned());
+        }
+        steps.extend(edge.path.steps.iter().cloned());
+    }
+    DynSsePath { matrices, steps }
+}
+
 /// Search for a strong shift equivalence path between arbitrary square endpoints,
 /// returning aggregate telemetry.
 pub fn search_sse_with_telemetry_dyn(
@@ -124,10 +731,47 @@ pub fn search_sse_with_telemetry_dyn(
     b: &DynMatrix,
     config: &SearchConfig,
 ) -> (DynSseResult, SearchTelemetry) {
+    search_sse_with_telemetry_dyn_with_deadline_and_observer(a, b, config, None, None)
+}
+
+fn search_sse_with_telemetry_dyn_with_deadline(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    deadline: Option<Instant>,
+) -> (DynSseResult, SearchTelemetry) {
+    search_sse_with_telemetry_dyn_with_deadline_and_observer(a, b, config, None, deadline)
+}
+
+/// Search for a strong shift equivalence path between arbitrary square endpoints,
+/// returning aggregate telemetry and optionally recording events.
+pub fn search_sse_with_telemetry_dyn_and_observer(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    observer: Option<&mut dyn SearchObserver>,
+) -> (DynSseResult, SearchTelemetry) {
+    search_sse_with_telemetry_dyn_with_deadline_and_observer(a, b, config, observer, None)
+}
+
+fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    mut observer: Option<&mut dyn SearchObserver>,
+    deadline: Option<Instant>,
+) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
+    let request = search_request(a, b, config, SearchStage::EndpointSearch);
+
+    if deadline_reached(deadline) {
+        return finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry);
+    }
 
     if !a.is_square() || !b.is_square() {
-        return (
+        return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::NotEquivalent("search expects square endpoint matrices".to_string()),
             telemetry,
         );
@@ -135,14 +779,18 @@ pub fn search_sse_with_telemetry_dyn(
 
     if trace_square(a) != trace_square(b) {
         telemetry.invariant_filtered = true;
-        return (
+        return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::NotEquivalent("trace(M^2) invariant mismatch".to_string()),
             telemetry,
         );
     }
     if a.trace() != b.trace() {
         telemetry.invariant_filtered = true;
-        return (
+        return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::NotEquivalent("trace invariant mismatch".to_string()),
             telemetry,
         );
@@ -152,7 +800,27 @@ pub fn search_sse_with_telemetry_dyn(
     let b_canon = b.canonical_perm();
 
     if a == b {
+        emit_started(&mut observer, &request, &a_canon, &b_canon);
+        emit_roots(
+            &mut observer,
+            &[
+                SearchRootRecord {
+                    direction: SearchDirection::Forward,
+                    canonical: a_canon.clone(),
+                    orig: a.clone(),
+                    depth: 0,
+                },
+                SearchRootRecord {
+                    direction: SearchDirection::Backward,
+                    canonical: b_canon.clone(),
+                    orig: b.clone(),
+                    depth: 0,
+                },
+            ],
+        );
         return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::Equivalent(DynSsePath {
                 matrices: vec![a.clone()],
                 steps: vec![],
@@ -166,7 +834,27 @@ pub fn search_sse_with_telemetry_dyn(
         if a != b {
             telemetry.permutation_shortcut = true;
         }
+        emit_started(&mut observer, &request, &a_canon, &b_canon);
+        emit_roots(
+            &mut observer,
+            &[
+                SearchRootRecord {
+                    direction: SearchDirection::Forward,
+                    canonical: a_canon.clone(),
+                    orig: a.clone(),
+                    depth: 0,
+                },
+                SearchRootRecord {
+                    direction: SearchDirection::Backward,
+                    canonical: b_canon.clone(),
+                    orig: b.clone(),
+                    depth: 0,
+                },
+            ],
+        );
         return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::Equivalent(DynSsePath {
                 matrices: vec![a.clone(), b.clone()],
                 steps: permutation_step_between(a, b).into_iter().collect(),
@@ -204,11 +892,33 @@ pub fn search_sse_with_telemetry_dyn(
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
 
+    emit_started(&mut observer, &request, &a_canon, &b_canon);
+    emit_roots(
+        &mut observer,
+        &[
+            SearchRootRecord {
+                direction: SearchDirection::Forward,
+                canonical: a_canon.clone(),
+                orig: a.clone(),
+                depth: 0,
+            },
+            SearchRootRecord {
+                direction: SearchDirection::Backward,
+                canonical: b_canon.clone(),
+                orig: b.clone(),
+                depth: 0,
+            },
+        ],
+    );
+
     if config.search_mode == SearchMode::GraphOnly {
-        return search_graph_only_dyn_with_telemetry(a, b, config);
+        return search_graph_only_dyn_with_telemetry(a, b, config, observer, &request, deadline);
     }
 
     for layer_index in 0..config.max_lag {
+        if deadline_reached(deadline) {
+            break;
+        }
         let next_fwd_depth = fwd_frontier
             .front()
             .and_then(|node| fwd_depths.get(node))
@@ -265,12 +975,13 @@ pub fn search_sse_with_telemetry_dyn(
 
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
-        let (expansions, expansion_stats) = expand_frontier_layer_dyn(
+        let (expansions, expansion_stats, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
             config.max_intermediate_dim,
             config.max_entry,
             config.search_mode,
+            deadline,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -376,6 +1087,8 @@ pub fn search_sse_with_telemetry_dyn(
                     move_family_telemetry: layer_move_family_telemetry,
                 });
                 return finish_search_dyn(
+                    observer,
+                    &request,
                     DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
                         a,
                         b,
@@ -454,6 +1167,9 @@ pub fn search_sse_with_telemetry_dyn(
             move_family_telemetry: layer_move_family_telemetry,
         });
 
+        if timed_out {
+            break;
+        }
         if next_frontier.is_empty() {
             break;
         }
@@ -461,7 +1177,7 @@ pub fn search_sse_with_telemetry_dyn(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    finish_search_dyn(DynSseResult::Unknown, telemetry)
+    finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry)
 }
 
 /// Search for a strong shift equivalence path, optionally recording the visited graph.
@@ -476,10 +1192,11 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     let b_dyn = DynMatrix::from_sq(b);
     let a_canon = a_dyn.canonical_perm();
     let b_canon = b_dyn.canonical_perm();
-
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_search_started(&a_dyn, &b_dyn, &a_canon, &b_canon, config);
-        let roots = [
+    let request = search_request(&a_dyn, &b_dyn, config, SearchStage::EndpointSearch);
+    emit_started(&mut observer, &request, &a_canon, &b_canon);
+    emit_roots(
+        &mut observer,
+        &[
             SearchRootRecord {
                 direction: SearchDirection::Forward,
                 canonical: a_canon.clone(),
@@ -492,14 +1209,14 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 orig: b_dyn.clone(),
                 depth: 0,
             },
-        ];
-        observer.on_roots(&roots);
-    }
+        ],
+    );
 
     // Quick check: are they already equal?
     if a == b {
-        return finish_search(
+        return finish_search_2x2(
             observer,
+            &request,
             SseResult::Equivalent(SsePath {
                 matrices: vec![a.clone()],
                 steps: vec![],
@@ -511,7 +1228,12 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     // Pre-filter with invariants.
     if let Some(reason) = check_invariants_2x2(a, b) {
         telemetry.invariant_filtered = true;
-        return finish_search(observer, SseResult::NotEquivalent(reason), telemetry);
+        return finish_search_2x2(
+            observer,
+            &request,
+            SseResult::NotEquivalent(reason),
+            telemetry,
+        );
     }
 
     // If a and b have the same canonical form, they are related by permutation
@@ -522,8 +1244,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         let p = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
         let ap = DynMatrix::from_sq(a).mul(&p);
         let step = EsseStep { u: ap, v: p };
-        return finish_search(
+        return finish_search_2x2(
             observer,
+            &request,
             SseResult::Equivalent(SsePath {
                 matrices: vec![a.clone(), b.clone()],
                 steps: vec![step],
@@ -568,8 +1291,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     if a_canon == b_canon {
         telemetry.canonical_shortcut = true;
         telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-        return finish_search(
+        return finish_search_2x2(
             observer,
+            &request,
             SseResult::Equivalent(reconstruct_bidirectional_path(
                 a,
                 b,
@@ -584,7 +1308,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     }
 
     if config.search_mode == SearchMode::GraphOnly {
-        return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer);
+        return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer, &request);
     }
 
     for layer_index in 0..config.max_lag {
@@ -794,10 +1518,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                         enqueued,
                     });
                 }
-                if let (Some(observer), Some(records)) =
-                    (observer.as_deref_mut(), layer_records.as_ref())
-                {
-                    observer.on_layer(records);
+                if let Some(records) = layer_records.as_ref() {
+                    emit_layer(&mut observer, records);
                 }
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
@@ -820,8 +1542,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     total_visited_nodes: telemetry.total_visited_nodes,
                     move_family_telemetry: layer_move_family_telemetry,
                 });
-                return finish_search(
+                return finish_search_2x2(
                     observer,
+                    &request,
                     SseResult::Equivalent(reconstruct_bidirectional_path(
                         a,
                         b,
@@ -898,8 +1621,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
         );
-        if let (Some(observer), Some(records)) = (observer.as_deref_mut(), layer_records.as_ref()) {
-            observer.on_layer(records);
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
         }
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
@@ -945,15 +1668,16 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
         {
             telemetry.concrete_shift_shortcut = true;
-            return finish_search(
+            return finish_search_2x2(
                 observer,
+                &request,
                 SseResult::EquivalentByConcreteShift(witness),
                 telemetry,
             );
         }
     }
 
-    finish_search(observer, SseResult::Unknown, telemetry)
+    finish_search_2x2(observer, &request, SseResult::Unknown, telemetry)
 }
 
 fn is_essential_matrix_2x2(m: &SqMatrix<2>) -> bool {
@@ -988,6 +1712,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
     b: &SqMatrix<2>,
     config: &SearchConfig,
     mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
 ) -> (SseResult<2>, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
@@ -1226,14 +1951,13 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                                 enqueued: false,
                             });
                         }
-                        if let (Some(observer), Some(records)) =
-                            (observer.as_deref_mut(), layer_records.as_ref())
-                        {
-                            observer.on_layer(records);
+                        if let Some(records) = layer_records.as_ref() {
+                            emit_layer(&mut observer, records);
                         }
                         telemetry.layers.push(layer);
-                        return finish_search(
+                        return finish_search_2x2(
                             observer,
+                            request,
                             SseResult::Equivalent(reconstruct_bidirectional_path(
                                 a,
                                 b,
@@ -1290,8 +2014,8 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
             &mut telemetry.move_family_telemetry,
             &layer.move_family_telemetry,
         );
-        if let (Some(observer), Some(records)) = (observer.as_deref_mut(), layer_records.as_ref()) {
-            observer.on_layer(records);
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
         }
         telemetry.layers.push(layer);
 
@@ -1302,13 +2026,16 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    finish_search(observer, SseResult::Unknown, telemetry)
+    finish_search_2x2(observer, request, SseResult::Unknown, telemetry)
 }
 
 fn search_graph_only_dyn_with_telemetry(
     a: &DynMatrix,
     b: &DynMatrix,
     config: &SearchConfig,
+    observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    deadline: Option<Instant>,
 ) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_canon = a.canonical_perm();
@@ -1340,6 +2067,9 @@ fn search_graph_only_dyn_with_telemetry(
     let mut bwd_cost_sample_nodes = 0usize;
 
     for layer_index in 0..config.max_lag {
+        if deadline_reached(deadline) {
+            break;
+        }
         let next_fwd_depth = fwd_frontier
             .front()
             .and_then(|node| fwd_depths.get(node))
@@ -1387,19 +2117,6 @@ fn search_graph_only_dyn_with_telemetry(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
         let current_frontier_len = current_frontier.len();
-        let computed: Vec<(DynMatrix, crate::graph_moves::GraphMoveSuccessors)> = current_frontier
-            .par_iter()
-            .map(|current_canon| {
-                let current = orig
-                    .get(current_canon)
-                    .expect("frontier node should have an original matrix");
-                (
-                    current_canon.clone(),
-                    enumerate_graph_move_successors(current, config.max_intermediate_dim),
-                )
-            })
-            .collect();
-
         let mut layer = SearchLayerTelemetry {
             layer_index,
             direction: Some(if expand_forward {
@@ -1414,111 +2131,140 @@ fn search_graph_only_dyn_with_telemetry(
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
         let mut same_future_past_seen = HashSet::new();
+        let mut timed_out = false;
 
-        for (current_canon, successors) in computed {
-            layer.candidates_generated += successors.candidates;
-            for (family, count) in successors.family_candidates {
-                move_family_telemetry_mut(&mut layer.move_family_telemetry, family)
-                    .candidates_generated += count;
+        for chunk in current_frontier.chunks(frontier_chunk_size(current_frontier_len, deadline)) {
+            if deadline_reached(deadline) {
+                timed_out = true;
+                break;
             }
+            let computed: Vec<(DynMatrix, crate::graph_moves::GraphMoveSuccessors)> = chunk
+                .par_iter()
+                .map(|current_canon| {
+                    let current = orig
+                        .get(current_canon)
+                        .expect("frontier node should have an original matrix");
+                    (
+                        current_canon.clone(),
+                        enumerate_graph_move_successors(current, config.max_intermediate_dim),
+                    )
+                })
+                .collect();
 
-            if current_frontier_len > 0 {
-                let candidates_per_node =
-                    layer.candidates_generated.max(1) as f64 / current_frontier_len as f64;
-                if expand_forward {
-                    fwd_candidates_per_node = candidates_per_node;
-                    fwd_cost_sample_nodes = current_frontier_len;
-                } else {
-                    bwd_candidates_per_node = candidates_per_node;
-                    bwd_cost_sample_nodes = current_frontier_len;
-                }
-            }
-
-            for successor in successors.nodes {
-                if successor.orig_matrix.max_entry() > config.max_entry {
-                    continue;
-                }
-                move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
-                    .candidates_after_pruning += 1;
-                layer.candidates_after_pruning += 1;
-
-                if parent.contains_key(&successor.matrix) {
-                    layer.collisions_with_seen += 1;
-                    continue;
+            for (current_canon, successors) in computed {
+                layer.candidates_generated += successors.candidates;
+                for (family, count) in successors.family_candidates {
+                    move_family_telemetry_mut(&mut layer.move_family_telemetry, family)
+                        .candidates_generated += count;
                 }
 
-                if current_frontier_len >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD
-                    && successor.matrix.rows >= 3
-                {
-                    if let Some(signature) = same_future_past_signature(&successor.matrix) {
-                        if !same_future_past_seen.insert(signature) {
-                            layer.same_future_past_collisions += 1;
-                            continue;
-                        }
+                if current_frontier_len > 0 {
+                    let candidates_per_node =
+                        layer.candidates_generated.max(1) as f64 / current_frontier_len as f64;
+                    if expand_forward {
+                        fwd_candidates_per_node = candidates_per_node;
+                        fwd_cost_sample_nodes = current_frontier_len;
+                    } else {
+                        bwd_candidates_per_node = candidates_per_node;
+                        bwd_cost_sample_nodes = current_frontier_len;
                     }
                 }
 
-                parent.insert(
-                    successor.matrix.clone(),
-                    Some((current_canon.clone(), successor.step.clone())),
-                );
-                depths.insert(successor.matrix.clone(), next_depth);
-                orig.insert(successor.matrix.clone(), successor.orig_matrix.clone());
-                layer.discovered_nodes += 1;
-                move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
-                    .discovered_nodes += 1;
-                parents_with_progress.insert(current_canon.clone());
-
-                if let Some(&other_depth) = other_depths.get(&successor.matrix) {
-                    layer.collisions_with_other_frontier += 1;
+                for successor in successors.nodes {
+                    if successor.orig_matrix.max_entry() > config.max_entry {
+                        continue;
+                    }
                     move_family_telemetry_mut(
                         &mut layer.move_family_telemetry,
                         successor.family,
                     )
-                    .exact_meets += 1;
-                    let path_depth = next_depth + other_depth;
-                    if path_depth <= config.max_lag {
-                        layer.next_frontier_nodes = next_frontier.len();
-                        telemetry.collisions_with_seen += layer.collisions_with_seen;
-                        telemetry.collisions_with_other_frontier +=
-                            layer.collisions_with_other_frontier;
-                        telemetry.same_future_past_collisions += layer.same_future_past_collisions;
-                        telemetry.discovered_nodes += layer.discovered_nodes;
-                        layer.dead_end_nodes =
-                            current_frontier_len.saturating_sub(parents_with_progress.len());
-                        telemetry.dead_end_nodes += layer.dead_end_nodes;
-                        telemetry.enqueued_nodes += layer.enqueued_nodes;
-                        telemetry.candidates_generated += layer.candidates_generated;
-                        telemetry.candidates_after_pruning += layer.candidates_after_pruning;
-                        telemetry.pruned_by_spectrum += layer.pruned_by_spectrum;
-                        telemetry.frontier_nodes_expanded += layer.frontier_nodes;
-                        telemetry.total_visited_nodes =
-                            visited_union_size(&fwd_parent, &bwd_parent);
-                        layer.total_visited_nodes = telemetry.total_visited_nodes;
-                        accumulate_move_family_telemetry(
-                            &mut telemetry.move_family_telemetry,
-                            &layer.move_family_telemetry,
-                        );
-                        telemetry.layers.push(layer);
-                        return finish_search_dyn(
-                            DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
-                                a,
-                                b,
-                                &successor.matrix,
-                                &fwd_parent,
-                                &fwd_orig,
-                                &bwd_parent,
-                                &bwd_orig,
-                            )),
-                            telemetry,
-                        );
-                    }
-                } else {
-                    telemetry.total_visited_nodes += 1;
-                }
+                    .candidates_after_pruning += 1;
+                    layer.candidates_after_pruning += 1;
 
-                next_frontier.push_back(successor.matrix.clone());
-                layer.enqueued_nodes += 1;
+                    if parent.contains_key(&successor.matrix) {
+                        layer.collisions_with_seen += 1;
+                        continue;
+                    }
+
+                    if current_frontier_len >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD
+                        && successor.matrix.rows >= 3
+                    {
+                        if let Some(signature) = same_future_past_signature(&successor.matrix) {
+                            if !same_future_past_seen.insert(signature) {
+                                layer.same_future_past_collisions += 1;
+                                continue;
+                            }
+                        }
+                    }
+
+                    parent.insert(
+                        successor.matrix.clone(),
+                        Some((current_canon.clone(), successor.step.clone())),
+                    );
+                    depths.insert(successor.matrix.clone(), next_depth);
+                    orig.insert(successor.matrix.clone(), successor.orig_matrix.clone());
+                    layer.discovered_nodes += 1;
+                    move_family_telemetry_mut(
+                        &mut layer.move_family_telemetry,
+                        successor.family,
+                    )
+                    .discovered_nodes += 1;
+                    parents_with_progress.insert(current_canon.clone());
+
+                    if let Some(&other_depth) = other_depths.get(&successor.matrix) {
+                        layer.collisions_with_other_frontier += 1;
+                        move_family_telemetry_mut(
+                            &mut layer.move_family_telemetry,
+                            successor.family,
+                        )
+                        .exact_meets += 1;
+                        let path_depth = next_depth + other_depth;
+                        if path_depth <= config.max_lag {
+                            layer.next_frontier_nodes = next_frontier.len();
+                            telemetry.collisions_with_seen += layer.collisions_with_seen;
+                            telemetry.collisions_with_other_frontier +=
+                                layer.collisions_with_other_frontier;
+                            telemetry.same_future_past_collisions +=
+                                layer.same_future_past_collisions;
+                            telemetry.discovered_nodes += layer.discovered_nodes;
+                            layer.dead_end_nodes =
+                                current_frontier_len.saturating_sub(parents_with_progress.len());
+                            telemetry.dead_end_nodes += layer.dead_end_nodes;
+                            telemetry.enqueued_nodes += layer.enqueued_nodes;
+                            telemetry.candidates_generated += layer.candidates_generated;
+                            telemetry.candidates_after_pruning += layer.candidates_after_pruning;
+                            telemetry.pruned_by_spectrum += layer.pruned_by_spectrum;
+                            telemetry.frontier_nodes_expanded += layer.frontier_nodes;
+                            telemetry.total_visited_nodes =
+                                visited_union_size(&fwd_parent, &bwd_parent);
+                            layer.total_visited_nodes = telemetry.total_visited_nodes;
+                            accumulate_move_family_telemetry(
+                                &mut telemetry.move_family_telemetry,
+                                &layer.move_family_telemetry,
+                            );
+                            telemetry.layers.push(layer);
+                            return finish_search_dyn(
+                                observer,
+                                request,
+                                DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
+                                    a,
+                                    b,
+                                    &successor.matrix,
+                                    &fwd_parent,
+                                    &fwd_orig,
+                                    &bwd_parent,
+                                    &bwd_orig,
+                                )),
+                                telemetry,
+                            );
+                        }
+                    } else {
+                        telemetry.total_visited_nodes += 1;
+                    }
+
+                    next_frontier.push_back(successor.matrix.clone());
+                    layer.enqueued_nodes += 1;
+                }
             }
         }
 
@@ -1542,6 +2288,9 @@ fn search_graph_only_dyn_with_telemetry(
         );
         telemetry.layers.push(layer);
 
+        if timed_out {
+            break;
+        }
         if next_frontier.is_empty() {
             break;
         }
@@ -1549,7 +2298,158 @@ fn search_graph_only_dyn_with_telemetry(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    finish_search_dyn(DynSseResult::Unknown, telemetry)
+    finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
+}
+
+fn deadline_reached(deadline: Option<Instant>) -> bool {
+    deadline.is_some_and(|deadline| Instant::now() >= deadline)
+}
+
+fn frontier_chunk_size(frontier_len: usize, deadline: Option<Instant>) -> usize {
+    if deadline.is_some() {
+        frontier_len.min(TIMED_SEARCH_FRONTIER_CHUNK_SIZE).max(1)
+    } else {
+        frontier_len.max(1)
+    }
+}
+
+fn expand_frontier_layer_dyn(
+    current_frontier: &[DynMatrix],
+    orig: &HashMap<DynMatrix, DynMatrix>,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    search_mode: SearchMode,
+    deadline: Option<Instant>,
+) -> (Vec<FrontierExpansion>, FrontierExpansionStats, bool) {
+    let expand_node = |current_canon: &DynMatrix| {
+        let current = orig
+            .get(current_canon)
+            .expect("frontier node should have an original matrix");
+        let mut expansions = Vec::new();
+        let mut seen_successors = HashSet::new();
+        let mut stats = FrontierExpansionStats {
+            frontier_nodes: 1,
+            factorisation_calls: 1,
+            ..FrontierExpansionStats::default()
+        };
+
+        let graph_successors = enumerate_graph_move_successors(current, max_intermediate_dim);
+        stats.candidates_generated += graph_successors.candidates;
+        for (family, count) in graph_successors.family_candidates {
+            move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
+                .candidates_generated += count;
+        }
+
+        for successor in graph_successors.nodes {
+            let next = successor.orig_matrix;
+            let next_canon = successor.matrix;
+            if !seen_successors.insert(next_canon.clone()) {
+                continue;
+            }
+            let same_future_past_signature = same_future_past_signature(&next_canon);
+            expansions.push(FrontierExpansion {
+                parent_canon: current_canon.clone(),
+                next_canon,
+                next_orig: next,
+                step: successor.step,
+                move_family: successor.family,
+                same_future_past_signature,
+            });
+        }
+
+        if search_mode == SearchMode::Mixed {
+            visit_all_factorisations_with_family(
+                current,
+                max_intermediate_dim,
+                max_entry,
+                |move_family, u, v| {
+                    move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
+                        .candidates_generated += 1;
+                    stats.factorisations_enumerated += 1;
+                    stats.candidates_generated += 1;
+                    let next = v.mul(&u);
+
+                    if next.rows > max_intermediate_dim {
+                        stats.pruned_by_size += 1;
+                        return;
+                    }
+
+                    let next_canon = next.canonical_perm();
+                    if !seen_successors.insert(next_canon.clone()) {
+                        return;
+                    }
+                    let step = EsseStep { u, v };
+                    expansions.push(FrontierExpansion {
+                        parent_canon: current_canon.clone(),
+                        next_canon,
+                        next_orig: next,
+                        step,
+                        move_family,
+                        same_future_past_signature: None,
+                    });
+                },
+            );
+        }
+
+        (expansions, stats)
+    };
+
+    let mut expansions = Vec::new();
+    let mut stats = FrontierExpansionStats::default();
+    let mut timed_out = false;
+    for chunk in current_frontier.chunks(frontier_chunk_size(current_frontier.len(), deadline)) {
+        if deadline_reached(deadline) {
+            timed_out = true;
+            break;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
+            chunk.par_iter().map(expand_node).collect();
+
+        #[cfg(target_arch = "wasm32")]
+        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
+            chunk.iter().map(expand_node).collect();
+
+        for (node_expansions, node_stats) in per_node {
+            expansions.extend(node_expansions);
+            accumulate_frontier_stats(&mut stats, &node_stats);
+        }
+    }
+
+    let (deduped, same_future_past_collisions) = deduplicate_expansions(
+        expansions,
+        current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
+    );
+    stats.same_future_past_collisions = same_future_past_collisions;
+    record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
+    (deduped, stats, timed_out)
+}
+
+fn deduplicate_expansions(
+    expansions: Vec<FrontierExpansion>,
+    enable_same_future_past_representatives: bool,
+) -> (Vec<FrontierExpansion>, usize) {
+    let mut seen = HashSet::new();
+    let mut same_future_past_seen = HashSet::new();
+    let mut deduped = Vec::with_capacity(expansions.len());
+    let mut same_future_past_collisions = 0usize;
+    for expansion in expansions {
+        if seen.contains(&expansion.next_canon) {
+            continue;
+        }
+        if enable_same_future_past_representatives && expansion.next_canon.rows >= 3 {
+            if let Some(signature) = expansion.same_future_past_signature.as_ref() {
+                if !same_future_past_seen.insert(signature.clone()) {
+                    same_future_past_collisions += 1;
+                    continue;
+                }
+            }
+        }
+        seen.insert(expansion.next_canon.clone());
+        deduped.push(expansion);
+    }
+    (deduped, same_future_past_collisions)
 }
 
 fn choose_next_layer(
@@ -1758,149 +2658,6 @@ fn expand_frontier_layer(
     }
 }
 
-fn expand_frontier_layer_dyn(
-    current_frontier: &[DynMatrix],
-    orig: &HashMap<DynMatrix, DynMatrix>,
-    max_intermediate_dim: usize,
-    max_entry: u32,
-    search_mode: SearchMode,
-) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
-    let expand_node = |current_canon: &DynMatrix| {
-        let current = orig
-            .get(current_canon)
-            .expect("frontier node should have an original matrix");
-        let mut expansions = Vec::new();
-        let mut seen_successors = HashSet::new();
-        let mut stats = FrontierExpansionStats {
-            frontier_nodes: 1,
-            factorisation_calls: 1,
-            ..FrontierExpansionStats::default()
-        };
-
-        let graph_successors = enumerate_graph_move_successors(current, max_intermediate_dim);
-        stats.candidates_generated += graph_successors.candidates;
-        for (family, count) in graph_successors.family_candidates {
-            move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
-                .candidates_generated += count;
-        }
-
-        for successor in graph_successors.nodes {
-            let next = successor.orig_matrix;
-            let next_canon = successor.matrix;
-            if !seen_successors.insert(next_canon.clone()) {
-                continue;
-            }
-            let same_future_past_signature = same_future_past_signature(&next_canon);
-            expansions.push(FrontierExpansion {
-                parent_canon: current_canon.clone(),
-                next_canon,
-                next_orig: next,
-                step: successor.step,
-                move_family: successor.family,
-                same_future_past_signature,
-            });
-        }
-
-        if search_mode == SearchMode::Mixed {
-            visit_all_factorisations_with_family(
-                current,
-                max_intermediate_dim,
-                max_entry,
-                |move_family, u, v| {
-                    move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
-                        .candidates_generated += 1;
-                    stats.factorisations_enumerated += 1;
-                    stats.candidates_generated += 1;
-                    let next = v.mul(&u);
-
-                    if next.rows > max_intermediate_dim {
-                        stats.pruned_by_size += 1;
-                        return;
-                    }
-
-                    let next_canon = next.canonical_perm();
-                    if !seen_successors.insert(next_canon.clone()) {
-                        return;
-                    }
-                    let step = EsseStep { u, v };
-                    expansions.push(FrontierExpansion {
-                        parent_canon: current_canon.clone(),
-                        next_canon,
-                        next_orig: next,
-                        step,
-                        move_family,
-                        same_future_past_signature: None,
-                    });
-                },
-            );
-        }
-
-        (expansions, stats)
-    };
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
-            current_frontier.par_iter().map(expand_node).collect();
-        let mut expansions = Vec::new();
-        let mut stats = FrontierExpansionStats::default();
-        for (node_expansions, node_stats) in per_node {
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        let (deduped, same_future_past_collisions) = deduplicate_expansions(
-            expansions,
-            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-        );
-        stats.same_future_past_collisions = same_future_past_collisions;
-        record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (deduped, stats)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut expansions = Vec::new();
-        let mut stats = FrontierExpansionStats::default();
-        for (node_expansions, node_stats) in current_frontier.iter().map(expand_node) {
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        let (deduped, same_future_past_collisions) = deduplicate_expansions(
-            expansions,
-            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-        );
-        stats.same_future_past_collisions = same_future_past_collisions;
-        record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (deduped, stats)
-    }
-}
-
-fn deduplicate_expansions(
-    expansions: Vec<FrontierExpansion>,
-    enable_same_future_past_representatives: bool,
-) -> (Vec<FrontierExpansion>, usize) {
-    let mut seen = HashSet::new();
-    let mut same_future_past_seen = HashSet::new();
-    let mut deduped = Vec::with_capacity(expansions.len());
-    let mut same_future_past_collisions = 0usize;
-    for expansion in expansions {
-        if seen.contains(&expansion.next_canon) {
-            continue;
-        }
-        if enable_same_future_past_representatives && expansion.next_canon.rows >= 3 {
-            if let Some(signature) = expansion.same_future_past_signature.as_ref() {
-                if !same_future_past_seen.insert(signature.clone()) {
-                    same_future_past_collisions += 1;
-                    continue;
-                }
-            }
-        }
-        seen.insert(expansion.next_canon.clone());
-        deduped.push(expansion);
-    }
-    (deduped, same_future_past_collisions)
-}
-
 fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &FrontierExpansionStats) {
     total.frontier_nodes += delta.frontier_nodes;
     total.factorisation_calls += delta.factorisation_calls;
@@ -2029,24 +2786,6 @@ fn record_candidates_after_pruning_by_family(
     for expansion in expansions {
         move_family_telemetry_mut(telemetry, expansion.move_family).candidates_after_pruning += 1;
     }
-}
-
-fn finish_search(
-    mut observer: Option<&mut dyn SearchObserver>,
-    result: SseResult<2>,
-    telemetry: SearchTelemetry,
-) -> (SseResult<2>, SearchTelemetry) {
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_search_finished(&result, &telemetry);
-    }
-    (result, telemetry)
-}
-
-fn finish_search_dyn(
-    result: DynSseResult,
-    telemetry: SearchTelemetry,
-) -> (DynSseResult, SearchTelemetry) {
-    (result, telemetry)
 }
 
 fn visited_union_size(
@@ -2343,6 +3082,10 @@ fn reconstruct_bidirectional_dyn_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{
+        GuideArtifact, GuideArtifactCompatibility, GuideArtifactPayload, GuideArtifactProvenance,
+        GuideArtifactValidation, GuidedRefinementConfig,
+    };
 
     fn default_config() -> SearchConfig {
         SearchConfig {
@@ -2351,6 +3094,70 @@ mod tests {
             max_entry: 10,
             search_mode: SearchMode::Mixed,
         }
+    }
+
+    fn full_path_artifact(id: &str, path: DynSsePath) -> GuideArtifact {
+        let source = path
+            .matrices
+            .first()
+            .expect("guide path should have a source matrix")
+            .clone();
+        let target = path
+            .matrices
+            .last()
+            .expect("guide path should have a target matrix")
+            .clone();
+        let mut artifact = build_full_path_guide_artifact(&source, &target, &path).unwrap();
+        artifact.artifact_id = Some(id.to_string());
+        artifact.provenance = GuideArtifactProvenance {
+            source_kind: Some("unit_test".to_string()),
+            label: Some(id.to_string()),
+            source_ref: None,
+        };
+        artifact.compatibility = GuideArtifactCompatibility {
+            supported_stages: vec![SearchStage::GuidedRefinement],
+            max_endpoint_dim: Some(4),
+        };
+        artifact
+    }
+
+    #[test]
+    fn test_build_full_path_guide_artifact_populates_metadata() {
+        let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let path = DynSsePath {
+            matrices: vec![source.clone()],
+            steps: vec![],
+        };
+
+        let artifact = build_full_path_guide_artifact(&source, &source, &path).unwrap();
+        assert_eq!(artifact.endpoints.source, source);
+        assert_eq!(artifact.endpoints.target, artifact.endpoints.source);
+        assert_eq!(
+            artifact.validation,
+            GuideArtifactValidation::WitnessValidated
+        );
+        assert_eq!(artifact.quality.lag, Some(0));
+        assert_eq!(artifact.quality.cost, Some(0));
+        assert!(matches!(
+            artifact.payload,
+            GuideArtifactPayload::FullPath { path: ref full_path } if full_path.steps.is_empty()
+        ));
+    }
+
+    #[test]
+    fn test_build_full_path_guide_artifact_rejects_invalid_path() {
+        let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let target = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let invalid = DynSsePath {
+            matrices: vec![source.clone(), source.clone()],
+            steps: vec![EsseStep {
+                u: target.clone(),
+                v: target.clone(),
+            }],
+        };
+
+        let err = build_full_path_guide_artifact(&source, &target, &invalid).unwrap_err();
+        assert!(err.contains("does not end"));
     }
 
     #[test]
@@ -2397,6 +3204,126 @@ mod tests {
             }
             _ => panic!("Expected NotEquivalent"),
         }
+    }
+
+    #[test]
+    fn test_guided_refinement_stage_accepts_full_path_artifact() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![permutation_step_between(&a, &b).unwrap()],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: default_config(),
+            stage: SearchStage::GuidedRefinement,
+            guide_artifacts: vec![full_path_artifact("direct-guide", guide)],
+            guided_refinement: GuidedRefinementConfig::default(),
+        };
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from guided refinement, got {other:?}"),
+        }
+        assert_eq!(telemetry.guide_artifacts_considered, 1);
+        assert_eq!(telemetry.guide_artifacts_accepted, 1);
+    }
+
+    #[test]
+    fn test_guided_refinement_stage_shortens_permutation_guide() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid).unwrap(),
+                permutation_step_between(&mid, &b).unwrap(),
+            ],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::GuidedRefinement,
+            guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
+            guided_refinement: GuidedRefinementConfig {
+                max_shortcut_lag: 1,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+        };
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from guided refinement, got {other:?}"),
+        }
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(telemetry.guided_segments_improved, 1);
+    }
+
+    #[test]
+    fn test_guided_refinement_segment_timeout_preserves_guide_when_search_times_out() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid).unwrap(),
+                permutation_step_between(&mid, &b).unwrap(),
+            ],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::GuidedRefinement,
+            guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
+            guided_refinement: GuidedRefinementConfig {
+                max_shortcut_lag: 1,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+                segment_timeout_secs: Some(0),
+            },
+        };
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 2);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from guided refinement, got {other:?}"),
+        }
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(telemetry.guided_segments_improved, 0);
     }
 
     #[test]

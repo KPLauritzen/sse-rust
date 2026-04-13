@@ -1,5 +1,5 @@
 use crate::matrix::DynMatrix;
-use crate::types::{EsseStep, SearchConfig, SearchDirection, SearchTelemetry, SseResult};
+use crate::types::{EsseStep, SearchDirection, SearchRequest, SearchRunResult, SearchTelemetry};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SearchEdgeStatus {
@@ -14,6 +14,13 @@ pub struct SearchRootRecord {
     pub canonical: DynMatrix,
     pub orig: DynMatrix,
     pub depth: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchStartRecord {
+    pub request: SearchRequest,
+    pub source_canonical: DynMatrix,
+    pub target_canonical: DynMatrix,
 }
 
 #[derive(Clone, Debug)]
@@ -33,20 +40,21 @@ pub struct SearchEdgeRecord {
     pub enqueued: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct SearchFinishedRecord {
+    pub request: SearchRequest,
+    pub result: SearchRunResult,
+    pub telemetry: SearchTelemetry,
+}
+
+#[derive(Clone, Debug)]
+pub enum SearchEvent {
+    Started(SearchStartRecord),
+    Roots(Vec<SearchRootRecord>),
+    Layer(Vec<SearchEdgeRecord>),
+    Finished(SearchFinishedRecord),
+}
+
 pub trait SearchObserver {
-    fn on_search_started(
-        &mut self,
-        _a: &DynMatrix,
-        _b: &DynMatrix,
-        _a_canonical: &DynMatrix,
-        _b_canonical: &DynMatrix,
-        _config: &SearchConfig,
-    ) {
-    }
-
-    fn on_roots(&mut self, _roots: &[SearchRootRecord]) {}
-
-    fn on_layer(&mut self, _edges: &[SearchEdgeRecord]) {}
-
-    fn on_search_finished(&mut self, _result: &SseResult<2>, _telemetry: &SearchTelemetry) {}
+    fn on_event(&mut self, _event: &SearchEvent) {}
 }

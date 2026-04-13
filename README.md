@@ -184,6 +184,20 @@ cargo run --release --bin search -- --help
 cargo run --profile dist --features research-tools --bin research_harness -- --cases research/cases.json --format pretty
 ```
 
+Supported workflows now go through those two front doors:
+
+- use `search` for direct endpoint runs, including the generic
+  `guided-refinement` stage,
+- use `research_harness` for benchmark-family fixtures, staged comparisons, and
+  campaign-style scoring,
+- and treat the remaining `research-tools` binaries as targeted diagnostics or
+  paper-reproduction helpers rather than alternate solver entry points.
+
+The older Brix-Ruiz-specific search sidecars (`brix_ruiz_k3`,
+`find_brix_ruiz_graph_path`, and `find_brix_ruiz_path_shortcuts`) are retired
+from the supported Cargo targets. Their source files remain in-tree as
+historical references for the research log and notes.
+
 ### Persisting the visited search graph
 
 The main `search` CLI can optionally persist the visited graph to a local
@@ -211,6 +225,23 @@ The persisted schema is graph-shaped even though it uses SQLite tables:
 The recorder is disabled by default and uses batched per-layer transactions with
 WAL mode, so normal searches do not pay any storage overhead unless
 `--visited-db` is enabled.
+
+### Exporting reusable guide artifacts
+
+The generic `search` CLI can also write a successful path witness as a reusable
+`full_path` guide artifact:
+
+```sh
+cargo run --release --bin search -- \
+  1,0,0,1 1,0,0,1 \
+  --write-guide-artifact guide.json
+```
+
+This export only succeeds for results that include an explicit SSE path witness.
+Concrete-shift-only witnesses, `not_equivalent`, and `unknown` results are not
+serializable as `full_path` guide artifacts. The written JSON matches the
+generic guide-artifact schema in `src/types.rs` and can be fed back into later
+guided searches with `--guide-artifacts`.
 
 **Deployment:**
 

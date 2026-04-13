@@ -11,9 +11,10 @@ use serde_json::json;
 
 use crate::matrix::DynMatrix;
 use crate::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
+    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
+    SearchRootRecord, SearchStartRecord,
 };
-use crate::types::{SearchConfig, SearchDirection, SearchMode, SearchTelemetry, SseResult};
+use crate::types::{SearchDirection, SearchMode, SearchRunResult, SearchStage, SearchTelemetry};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SqliteGraphRecorder {
@@ -115,18 +116,11 @@ impl SqliteGraphRecorder {
         Ok(id)
     }
 
-    fn insert_run(
-        &mut self,
-        a: &DynMatrix,
-        b: &DynMatrix,
-        a_canonical: &DynMatrix,
-        b_canonical: &DynMatrix,
-        config: &SearchConfig,
-    ) -> Result<(), String> {
-        let a_id = self.ensure_matrix_id(a)?;
-        let b_id = self.ensure_matrix_id(b)?;
-        let a_canonical_id = self.ensure_matrix_id(a_canonical)?;
-        let b_canonical_id = self.ensure_matrix_id(b_canonical)?;
+    fn insert_run(&mut self, start: &SearchStartRecord) -> Result<(), String> {
+        let a_id = self.ensure_matrix_id(&start.request.source)?;
+        let b_id = self.ensure_matrix_id(&start.request.target)?;
+        let a_canonical_id = self.ensure_matrix_id(&start.source_canonical)?;
+        let b_canonical_id = self.ensure_matrix_id(&start.target_canonical)?;
         let started_unix_ms = unix_timestamp_ms();
 
         self.conn
@@ -140,18 +134,20 @@ impl SqliteGraphRecorder {
                     max_lag,
                     max_intermediate_dim,
                     max_entry,
-                    search_mode
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    search_mode,
+                    stage
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     started_unix_ms,
                     a_id,
                     b_id,
                     a_canonical_id,
                     b_canonical_id,
-                    config.max_lag as i64,
-                    config.max_intermediate_dim as i64,
-                    config.max_entry as i64,
-                    search_mode_label(config.search_mode),
+                    start.request.config.max_lag as i64,
+                    start.request.config.max_intermediate_dim as i64,
+                    start.request.config.max_entry as i64,
+                    search_mode_label(start.request.config.search_mode),
+                    search_stage_label(start.request.stage),
                 ],
             )
             .map_err(|err| format!("failed to insert search run: {err}"))?;
@@ -325,14 +321,20 @@ impl SqliteGraphRecorder {
 
     fn finish_run(
         &mut self,
-        result: &SseResult<2>,
+        result: &SearchRunResult,
         telemetry: &SearchTelemetry,
     ) -> Result<(), String> {
         let (outcome, reason, path_steps) = match result {
-            SseResult::Equivalent(path) => ("equivalent", None, Some(path.steps.len() as i64)),
-            SseResult::EquivalentByConcreteShift(_) => ("equivalent_by_concrete_shift", None, None),
-            SseResult::NotEquivalent(reason) => ("not_equivalent", Some(reason.as_str()), None),
-            SseResult::Unknown => ("unknown", None, None),
+            SearchRunResult::Equivalent(path) => {
+                ("equivalent", None, Some(path.steps.len() as i64))
+            }
+            SearchRunResult::EquivalentByConcreteShift(_) => {
+                ("equivalent_by_concrete_shift", None, None)
+            }
+            SearchRunResult::NotEquivalent(reason) => {
+                ("not_equivalent", Some(reason.as_str()), None)
+            }
+            SearchRunResult::Unknown => ("unknown", None, None),
         };
         let telemetry_json = serde_json::to_string(telemetry)
             .map_err(|err| format!("failed to serialise telemetry: {err}"))?;
@@ -364,32 +366,28 @@ impl SqliteGraphRecorder {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl SearchObserver for SqliteGraphRecorder {
-    fn on_search_started(
-        &mut self,
-        a: &DynMatrix,
-        b: &DynMatrix,
-        a_canonical: &DynMatrix,
-        b_canonical: &DynMatrix,
-        config: &SearchConfig,
-    ) {
-        self.with_connection(|this| this.insert_run(a, b, a_canonical, b_canonical, config));
-    }
-
-    fn on_roots(&mut self, roots: &[SearchRootRecord]) {
-        self.with_connection(|this| {
-            for root in roots {
-                this.upsert_root(root)?;
+    fn on_event(&mut self, event: &SearchEvent) {
+        match event {
+            SearchEvent::Started(start) => {
+                self.with_connection(|this| this.insert_run(start));
             }
-            Ok(())
-        });
-    }
-
-    fn on_layer(&mut self, edges: &[SearchEdgeRecord]) {
-        self.with_connection(|this| this.insert_edges(edges));
-    }
-
-    fn on_search_finished(&mut self, result: &SseResult<2>, telemetry: &SearchTelemetry) {
-        self.with_connection(|this| this.finish_run(result, telemetry));
+            SearchEvent::Roots(roots) => {
+                self.with_connection(|this| {
+                    for root in roots {
+                        this.upsert_root(root)?;
+                    }
+                    Ok(())
+                });
+            }
+            SearchEvent::Layer(edges) => {
+                self.with_connection(|this| this.insert_edges(edges));
+            }
+            SearchEvent::Finished(SearchFinishedRecord {
+                result, telemetry, ..
+            }) => {
+                self.with_connection(|this| this.finish_run(result, telemetry));
+            }
+        }
     }
 }
 
@@ -437,6 +435,7 @@ fn initialise_schema(conn: &Connection) -> Result<(), String> {
             max_intermediate_dim INTEGER NOT NULL,
             max_entry INTEGER NOT NULL,
             search_mode TEXT NOT NULL,
+            stage TEXT NOT NULL,
             outcome TEXT,
             reason TEXT,
             path_steps INTEGER,
@@ -477,6 +476,33 @@ fn initialise_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_run_edges_run_to ON run_edges(run_id, to_canonical_matrix_id);",
     )
     .map_err(|err| format!("failed to initialise sqlite schema: {err}"))?;
+
+    let mut has_stage_column = false;
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(search_runs)")
+        .map_err(|err| format!("failed to inspect search_runs schema: {err}"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| format!("failed to query search_runs schema: {err}"))?;
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| format!("failed to read search_runs schema row: {err}"))?
+    {
+        let column_name: String = row
+            .get(1)
+            .map_err(|err| format!("failed to read search_runs column name: {err}"))?;
+        if column_name == "stage" {
+            has_stage_column = true;
+            break;
+        }
+    }
+    if !has_stage_column {
+        conn.execute(
+            "ALTER TABLE search_runs ADD COLUMN stage TEXT NOT NULL DEFAULT 'endpoint_search'",
+            [],
+        )
+        .map_err(|err| format!("failed to add stage column to search_runs: {err}"))?;
+    }
     Ok(())
 }
 
@@ -502,14 +528,14 @@ fn matrix_json(matrix: &DynMatrix) -> Result<String, String> {
     serde_json::to_string(&rows).map_err(|err| format!("failed to serialise matrix: {err}"))
 }
 
-fn result_json(result: &SseResult<2>) -> Result<String, String> {
+fn result_json(result: &SearchRunResult) -> Result<String, String> {
     let json = match result {
-        SseResult::Equivalent(path) => json!({
+        SearchRunResult::Equivalent(path) => json!({
             "outcome": "equivalent",
             "matrices": path
                 .matrices
                 .iter()
-                .map(|matrix| matrix.data)
+                .map(|matrix| matrix.data.clone())
                 .collect::<Vec<_>>(),
             "steps": path
                 .steps
@@ -522,7 +548,7 @@ fn result_json(result: &SseResult<2>) -> Result<String, String> {
                 })
                 .collect::<Vec<_>>(),
         }),
-        SseResult::EquivalentByConcreteShift(witness) => json!({
+        SearchRunResult::EquivalentByConcreteShift(witness) => json!({
             "outcome": "equivalent_by_concrete_shift",
             "witness": {
                 "lag": witness.shift.lag,
@@ -534,11 +560,11 @@ fn result_json(result: &SseResult<2>) -> Result<String, String> {
                 "omega_f": witness.omega_f.mapping,
             },
         }),
-        SseResult::NotEquivalent(reason) => json!({
+        SearchRunResult::NotEquivalent(reason) => json!({
             "outcome": "not_equivalent",
             "reason": reason,
         }),
-        SseResult::Unknown => json!({
+        SearchRunResult::Unknown => json!({
             "outcome": "unknown",
         }),
     };
@@ -566,6 +592,14 @@ fn search_mode_label(mode: SearchMode) -> &'static str {
     }
 }
 
+fn search_stage_label(stage: SearchStage) -> &'static str {
+    match stage {
+        SearchStage::EndpointSearch => "endpoint_search",
+        SearchStage::GuidedRefinement => "guided_refinement",
+        SearchStage::ShortcutSearch => "shortcut_search",
+    }
+}
+
 fn search_direction_label(direction: SearchDirection) -> &'static str {
     match direction {
         SearchDirection::Forward => "forward",
@@ -589,6 +623,7 @@ mod tests {
 
     use crate::matrix::SqMatrix;
     use crate::search::search_sse_2x2_with_telemetry_and_observer;
+    use crate::types::SearchConfig;
 
     fn temp_db_path() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
