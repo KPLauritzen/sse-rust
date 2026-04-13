@@ -207,6 +207,9 @@ files:
 sandbox:
   enabled: true
   image: my-sandbox
+  extra_mounts:
+    - host_path: .beads
+      writable: true
 #   backend: lima
 #   # host_commands: ["just", "cargo", "npm"]
 #   # container:
