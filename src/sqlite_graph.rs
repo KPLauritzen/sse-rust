@@ -636,19 +636,21 @@ mod tests {
     #[test]
     fn sqlite_graph_recorder_persists_nodes_and_edges() {
         let path = temp_db_path();
-        let mut recorder = SqliteGraphRecorder::new(&path).unwrap();
-        let a = SqMatrix::new([[1, 3], [2, 1]]);
-        let b = SqMatrix::new([[1, 6], [1, 1]]);
-        let config = SearchConfig {
-            max_lag: 4,
-            max_intermediate_dim: 3,
-            max_entry: 4,
-            search_mode: SearchMode::Mixed,
-        };
+        {
+            let mut recorder = SqliteGraphRecorder::new(&path).unwrap();
+            let a = SqMatrix::new([[1, 3], [2, 1]]);
+            let b = SqMatrix::new([[1, 6], [1, 1]]);
+            let config = SearchConfig {
+                max_lag: 4,
+                max_intermediate_dim: 3,
+                max_entry: 4,
+                search_mode: SearchMode::Mixed,
+            };
 
-        let (_result, _telemetry) =
-            search_sse_2x2_with_telemetry_and_observer(&a, &b, &config, Some(&mut recorder));
-        assert_eq!(recorder.error(), None);
+            let (_result, _telemetry) =
+                search_sse_2x2_with_telemetry_and_observer(&a, &b, &config, Some(&mut recorder));
+            assert_eq!(recorder.error(), None);
+        }
 
         let conn = Connection::open(&path).unwrap();
         let run_count: i64 = conn
