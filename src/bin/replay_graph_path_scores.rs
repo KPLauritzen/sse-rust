@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use sse_core::graph_moves::enumerate_graph_move_successors;
 use sse_core::matrix::DynMatrix;
+use sse_core::path_scoring::{
+    candidate_score_specs, new_summaries, rank_target, Rank, ScoreSummary,
+};
 
 fn main() {
     let max_dim = 5;
@@ -38,59 +41,10 @@ struct KnownPath {
     segment_ends: Vec<usize>,
 }
 
-#[derive(Clone, Copy)]
-struct ScoreSpec {
-    name: &'static str,
-    score: fn(&DynMatrix, &DynMatrix, &DynMatrix) -> i64,
-}
-
-#[derive(Default)]
-struct ScoreSummary {
-    seen: usize,
-    top_1: usize,
-    top_5_pct: usize,
-    top_10_pct: usize,
-    percentile_sum: f64,
-    worst_percentile: f64,
-}
-
-impl ScoreSummary {
-    fn add(&mut self, rank: Rank) {
-        self.seen += 1;
-        let pct = rank.rank as f64 / rank.total as f64;
-        self.percentile_sum += pct;
-        self.worst_percentile = self.worst_percentile.max(pct);
-        if rank.rank == 1 {
-            self.top_1 += 1;
-        }
-        if pct <= 0.05 {
-            self.top_5_pct += 1;
-        }
-        if pct <= 0.10 {
-            self.top_10_pct += 1;
-        }
-    }
-
-    fn mean_percentile(&self) -> f64 {
-        if self.seen == 0 {
-            0.0
-        } else {
-            self.percentile_sum / self.seen as f64
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Rank {
-    rank: usize,
-    total: usize,
-    ties: usize,
-}
-
 fn analyze_local_steps(known: &KnownPath, max_dim: usize, max_entry: u32) {
     println!();
     println!("Local successor ranking:");
-    let specs = score_specs();
+    let specs = candidate_score_specs();
     let mut summaries = new_summaries(&specs);
     let final_target = known.path.last().expect("path should not be empty");
 
@@ -124,7 +78,7 @@ fn analyze_local_steps(known: &KnownPath, max_dim: usize, max_entry: u32) {
 fn analyze_bfs_segments(known: &KnownPath, max_dim: usize, max_entry: u32) {
     println!();
     println!("BFS segment next-frontier ranking:");
-    let specs = score_specs();
+    let specs = candidate_score_specs();
     let mut summaries = new_summaries(&specs);
     let final_target = known.path.last().expect("path should not be empty");
 
@@ -192,50 +146,6 @@ fn analyze_bfs_segments(known: &KnownPath, max_dim: usize, max_entry: u32) {
     print_summaries(&summaries);
 }
 
-fn score_specs() -> Vec<ScoreSpec> {
-    vec![
-        ScoreSpec {
-            name: "dimension_low",
-            score: |m, _, _| m.rows as i64,
-        },
-        ScoreSpec {
-            name: "entry_sum_low",
-            score: |m, _, _| entry_sum(m) as i64,
-        },
-        ScoreSpec {
-            name: "max_entry_low",
-            score: |m, _, _| m.max_entry() as i64,
-        },
-        ScoreSpec {
-            name: "row_col_types_low",
-            score: |m, _, _| (row_type_count(m) + col_type_count(m)) as i64,
-        },
-        ScoreSpec {
-            name: "support_types_low",
-            score: |m, _, _| (row_support_type_count(m) + col_support_type_count(m)) as i64,
-        },
-        ScoreSpec {
-            name: "duplicates_high",
-            score: |m, _, _| -(duplicate_row_pairs(m) as i64 + duplicate_col_pairs(m) as i64),
-        },
-        ScoreSpec {
-            name: "endpoint_sig_low",
-            score: |m, endpoint, _| signature_distance(m, endpoint) as i64,
-        },
-        ScoreSpec {
-            name: "segment_goal_sig_low",
-            score: |m, _, segment_goal| signature_distance(m, segment_goal) as i64,
-        },
-    ]
-}
-
-fn new_summaries(specs: &[ScoreSpec]) -> BTreeMap<&'static str, ScoreSummary> {
-    specs
-        .iter()
-        .map(|spec| (spec.name, ScoreSummary::default()))
-        .collect()
-}
-
 fn successor_set(current: &DynMatrix, max_dim: usize, max_entry: u32) -> Vec<DynMatrix> {
     let mut seen = HashSet::new();
     let mut successors = Vec::new();
@@ -245,36 +155,6 @@ fn successor_set(current: &DynMatrix, max_dim: usize, max_entry: u32) -> Vec<Dyn
         }
     }
     successors
-}
-
-fn rank_target(
-    candidates: &[DynMatrix],
-    target: &DynMatrix,
-    final_target: &DynMatrix,
-    segment_goal: &DynMatrix,
-    spec: ScoreSpec,
-) -> Option<Rank> {
-    let target_score = (spec.score)(target, final_target, segment_goal);
-    if !candidates.iter().any(|candidate| candidate == target) {
-        return None;
-    }
-
-    let mut better = 0usize;
-    let mut ties = 0usize;
-    for candidate in candidates {
-        let candidate_score = (spec.score)(candidate, final_target, segment_goal);
-        if candidate_score < target_score {
-            better += 1;
-        } else if candidate_score == target_score {
-            ties += 1;
-        }
-    }
-
-    Some(Rank {
-        rank: better + 1,
-        total: candidates.len(),
-        ties,
-    })
 }
 
 fn print_step_header(step: usize, current: &DynMatrix, target: &DynMatrix, candidates: usize) {
@@ -309,159 +189,6 @@ fn print_summaries(summaries: &BTreeMap<&'static str, ScoreSummary>) {
             summary.top_10_pct
         );
     }
-}
-
-fn entry_sum(m: &DynMatrix) -> u64 {
-    m.data.iter().map(|&value| value as u64).sum()
-}
-
-fn row_type_count(m: &DynMatrix) -> usize {
-    let mut rows = (0..m.rows)
-        .map(|row| (0..m.cols).map(|col| m.get(row, col)).collect::<Vec<_>>())
-        .collect::<Vec<_>>();
-    rows.sort();
-    rows.dedup();
-    rows.len()
-}
-
-fn col_type_count(m: &DynMatrix) -> usize {
-    let mut cols = (0..m.cols)
-        .map(|col| (0..m.rows).map(|row| m.get(row, col)).collect::<Vec<_>>())
-        .collect::<Vec<_>>();
-    cols.sort();
-    cols.dedup();
-    cols.len()
-}
-
-fn row_support_type_count(m: &DynMatrix) -> usize {
-    let mut rows = (0..m.rows)
-        .map(|row| {
-            (0..m.cols)
-                .map(|col| u8::from(m.get(row, col) > 0))
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    rows.sort();
-    rows.dedup();
-    rows.len()
-}
-
-fn col_support_type_count(m: &DynMatrix) -> usize {
-    let mut cols = (0..m.cols)
-        .map(|col| {
-            (0..m.rows)
-                .map(|row| u8::from(m.get(row, col) > 0))
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    cols.sort();
-    cols.dedup();
-    cols.len()
-}
-
-fn duplicate_row_pairs(m: &DynMatrix) -> usize {
-    let mut count = 0;
-    for left in 0..m.rows {
-        for right in left + 1..m.rows {
-            if (0..m.cols).all(|col| m.get(left, col) == m.get(right, col)) {
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
-fn duplicate_col_pairs(m: &DynMatrix) -> usize {
-    let mut count = 0;
-    for left in 0..m.cols {
-        for right in left + 1..m.cols {
-            if (0..m.rows).all(|row| m.get(row, left) == m.get(row, right)) {
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
-fn signature_distance(left: &DynMatrix, right: &DynMatrix) -> u64 {
-    let left_sig = Signature::new(left);
-    let right_sig = Signature::new(right);
-    let dim_distance = left_sig.dim.abs_diff(right_sig.dim) as u64;
-    10 * dim_distance
-        + left_sig.entry_sum.abs_diff(right_sig.entry_sum)
-        + left_sig.max_entry.abs_diff(right_sig.max_entry) as u64
-        + sorted_l1(&left_sig.row_sums, &right_sig.row_sums)
-        + sorted_l1(&left_sig.col_sums, &right_sig.col_sums)
-        + sorted_l1_u8(&left_sig.row_supports, &right_sig.row_supports)
-        + sorted_l1_u8(&left_sig.col_supports, &right_sig.col_supports)
-}
-
-struct Signature {
-    dim: usize,
-    entry_sum: u64,
-    max_entry: u32,
-    row_sums: Vec<u32>,
-    col_sums: Vec<u32>,
-    row_supports: Vec<u8>,
-    col_supports: Vec<u8>,
-}
-
-impl Signature {
-    fn new(m: &DynMatrix) -> Self {
-        let mut row_sums = vec![0u32; m.rows];
-        let mut col_sums = vec![0u32; m.cols];
-        let mut row_supports = vec![0u8; m.rows];
-        let mut col_supports = vec![0u8; m.cols];
-
-        for row in 0..m.rows {
-            for col in 0..m.cols {
-                let value = m.get(row, col);
-                row_sums[row] += value;
-                col_sums[col] += value;
-                if value > 0 {
-                    row_supports[row] += 1;
-                    col_supports[col] += 1;
-                }
-            }
-        }
-
-        row_sums.sort_unstable();
-        col_sums.sort_unstable();
-        row_supports.sort_unstable();
-        col_supports.sort_unstable();
-
-        Self {
-            dim: m.rows,
-            entry_sum: entry_sum(m),
-            max_entry: m.max_entry(),
-            row_sums,
-            col_sums,
-            row_supports,
-            col_supports,
-        }
-    }
-}
-
-fn sorted_l1(left: &[u32], right: &[u32]) -> u64 {
-    let len = left.len().max(right.len());
-    let mut total = 0u64;
-    for idx in 0..len {
-        let left_value = left.get(idx).copied().unwrap_or(0);
-        let right_value = right.get(idx).copied().unwrap_or(0);
-        total += left_value.abs_diff(right_value) as u64;
-    }
-    total
-}
-
-fn sorted_l1_u8(left: &[u8], right: &[u8]) -> u64 {
-    let len = left.len().max(right.len());
-    let mut total = 0u64;
-    for idx in 0..len {
-        let left_value = left.get(idx).copied().unwrap_or(0);
-        let right_value = right.get(idx).copied().unwrap_or(0);
-        total += left_value.abs_diff(right_value) as u64;
-    }
-    total
 }
 
 fn mat(dim: usize, data: Vec<u32>) -> DynMatrix {
