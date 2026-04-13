@@ -25,3 +25,30 @@
 - Close finished work with `bd close <id> --reason "..." --json`.
 - Avoid `bd edit`; use non-interactive `bd update` flags instead.
 - `bd` may be in use by another agent or process. If you hit an embedded-dolt exclusive-lock error, the usual resolution is to wait briefly and try again.
+
+## Beads Issue Tracker
+
+This project uses `bd` (beads) for issue tracking. Run `bd prime` to see the full workflow context and command reference.
+
+### Quick Reference
+
+```bash
+bd ready                 # Find available work
+bd show <id>             # View issue details
+bd update <id> --claim   # Claim work
+bd close <id>            # Complete work
+```
+
+### Rules
+
+- Use `bd` for all task tracking instead of markdown TODO lists or ad hoc trackers
+- Run `bd prime` when you need the detailed workflow and session-close guidance
+- Use `bd remember` for persistent project knowledge instead of `MEMORY.md` files
+
+## Session Completion
+
+When ending a work session:
+
+1. File issues for remaining work that still needs follow-up
+2. Run quality gates when code changed
+3. Update issue status so finished and in-progress work is reflected in `bd`
