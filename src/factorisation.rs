@@ -205,6 +205,18 @@ fn valid_3x2_u_rows_for_target_row(target_row: [u32; 3], max_entry: u32) -> Vec<
 /// compute the 1D null space, find a particular solution, then enumerate
 /// the free parameter t such that x0 + t*n has all entries in [0, max_entry].
 pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<[u32; 3]> {
+    let mut results = Vec::new();
+    solve_nonneg_2x3_into(u, b, max_entry, &mut results);
+    results
+}
+
+fn solve_nonneg_2x3_into(
+    u: &[[i64; 3]; 2],
+    b: &[i64; 2],
+    max_entry: u32,
+    results: &mut Vec<[u32; 3]>,
+) {
+    results.clear();
     let me = max_entry as i64;
 
     // Compute 2×2 minors: d_ij = u[0][i]*u[1][j] - u[0][j]*u[1][i]
@@ -224,7 +236,7 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
     } else {
         // Rank < 2, no solutions in general (unless b is in the column space,
         // but we skip this degenerate case).
-        return vec![];
+        return;
     };
 
     // Null vector: for pivot columns (i, j) and free column k,
@@ -249,7 +261,7 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
     let xp1_num = b[1] * u[0][p0] - b[0] * u[1][p0];
 
     if xp0_num % det != 0 || xp1_num % det != 0 {
-        return vec![];
+        return;
     }
 
     let mut x0 = [0i64; 3];
@@ -267,9 +279,9 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
     if g == 0 {
         // Null vector is zero — unique solution, just check bounds.
         if x0.iter().all(|&v| v >= 0 && v <= me) {
-            return vec![[x0[0] as u32, x0[1] as u32, x0[2] as u32]];
+            results.push([x0[0] as u32, x0[1] as u32, x0[2] as u32]);
         }
-        return vec![];
+        return;
     }
     let n = [null[0] / g as i64, null[1] / g as i64, null[2] / g as i64];
 
@@ -281,7 +293,7 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
         if n[i] == 0 {
             // x0[i] must be in [0, me] on its own.
             if x0[i] < 0 || x0[i] > me {
-                return vec![];
+                return;
             }
         } else if n[i] > 0 {
             // t >= ceil(-x0[i] / n[i]) and t <= floor((me - x0[i]) / n[i])
@@ -298,9 +310,8 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
         }
     }
 
-    let mut results = Vec::new();
     if t_min > t_max {
-        return results;
+        return;
     }
 
     for t in t_min..=t_max {
@@ -311,7 +322,6 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
         ];
         results.push(x);
     }
-    results
 }
 
 /// Solve U·x = b where U is 3×2 (given as rows), b is 3-vector.
@@ -2205,6 +2215,9 @@ fn enumerate_sq3_from_row0(
     let [u00, u01, u02] = row0;
     let me = max_entry;
     let mut results = Vec::new();
+    let mut v_col0 = Vec::new();
+    let mut v_col1 = Vec::new();
+    let mut v_col2 = Vec::new();
 
     for u10 in 0..=me {
         for u11 in 0..=me {
@@ -2233,17 +2246,32 @@ fn enumerate_sq3_from_row0(
                 ];
 
                 // Solve for each column of V: u_top · v_j = [C[0,j], C[1,j]].
-                let v_col0 = solve_nonneg_2x3(&u_top, &[c_cols[0][0], c_cols[0][1]], max_entry);
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[0][0], c_cols[0][1]],
+                    max_entry,
+                    &mut v_col0,
+                );
                 if v_col0.is_empty() {
                     continue;
                 }
 
-                let v_col1 = solve_nonneg_2x3(&u_top, &[c_cols[1][0], c_cols[1][1]], max_entry);
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[1][0], c_cols[1][1]],
+                    max_entry,
+                    &mut v_col1,
+                );
                 if v_col1.is_empty() {
                     continue;
                 }
 
-                let v_col2 = solve_nonneg_2x3(&u_top, &[c_cols[2][0], c_cols[2][1]], max_entry);
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[2][0], c_cols[2][1]],
+                    max_entry,
+                    &mut v_col2,
+                );
                 if v_col2.is_empty() {
                     continue;
                 }

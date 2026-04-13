@@ -208,3 +208,9 @@
 
 - `guided-segment-timeout` Added generic per-segment timeout support to guided refinement.
   Kept. `GuidedRefinementConfig` and the `search` CLI now expose an optional `segment_timeout_secs` / `--guided-segment-timeout`, and the generic guided-refinement segment search enforces it with 256-node frontier chunk checks so one hard shortcut attempt no longer monopolizes a run.
+
+- `profile-mixed-brix-k3` Added gated `pprof` / `dhat` hooks to the `search` CLI and profiled the mixed `brix_ruiz_k3` endpoint run directly.
+  `pprof` concentrated on `visit_all_factorisations_with_family`, especially `enumerate_sq3_from_row0` and `solve_nonneg_2x3`, while reduced-lag `dhat` still allocated about `200 MB` across `2.58M` blocks by layer 3, so the next wins should come from cutting factorisation-side allocation churn rather than graph heuristics.
+
+- `2026-04-13-1455-solver-buffer-reuse` Reused `solve_nonneg_2x3` output buffers inside the hot `3x3` square-factorisation loop instead of allocating fresh vectors every call.
+  Kept. The second saved harness rerun dropped total elapsed from `10858 ms` to `10593 ms` with identical scores, while the mixed `brix_ruiz_k3`, `brix_ruiz_k3_wide_probe`, and `brix_ruiz_k4_probe` cases all got faster.

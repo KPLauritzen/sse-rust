@@ -1,6 +1,10 @@
 use std::fs;
 use std::process::ExitCode;
 
+#[cfg(feature = "dhat-profile")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::search::{
@@ -25,9 +29,23 @@ struct Cli {
     shortcut_search: ShortcutSearchConfig,
     json: bool,
     telemetry: bool,
+    pprof: bool,
+    dhat: bool,
     visited_db: Option<String>,
     write_guide_artifact: Option<String>,
 }
+
+#[cfg(feature = "pprof-profile")]
+type CpuProfileGuard = pprof::ProfilerGuard<'static>;
+
+#[cfg(not(feature = "pprof-profile"))]
+struct CpuProfileGuard;
+
+#[cfg(feature = "dhat-profile")]
+type HeapProfiler = dhat::Profiler;
+
+#[cfg(not(feature = "dhat-profile"))]
+struct HeapProfiler;
 
 fn main() -> ExitCode {
     match run() {
@@ -70,50 +88,27 @@ where
         guided_refinement: cli.guided_refinement.clone(),
         shortcut_search: cli.shortcut_search.clone(),
     };
+    let cpu_profile = start_cpu_profile(cli.pprof)?;
+    let _heap_profile = start_heap_profile(cli.dhat)?;
 
-    if let Some(path) = cli.visited_db.as_deref() {
+    let (result, telemetry) = if let Some(path) = cli.visited_db.as_deref() {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut recorder = SqliteGraphRecorder::new(path)?;
-            let (result, telemetry) =
+            let profiled_result =
                 execute_search_request_and_observer(&request, Some(&mut recorder))?;
             if let Some(err) = recorder.error() {
                 return Err(format!("failed to persist visited graph to {path}: {err}"));
             }
-            maybe_write_guide_artifact(
-                &request,
-                cli.stage,
-                &result,
-                cli.write_guide_artifact.as_deref(),
-            )?;
-            if cli.json {
-                print_json(
-                    &cli.a,
-                    &cli.b,
-                    cli.stage,
-                    &result,
-                    &telemetry,
-                    cli.telemetry,
-                );
-            } else {
-                print_pretty(
-                    &cli.a,
-                    &cli.b,
-                    cli.stage,
-                    &result,
-                    &telemetry,
-                    cli.telemetry,
-                );
-            }
-            return Ok(exit_code(&result));
+            profiled_result
         }
         #[cfg(target_arch = "wasm32")]
         {
             return Err("--visited-db is not supported on wasm32 targets".to_string());
         }
-    }
-
-    let (result, telemetry) = execute_search_request(&request)?;
+    } else {
+        execute_search_request(&request)?
+    };
     maybe_write_guide_artifact(
         &request,
         cli.stage,
@@ -139,7 +134,9 @@ where
             cli.telemetry,
         );
     }
-    Ok(exit_code(&result))
+    let code = exit_code(&result);
+    finish_cpu_profile(cpu_profile);
+    Ok(code)
 }
 
 fn exit_code(result: &SearchRunResult) -> ExitCode {
@@ -166,6 +163,8 @@ where
     let mut shortcut_search = ShortcutSearchConfig::default();
     let mut json = false;
     let mut telemetry = false;
+    let mut pprof = false;
+    let mut dhat = false;
     let mut visited_db = None;
     let mut write_guide_artifact = None;
 
@@ -204,7 +203,9 @@ where
                        --write-guide-artifact PATH\n\
                                                write a reusable full_path guide artifact JSON file\n\
                        --json                   output JSON instead of human-readable text\n\
-                       --telemetry              include search telemetry in output"
+                       --telemetry              include search telemetry in output\n\
+                       --pprof                  print a terminal CPU profile (requires pprof-profile feature)\n\
+                       --dhat                   print a heap profile summary on exit (requires dhat-profile feature)"
                     .to_string());
             }
             "--max-lag" => {
@@ -281,6 +282,8 @@ where
             }
             "--json" => json = true,
             "--telemetry" => telemetry = true,
+            "--pprof" => pprof = true,
+            "--dhat" => dhat = true,
             other if other.starts_with('-') => {
                 return Err(format!("unknown option: {other}"));
             }
@@ -313,9 +316,61 @@ where
         shortcut_search,
         json,
         telemetry,
+        pprof,
+        dhat,
         visited_db,
         write_guide_artifact,
     })
+}
+
+fn start_cpu_profile(enabled: bool) -> Result<Option<CpuProfileGuard>, String> {
+    if !enabled {
+        return Ok(None);
+    }
+
+    #[cfg(feature = "pprof-profile")]
+    {
+        let guard = pprof::ProfilerGuardBuilder::default()
+            .frequency(1000)
+            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+            .build()
+            .map_err(|err| format!("failed to start pprof profiler: {err}"))?;
+        Ok(Some(guard))
+    }
+
+    #[cfg(not(feature = "pprof-profile"))]
+    {
+        Err("--pprof requires building with --features pprof-profile".to_string())
+    }
+}
+
+fn finish_cpu_profile(_guard: Option<CpuProfileGuard>) {
+    #[cfg(feature = "pprof-profile")]
+    if let Some(guard) = _guard {
+        match guard.report().build() {
+            Ok(report) => {
+                eprintln!("--- CPU profile ---");
+                eprintln!("{report:?}");
+            }
+            Err(err) => eprintln!("--- CPU profile build failed: {err}"),
+        }
+    }
+}
+
+fn start_heap_profile(enabled: bool) -> Result<Option<HeapProfiler>, String> {
+    if !enabled {
+        return Ok(None);
+    }
+
+    #[cfg(feature = "dhat-profile")]
+    {
+        Ok(Some(dhat::Profiler::new_heap()))
+    }
+
+    #[cfg(not(feature = "dhat-profile"))]
+    {
+        Err("--dhat requires building with --features dhat-profile".to_string())
+    }
 }
 
 fn maybe_write_guide_artifact(
