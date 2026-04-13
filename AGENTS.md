@@ -12,3 +12,4 @@
 - Update work with `bd update <id> --notes "..." --status ... --priority ... --json`.
 - Close finished work with `bd close <id> --reason "..." --json`.
 - Avoid `bd edit`; use non-interactive `bd update` flags instead.
+- `bd` may be in use by another agent or process. If you hit an embedded-dolt exclusive-lock error, the usual resolution is to wait briefly and try again.
