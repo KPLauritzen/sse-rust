@@ -2,11 +2,12 @@
 
 ## Project Goals
 
-This project is currently optimizing for three concrete search goals:
+This project is currently optimizing for four concrete search goals:
 
 1. Find any path for `k = 3`. Solved.
 2. Find a new shortest path with lag `< 7` for `k = 3`.
 3. Find any path for `k = 4` or above.
+4. Make the main solver endpoint-agnostic for square matrices up to dimension 4, possibly higher later.
 
 ## Problem Statement
 

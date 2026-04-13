@@ -1,4 +1,4 @@
-# RFC: Integrate Refinement And Shortcut Search Into The Main Solver
+# RFC: Generalize The Main Solver And Integrate Guided Search Stages
 
 ## Status
 
@@ -6,388 +6,600 @@ Proposed
 
 ## Summary
 
-Integrate the current refinement and shortcutting workflows from the research
-binaries into the main search stack and CLI, so the project has one primary
-solver with multiple search strategies instead of a small main solver plus a
-growing sidecar lab.
+Evolve the project toward one primary solver for arbitrary square endpoint
+matrices, with explicit guided search stages and a stronger experiment harness.
 
 In practice, this means:
 
-- keeping `search` as the primary entry point,
-- moving graph-path guidance and shortcut compression behind explicit strategy
-  stages and budgets,
-- treating `k = 3` and `k >= 4` Brix-Ruiz cases as first-class search targets,
-- and reserving sidecar binaries for temporary diagnostics, profiling, and
-  one-off experiments rather than core solver capability.
+- keeping `search` as the canonical solver entry point,
+- making the solver core endpoint-agnostic for square matrices rather than
+  implicitly optimized around `2x2` endpoints,
+- integrating guide-aware refinement and shortcut search as generic solver
+  stages rather than family-specific sidecars,
+- keeping benchmark-family logic such as Brix-Ruiz `k = 3` and `k = 4` in
+  helpers, fixtures, seeded databases, and the harness rather than hardcoding
+  it into the solver,
+- and treating campaign scheduling as a harness concern, not as a blurrier
+  version of solver mode.
+
+The immediate target is square endpoints up to dimension `4`, with room to
+raise that bound later as the search stack improves.
 
 ## Context
 
-The project has now crossed an important threshold:
+The project has crossed two thresholds at once.
 
-1. `k = 3` has a known graph-only path.
-2. The remaining research goals are not "find any witness at all" in the
-   abstract, but:
-   - find a shorter `k = 3` path, ideally below lag `7`,
-   - and find any path for `k = 4` or above.
+First, the hard benchmark family is clearer than before:
 
-At the same time, the codebase has split into two realities:
+1. `k = 3` has a known path.
+2. The near-term search goals are:
+   - find a shorter `k = 3` path, ideally with lag `< 7`,
+   - find any path for `k = 4` or above,
+   - and make the main solver itself less special-cased around `2x2`.
+
+Second, the codebase now has an architectural split:
 
 - the main solver path in [`src/search.rs`](../src/search.rs) and the `search`
   CLI,
-- and a collection of research binaries in [`src/bin/`](../src/bin/) that now
-  contain some of the most relevant search machinery for the hard cases.
+- and a growing collection of research binaries in [`src/bin/`](../src/bin/)
+  that contain guide search, shortcut refinement, waypoint logic, and
+  family-specific orchestration.
 
-Examples of the current split:
+That split was useful while the project was still proving out ideas, but it now
+creates two problems:
 
-- `search` supports `mixed` and `graph-only` modes and is the public-facing
-  solver.
-- sidecar binaries such as `find_brix_ruiz_path_shortcuts`,
-  `compare_brix_ruiz_graph_paths`, `check_lind_marcus_path`, and the waypoint
-  and graph-path tools contain search logic that is directly relevant to the
-  hard benchmark family.
+- the generic solver surface is weaker than the best search workflows in the
+  repo,
+- and the strongest search workflows are still expressed through binaries that
+  are narrow in scope, hard to compare, and awkward to resume.
 
-This split was useful while the project was still answering questions like:
+There is also a deeper design issue underneath the current split:
 
-- can graph-only search recover any known `k = 3` witness at all,
-- can waypoint-guided compression beat blind endpoint search,
-- and which move families are worth keeping?
+- the dynamic search path already accepts arbitrary square endpoints,
+- but solver behavior is still materially split between the `2x2` and dynamic
+  paths,
+- persistence and observer integration are still effectively centered on
+  `2x2` endpoint search,
+- and some of the most productive refinement logic is currently tailored to the
+  Brix-Ruiz `k = 3` case rather than written as generic guided search
+  machinery.
 
-But the split is now starting to hurt both correctness and iteration:
-
-- the main CLI no longer reflects the strongest search capability in the repo,
-- profiling the "main solver" does not necessarily profile the full search
-  workflow that matters for `k = 3` and `k = 4`,
-- budget management is fragmented across binaries,
-- and expensive long-running refinement/shortcut experiments are hard to
-  compare, resume, or integrate with the normal telemetry surface.
+If the project keeps building outward from those local assumptions, the solver
+will become harder to generalize later.
 
 ## Problem
 
-The current architecture makes it too easy for important search ideas to remain
-outside the main solver path.
+The current architecture is too specialized in the wrong places.
 
-That has three concrete costs.
+### 1. The Solver Is Not Yet Cleanly Generalized
 
-### 1. Product Capability Drift
+The project wants a main solver that works for arbitrary square matrices, but
+the current solver surface still has `2x2`-specific seams.
 
-The project presents `search` as the main solver, but meaningful progress on
-hard cases increasingly comes from sidecar flows rather than from the main CLI.
+Those seams are not only about persistence.
+They also include richer `2x2` invariant filtering, observer support, and
+proof shortcuts that do not yet have dynamic-path equivalents.
 
-This creates an avoidable mismatch between:
+That is tolerable for local progress on the current hard examples, but it is
+the wrong direction for the architecture.
 
-- what the repo can actually do,
-- what the main CLI exposes,
-- and what the harness can score directly.
+### 2. Family-Specific Workflows Are Drifting Into Core Capability
 
-### 2. Research Turnaround Cost
+The Brix-Ruiz `k = 3` and `k = 4` cases are the best current benchmarks, but
+they should remain benchmark families, not become hidden assumptions of the
+solver.
 
-Raw compute is already a bottleneck:
+The solver should search square endpoints.
+The harness should decide which endpoint families, seeds, schedules, and
+budgets to run.
 
-- a graph-only `k = 3` solution is available in seconds,
-- but end-to-end shortcut compression can require tens of minutes.
+### 3. "Mode", "Strategy", And "Campaign" Are Blurry
 
-If the refinement machinery remains outside the main search stack, there is no
-single place to express:
+The repo currently mixes together several different concepts:
 
-- fast inner-loop budgets,
-- slower guided compression budgets,
-- resumable long-running campaigns,
-- or shared telemetry and persistence across those stages.
+- low-level substrate selection such as `mixed` versus `graph-only`,
+- higher-level stages such as guide generation or route refinement,
+- and long-running experiment schedules that vary bounds, reuse persistence,
+  and compare runs.
 
-### 3. Strategy Fragmentation
+Those are distinct concerns and should not share one overloaded vocabulary.
 
-The repo now contains multiple search substrates:
+### 4. The Harness Is Too Weak For The Next Phase
 
-- blind graph search,
-- mixed factorisation search,
-- structured graph moves,
-- waypoint-guided graph search,
-- shortcut/refinement search seeded by known guide paths,
-- and concrete-shift sidecars.
+A lot of future progress will come from running more disciplined experiments:
 
-These should be organized as strategies inside one solver pipeline, not treated
-as separate disconnected programs.
+- repeated bound schedules,
+- A/B comparisons across strategies,
+- persistent result reuse,
+- and scoring based on both outcome and search quality.
+
+That requires a stronger harness and result model than the project currently
+has.
 
 ## Goals
 
-- Make the main CLI the canonical interface to the strongest search workflows in
-  the repo.
-- Treat refinement and shortcutting as solver strategies, not sidecar-only
-  experiments.
-- Preserve fast iteration by separating cheap inner-loop stages from expensive
-  long-running stages.
-- Reuse existing persistence and telemetry surfaces where possible.
-- Keep default behavior stable until the integrated strategies are mature.
-- Make `k = 3` lag improvement and `k = 4+` path discovery first-class search
-  objectives.
+- Make the main solver endpoint-agnostic for square matrices, with the current
+  practical target being dimensions up to `4`.
+- Make the solver orchestration boundary endpoint-agnostic even where some
+  proof shortcuts remain intentionally `2x2`-specific for a while, provided
+  those special cases are explicit.
+- Keep `search` as the canonical solver interface.
+- Integrate guide-aware refinement and shortcutting as generic solver stages,
+  not family-specific sidecars.
+- Keep benchmark-family logic such as `k = 3` and `k = 4` out of the solver
+  core.
+- Separate low-level search mode, higher-level stage orchestration, and harness
+  campaign scheduling.
+- Strengthen the harness so it becomes the main loop for iterative search
+  improvement.
+- Keep default solver behavior stable until the generalized orchestration is in
+  place and tested.
 
 ## Non-Goals
 
-- Do not merge every experimental binary into the main CLI wholesale.
-- Do not remove one-off diagnostics that are genuinely useful for temporary
-  inspection or paper reproduction.
-- Do not force the default `search` mode to immediately run the most expensive
-  shortcut pipeline.
-- Do not change correctness semantics to accept heuristic witnesses as proofs.
+- Do not hardcode Brix-Ruiz `k = 3`, `k = 4`, literature waypoints, or other
+  benchmark-family endpoints into the main solver.
+- Do not merge every research binary into `search` wholesale.
+- Do not force expensive guided refinement into the default search path.
+- Do not change correctness semantics to treat heuristic guides as proofs.
+- Do not pretend the current persistence model is already generic enough when it
+  is not.
+
+## Design Principles
+
+### Solver Core: Generic Endpoints
+
+The solver core should operate on arbitrary square endpoints plus an explicit
+request configuration.
+
+It should not know why a given pair matters.
+It should not know that a run belongs to `k = 3` or `k = 4`.
+It should not assume literature waypoints, seeded paths, or benchmark-family
+fixtures unless those are provided through generic interfaces.
+
+### Harness: Families, Schedules, And Scoring
+
+The harness should own:
+
+- benchmark families,
+- run schedules,
+- seeded guide databases,
+- persistence reuse policy across runs,
+- and scoring/reporting.
+
+This is where Brix-Ruiz-specific workflows belong.
+
+### Helpers And Fixtures: Reproducibility
+
+Case-specific helpers remain useful for:
+
+- starting a known benchmark run,
+- seeding a database with known paths,
+- reproducing a literature example,
+- or checking a narrow family-specific claim.
+
+Those are valid support tools, but they should not define the solver
+architecture.
 
 ## Proposal
 
-### 1. Introduce A Strategy Layer In The Main Solver
+### 1. Generalize The Solver Request Surface First
 
-Keep the low-level search primitives where they are, but add an explicit
-strategy layer that can orchestrate the current search substrates.
+Before integrating more guided search logic, make the orchestration boundary
+generic for square endpoints.
 
-The main solver should support staged execution such as:
+This phase should explicitly reconcile the current semantic split between the
+`2x2` and dynamic solver paths.
+The project should decide which behaviors become generic, which remain
+intentionally `2x2`-specialized for now, and how that distinction is expressed
+in the API, telemetry, and CLI.
 
-- `graph-only`
+The solver should accept a request that can describe:
+
+- arbitrary square endpoints,
+- low-level substrate selection,
+- optional guide artifacts,
+- stage budgets,
+- and persistence hooks.
+
+This is the architectural prerequisite for integrating refinement in a way that
+does not keep inheriting `2x2` assumptions.
+
+This request surface should be paired with a correspondingly generic result,
+event, and observer boundary, so dynamic endpoint search can participate in the
+same telemetry and persistence pipeline rather than remaining a parallel path.
+
+In practice, this means the project should treat the generic result/event model
+as the dependency that unlocks generic observers and persistence, rather than
+trying to generalize persistence in isolation.
+
+### 2. Separate Three Layers Explicitly
+
+The project should distinguish these terms consistently.
+
+#### Search Mode
+
+A low-level substrate choice used inside one search stage.
+
+Examples:
+
 - `mixed`
-- `guided-shortcut`
-- `campaign`
+- `graph-only`
 
-These names are illustrative; the important part is that they are explicit and
-budgeted.
+This is close to what `SearchMode` already means today.
 
-Each strategy stage should be able to:
+#### Strategy Stage
 
-- receive a common search request,
-- emit telemetry in a common format,
-- optionally consume persisted guide data,
-- and either return a final witness or hand off to the next stage.
+A bounded solver step that consumes a request and either returns a witness or
+produces artifacts for the next step.
 
-### 2. Make Shortcutting A First-Class Solver Stage
+Examples:
 
-The current shortcut/refinement workflow should be promoted from sidecar logic
-to an internal strategy that can be invoked by the main CLI.
+- endpoint search
+- guide generation
+- guide refinement
+- segment-shortening
 
-That stage should:
+Stages are part of the solver-side orchestration layer.
 
-- accept an optional guide path or waypoint set,
-- run bounded segment-shortening or refinement search,
-- persist improved segment results,
-- and return a shorter path if found.
+#### Campaign
 
-The key point is that this should not be wired in as an unstructured fallback.
-It should be an explicit stage with its own budgets and telemetry.
+A harness-level run plan that selects cases, stages, schedules, budgets, and
+persistence reuse across repeated runs.
 
-### 3. Separate Fast And Slow Search Loops
+Examples:
 
-The integrated solver should acknowledge that the project now has multiple
-iteration cadences.
+- iterative deepening over bounds,
+- compare `mixed` versus `graph-only`,
+- use yesterday's guide store as seeds for today's refinement run.
 
-Recommended structure:
+Campaign is not a synonym for search mode.
 
-- Fast loop:
-  `graph-only`, `mixed`, and cheap proposal generation on `k = 3` and `k = 4`
-- Medium loop:
-  reduced-budget guided shortcutting on selected segments or guide paths
-- Long loop:
-  full campaign runs that attempt route compression or `k = 4+` discovery with
-  resume/persistence
+### 3. Make Guided Refinement Generic Before Making It Mainline
 
-The main CLI should let the user select these explicitly rather than embedding
-all of them in one opaque default run.
+The current shortcut/refinement workflow should not be moved into `search`
+unchanged, because it is still too tied to one benchmark family.
 
-### 4. Reuse The Existing Persistence Surface
+Instead, first extract generic concepts:
 
-The current persisted visited-graph support in the main `search` CLI and the
-existing sqlite-backed guide-path work already point in the right direction.
+- guide path input,
+- waypoint or segment selection,
+- bounded segment search,
+- route recomposition,
+- improved-route persistence,
+- and stage-level telemetry.
 
-The integrated design should converge on:
+Only after that extraction should a guided refinement stage become part of the
+main solver stack.
 
-- one canonical visited-graph/persistence story for ordinary search,
-- one canonical guide/result store for shortcut campaigns,
-- and explicit CLI options for reading and writing both.
+### 4. Generalize Persistence Instead Of "Reusing" It Blindly
 
-This avoids re-solving the same expensive segments repeatedly and reduces the
-cost of long-running refinement work.
+The current persistence story is promising but incomplete.
 
-### 5. Keep Research Binaries, But Demote Their Role
+The integrated design should converge on two generic persistence surfaces:
 
-After integration, sidecar binaries should mostly serve one of three jobs:
+- a solver-run store for endpoint search telemetry, visited nodes, and solver
+  artifacts,
+- and a guide/result store for reusable paths, route improvements, and other
+  guided-search outputs.
 
-- profiling and instrumentation,
-- paper-specific reproduction checks,
-- or targeted diagnostics while a new idea is still unproven.
+These stores should be keyed by generic endpoint/config identity, not by one
+benchmark family.
 
-They should no longer be the only place where the strongest search logic lives.
+The important point is not to claim that persistence is already unified.
+It is to make unification an explicit design goal.
 
-## Proposed CLI Direction
+### 4a. Define Guide Artifacts Before Wiring Them Into The CLI
 
-The current `search` CLI already has the right shape for this evolution:
+The project should not introduce `--stage`, `--guide-db`, or equivalent solver
+flags until guide artifacts are defined in generic terms.
 
-- it accepts endpoints,
-- it has explicit search-mode flags,
-- it supports telemetry,
-- and it can persist visited search graphs.
+At minimum, a reusable guide artifact should describe:
 
-The next step is to extend it with explicit strategy controls rather than adding
-more separate binaries.
+- the endpoint identity it applies to,
+- the artifact kind, such as full path, segment, waypoint set, or proposal
+  batch,
+- the matrix payload or references needed to replay it,
+- provenance, such as literature, seeded fixture, prior solver run, or manual
+  import,
+- validation status,
+- compatibility constraints for stages that consume it,
+- and quality metadata such as lag, cost, or score.
 
-Illustrative options:
+Guide artifacts should be generic solver inputs, not family labels wrapped in a
+database row.
+
+### 5. Keep Benchmark Families Out Of Core Search Logic
+
+The Brix-Ruiz family should remain central in the harness and regression
+surface, but not in the solver core.
+
+That means:
+
+- no hardcoded `k = 3` or `k = 4` endpoint assumptions inside the main solver,
+- no solver stages that require literature-specific waypoints to exist,
+- and no persistence schema that encodes one family as the primary use case.
+
+It is fine to ship helper binaries or scripts that:
+
+- launch Brix-Ruiz runs,
+- seed guide databases from known paths,
+- or replay literature witnesses.
+
+Those belong next to the solver, not inside it.
+
+### 6. Invest In The Harness As A First-Class Product Surface
+
+The harness is likely to be the main multiplier for future search improvement.
+
+The next harness should support:
+
+- endpoint corpora for arbitrary square cases,
+- repeated schedules over bounds and stages,
+- result reuse across runs,
+- comparison across commits or configurations,
+- and scoring that tracks both correctness outcome and search quality.
+
+The minimum viable version of that harness support is a prerequisite for solver
+generalization work, not a later convenience.
+If the project cannot express non-`2x2` cases in the corpus and run them
+through the normal comparison loop, then endpoint-agnostic solver changes will
+not have an adequate regression surface.
+
+For current goals, "search quality" should include at least:
+
+- witness found or not,
+- best lag found so far,
+- cost of the best witness search,
+- and useful stage-level telemetry.
+
+## Proposed CLI And Interface Direction
+
+The main `search` CLI should stay focused on solving one endpoint pair.
+
+Illustrative direction:
 
 ```text
 search A B \
-  --strategy mixed \
-  --strategy graph-only \
-  --strategy guided-shortcut \
-  --guide-db k3-guides.sqlite \
-  --segment-timeout-ms 10000 \
-  --campaign-budget-ms 60000
+  --search-mode mixed \
+  --stage endpoint-search \
+  --stage guided-refinement \
+  --guide-db guides.sqlite \
+  --segment-timeout-ms 10000
 ```
 
-This example is intentionally schematic. The exact flag names can change, but
-the core principle should remain:
+This is intentionally schematic.
+The important part is the separation of concepts:
 
-- one CLI,
-- multiple named stages,
-- explicit budgets,
-- explicit persistence.
+- `--search-mode` selects a low-level substrate,
+- `--stage` selects bounded solver stages,
+- and repeated schedules belong to the harness rather than being overloaded into
+  the solver CLI.
+
+The harness can then build on top with commands or configs of the form:
+
+```text
+research-harness run family/brix-ruiz-k3.json \
+  --schedule iterative-deepening \
+  --reuse-db guides.sqlite \
+  --compare baseline,new-strategy
+```
+
+Again, the exact interface can change.
+The architectural boundary is the key point.
+
+However, the CLI should only expose guide-oriented flags once the underlying
+guide artifact model is generic enough that those flags do not silently mean
+"Brix-Ruiz sidecar inputs, but under a new name".
 
 ## Architecture Sketch
 
 ### Core Layer
 
-Unchanged responsibilities:
+Responsibilities:
 
 - move generation,
 - factorisation enumeration,
 - invariants,
 - graph moves,
 - witness validation,
-- path reconstruction.
+- path reconstruction,
+- and endpoint-agnostic square-matrix search.
 
-### Strategy Layer
-
-New responsibilities:
-
-- stage selection and ordering,
-- waypoint/guide consumption,
-- segment-shortening orchestration,
-- budget enforcement,
-- resume and persistence policy.
-
-This is the layer that should absorb the current shortcut/refinement orchestration.
-
-### CLI/Harness Layer
+### Orchestration Layer
 
 Responsibilities:
 
-- expose strategies and budgets cleanly,
-- present results and telemetry,
-- allow campaign resumption,
-- and align the harness with real project objectives.
+- stage selection and ordering,
+- guide and artifact consumption,
+- stage budget enforcement,
+- generic persistence hooks,
+- and stage-level telemetry aggregation.
+
+This is the layer that should absorb guided refinement once the stage interface
+is generic enough.
+
+### Harness Layer
+
+Responsibilities:
+
+- benchmark families,
+- campaign scheduling,
+- persistence reuse across runs,
+- scoring and comparison,
+- and experiment reporting.
+
+This is the layer that should encode Brix-Ruiz-focused workflows.
 
 ## Why This Is Better Than More Sidecars
 
-### It Makes Profiling Honest
+### It Generalizes In The Right Direction
 
-Once shortcutting and refinement live inside the main solver path, profiling the
-main CLI actually profiles the real search stack.
+The solver grows toward arbitrary square endpoints, not toward a larger pile of
+case-specific binaries.
 
-### It Improves Research Throughput
+### It Keeps Benchmark Logic Where It Belongs
 
-A single staged solver makes it easier to:
+The project can stay heavily focused on `k = 3` and `k = 4` without teaching
+the solver that those are special endpoint families.
 
-- short-circuit expensive stages when cheap stages already fail,
-- reuse persisted results,
-- and compare strategies under the same telemetry surface.
+### It Clarifies The Experiment Loop
 
-### It Clarifies Project Identity
+The harness becomes the place to iterate on schedules, bounds, persistence
+reuse, and comparisons, which is where a lot of future progress is likely to
+come from.
 
-The project is now fundamentally about hard search:
+### It Makes Profiling More Honest
 
-- shortening `k = 3`,
-- and solving `k = 4+`.
-
-Those are not sidecar activities. They are the main content of the solver.
+Once guided stages are integrated through generic orchestration, profiling the
+main solver path measures the actual solver machinery rather than a subset that
+excludes the useful guided logic.
 
 ## Risks
 
-### 1. The Main CLI Becomes Too Complex
+### 1. The Solver Boundary Remains Too Vague
 
 Risk:
-integrating too many experimental ideas at once could turn `search` into a
-large, hard-to-reason-about pile of fallbacks.
+the project could keep mixing substrate choice, stage orchestration, and
+campaign scheduling.
 
 Mitigation:
 
-- integrate one strategy at a time,
-- keep default behavior stable,
-- and require each new strategy to have explicit budgets and telemetry.
+- define the vocabulary explicitly,
+- reflect that vocabulary in types and CLI flags,
+- and keep campaign logic in the harness.
 
-### 2. Expensive Search Becomes The Default
+### 2. Guided Refinement Gets Integrated Too Early
 
 Risk:
-integrating shortcutting could accidentally make ordinary runs much slower.
+a family-specific shortcut workflow could be imported into the main solver
+before its abstractions are generic.
 
 Mitigation:
 
-- keep long-running stages opt-in at first,
-- and treat campaign search as a named mode rather than implicit behavior.
+- genericize guide ingestion, segment search, and persistence first,
+- and only then promote the stage into the solver pipeline.
 
-### 3. Strategy Logic Becomes Hard To Test
+### 3. Persistence Design Stays Accidentally `2x2`-Centric
 
 Risk:
-multi-stage orchestration is harder to regression-test than one bounded BFS.
+new persistence features could keep inheriting current endpoint assumptions.
 
 Mitigation:
 
-- add strategy-level tests for stage selection and resume behavior,
-- and promote `k = 3` / `k = 4` benchmark cases into explicit solver targets.
+- make arbitrary square endpoints the explicit design target,
+- test persistence on non-`2x2` cases,
+- and avoid CLI features that only work on one endpoint size unless clearly
+  marked as temporary.
+
+### 4. Harness Work Is Deferred Too Long
+
+Risk:
+the project could keep adding search ideas without improving the experiment
+loop, which would slow down evaluation and comparison.
+
+Mitigation:
+
+- treat harness improvements as part of the main rollout,
+- and make scoring and run comparison first-class deliverables.
+
+### 5. Generic Interfaces Become Vague Before The First Real Stage Exists
+
+Risk:
+the project could spend time designing abstract request, artifact, and stage
+types that are too detached from the first guided stage that actually needs to
+ship.
+
+Mitigation:
+
+- design around one concrete guided-stage extraction target,
+- keep the first generic artifact schema narrow and extensible,
+- and require each new abstraction to be exercised by a real non-sidecar
+  integration step.
 
 ## Rollout Plan
 
-### Phase 1
+### Phase 1: Generalize The Boundaries
 
-- Define the strategy interface inside the main solver.
-- Keep existing `mixed` and `graph-only` behavior intact.
-- Do not change default CLI behavior yet.
+- audit the semantic differences between the `2x2` and dynamic solver paths,
+- define generic request, result, event, observer, stage, and persistence
+  interfaces for square endpoints,
+- decide which behaviors remain intentionally `2x2`-specific for now and mark
+  them explicitly,
+- in parallel, minimally extend the harness/corpus runner so at least one
+  non-`2x2` square endpoint case can run through the normal comparison flow,
+  because those boundary changes need a real regression surface immediately,
+- keep existing `mixed` and `graph-only` endpoint search behavior intact,
+- separate `SearchMode` from stage orchestration terminology,
+- and do not change default solver behavior yet.
 
-### Phase 2
+### Phase 2: Minimum Viable Harness Generalization
 
-- Integrate one existing shortcut/refinement path as an internal strategy.
-- Reuse current persistence mechanisms where possible.
-- Expose it as an explicit non-default CLI mode.
+- complete the case-corpus and runner changes so non-`2x2` square endpoints can
+  be expressed and executed routinely in the normal harness flow,
+- add enough result modeling to compare generalized solver runs honestly,
+- preserve existing `2x2` scoring while expanding the regression surface,
+- and keep the harness capable of A/B comparison across configurations.
 
-### Phase 3
+### Phase 3: Strengthen The Harness
 
-- Add reduced-budget campaign support and resumable guide usage.
-- Extend the research harness so it can score solver stages that actually target
-  shorter `k = 3` witnesses and `k = 4+` discovery.
+- add campaign scheduling concepts to the harness,
+- add scoring for best lag found, not just terminal outcome,
+- add reuse of persisted guides/results across runs,
+- and make it easy to compare strategies across the benchmark corpus.
 
-### Phase 4
+### Phase 4: Integrate One Guided Stage Generically
 
-- Retire or demote the overlapping research binaries whose logic is now fully
-  covered by the main solver path.
+- define the first generic guide artifact format,
+- extract one existing guide-aware refinement path into a generic stage, with
+  the current shortcut/segment-refinement workflow as the default first
+  extraction target,
+- ensure it works for arbitrary square endpoints within current practical
+  bounds,
+- and expose it as an explicit non-default solver stage.
+
+### Phase 5: Expand The Generic Experiment Surface
+
+- promote benchmark families such as Brix-Ruiz into harness fixtures and seeded
+  artifacts,
+- add broader non-`2x2` regression cases,
+- and compare stage combinations under the improved harness.
+
+### Phase 6: Demote Overlapping Sidecars
+
+- retire or demote research binaries whose logic is now covered by generic
+  solver stages plus harness workflows,
+- while keeping targeted diagnostics and paper-reproduction tools where they are
+  still useful.
 
 ## Alternatives Considered
 
 ### Keep The Current Split
 
-Rejected because it keeps the strongest hard-case search logic outside the main
-solver and makes runtime/persistence policy increasingly fragmented.
+Rejected because it keeps the useful guided logic outside the main solver path
+and leaves the experiment loop weaker than it needs to be.
 
-### Merge Everything Into The Default Search Path Immediately
+### Integrate The Current Shortcut Binary As-Is
 
-Rejected because the runtime cost is too high and the research cadence now
-depends on having distinct fast and slow loops.
+Rejected because that would import a still family-specific workflow into the
+solver before the abstractions are generic enough.
 
-### Create A Separate "Campaign" CLI Instead Of Extending `search`
+### Put Everything Under A New Campaign CLI
 
-Possible, but weaker than extending the main CLI. It preserves the same
-architectural split under a different name and does not solve the capability
-drift problem as directly.
+Possible, but weaker than clarifying the boundary between solver and harness.
+It risks renaming the confusion rather than fixing it.
 
 ## Recommendation
 
-Adopt this RFC.
+Adopt this RFC with the generalized boundary as the main design constraint.
 
-The repo should evolve toward one primary solver with explicit staged search
-strategies, not toward a growing cluster of disconnected research binaries.
+The project should evolve toward:
 
-That matches the current state of the project:
+- a main solver for arbitrary square endpoints,
+- explicit guided stages with generic interfaces,
+- benchmark families managed by the harness rather than hardcoded into the
+  solver,
+- and a stronger experiment loop that can drive future search improvements.
 
-- the main value is the search,
-- `k = 3` and `k = 4+` are the hard benchmark family,
-- and refinement/shortcutting is no longer "extra tooling" but part of the
-  solver itself.
+That is a better fit for the project's current state than continuing to grow a
+`2x2`-leaning solver plus a sidecar-heavy research layer.
