@@ -1,5 +1,9 @@
 FROM debian:trixie-slim
 
+# Repo-local marker so agents can tell they are running inside the
+# workmux container sandbox built from this Dockerfile.
+ENV WORKMUX_SANDBOX=container
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
