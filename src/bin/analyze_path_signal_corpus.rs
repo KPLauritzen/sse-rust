@@ -9,8 +9,8 @@ use sse_core::path_scoring::{candidate_score_specs, new_summaries, rank_target, 
 use sse_core::search::execute_search_request_and_observer;
 use sse_core::search_observer::{SearchEdgeStatus, SearchEvent, SearchObserver};
 use sse_core::types::{
-    GuideArtifactPayload, GuidedRefinementConfig, SearchConfig, SearchDirection, SearchMode,
-    SearchRequest, SearchRunResult, SearchStage, ShortcutSearchConfig,
+    FrontierMode, GuideArtifactPayload, GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig,
+    SearchDirection, SearchRequest, SearchRunResult, SearchStage, ShortcutSearchConfig,
 };
 
 fn main() -> Result<(), String> {
@@ -109,7 +109,7 @@ struct Cli {
     max_endpoint_dim: usize,
     max_intermediate_dim: usize,
     max_entry: u32,
-    search_mode: SearchMode,
+    search_mode: MoveFamilyPolicy,
 }
 
 #[derive(Clone)]
@@ -190,7 +190,7 @@ where
         max_endpoint_dim: 3,
         max_intermediate_dim: 5,
         max_entry: 6,
-        search_mode: SearchMode::Mixed,
+        search_mode: MoveFamilyPolicy::Mixed,
     };
 
     while let Some(arg) = args.next() {
@@ -250,8 +250,8 @@ where
             "--search-mode" => {
                 let value = args.next().ok_or("--search-mode requires a value")?;
                 cli.search_mode = match value.as_str() {
-                    "mixed" => SearchMode::Mixed,
-                    "graph-only" | "graph_only" => SearchMode::GraphOnly,
+                    "mixed" => MoveFamilyPolicy::Mixed,
+                    "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
             }
@@ -450,7 +450,8 @@ fn analyze_case(
             max_lag: case.gap,
             max_intermediate_dim: cli.max_intermediate_dim,
             max_entry: cli.max_entry,
-            search_mode: cli.search_mode,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: cli.search_mode,
             beam_width: None,
         },
         stage: SearchStage::EndpointSearch,

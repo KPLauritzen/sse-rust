@@ -6,23 +6,36 @@ use crate::matrix::{DynMatrix, SqMatrix};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SearchMode {
+pub enum FrontierMode {
+    Bfs,
+    Beam,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveFamilyPolicy {
     Mixed,
     #[serde(alias = "graph-only")]
     GraphOnly,
-    Beam,
 }
 
 pub const DEFAULT_BEAM_WIDTH: usize = 64;
 
-impl Default for SearchMode {
+impl Default for FrontierMode {
+    fn default() -> Self {
+        Self::Bfs
+    }
+}
+
+impl Default for MoveFamilyPolicy {
     fn default() -> Self {
         Self::Mixed
     }
 }
 
 /// High-level solver stage terminology. This is intentionally separate from
-/// [`SearchMode`], which only selects the low-level search substrate.
+/// [`FrontierMode`] and [`MoveFamilyPolicy`], which select the low-level search
+/// substrate and allowed move families.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchStage {
@@ -192,8 +205,10 @@ pub struct SearchConfig {
     pub max_intermediate_dim: usize,
     /// Maximum entry value in intermediate matrices U, V.
     pub max_entry: u32,
-    /// Search move mode.
-    pub search_mode: SearchMode,
+    /// Frontier expansion style.
+    pub frontier_mode: FrontierMode,
+    /// Allowed move families during frontier expansion.
+    pub move_family_policy: MoveFamilyPolicy,
     /// Optional best-first beam frontier cap. `None` preserves layer-synchronous BFS.
     pub beam_width: Option<usize>,
 }
@@ -204,7 +219,8 @@ impl Default for SearchConfig {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 25,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         }
     }
@@ -466,30 +482,40 @@ pub struct SearchTelemetry {
 #[cfg(test)]
 mod tests {
     use super::{
-        DynMatrix, DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility,
+        DynMatrix, DynSsePath, EsseStep, FrontierMode, GuideArtifact, GuideArtifactCompatibility,
         GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance,
-        GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, SearchConfig,
-        SearchMode, SearchStage, ShortcutGuideRankingPolicy, ShortcutPromotionPolicy,
+        GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, MoveFamilyPolicy,
+        SearchConfig, SearchStage, ShortcutGuideRankingPolicy, ShortcutPromotionPolicy,
         ShortcutSearchConfig, SsePath, DEFAULT_BEAM_WIDTH,
     };
     use crate::matrix::SqMatrix;
 
     #[test]
-    fn test_search_mode_deserializes_snake_and_kebab_case_graph_only() {
-        let snake: SearchMode = serde_json::from_str("\"graph_only\"").unwrap();
-        let kebab: SearchMode = serde_json::from_str("\"graph-only\"").unwrap();
-        let beam: SearchMode = serde_json::from_str("\"beam\"").unwrap();
+    fn test_move_family_policy_deserializes_snake_and_kebab_case_graph_only() {
+        let snake: MoveFamilyPolicy = serde_json::from_str("\"graph_only\"").unwrap();
+        let kebab: MoveFamilyPolicy = serde_json::from_str("\"graph-only\"").unwrap();
+        let mixed: MoveFamilyPolicy = serde_json::from_str("\"mixed\"").unwrap();
 
-        assert_eq!(snake, SearchMode::GraphOnly);
-        assert_eq!(kebab, SearchMode::GraphOnly);
-        assert_eq!(beam, SearchMode::Beam);
+        assert_eq!(snake, MoveFamilyPolicy::GraphOnly);
+        assert_eq!(kebab, MoveFamilyPolicy::GraphOnly);
+        assert_eq!(mixed, MoveFamilyPolicy::Mixed);
+    }
+
+    #[test]
+    fn test_frontier_mode_deserializes_bfs_and_beam() {
+        let bfs: FrontierMode = serde_json::from_str("\"bfs\"").unwrap();
+        let beam: FrontierMode = serde_json::from_str("\"beam\"").unwrap();
+
+        assert_eq!(bfs, FrontierMode::Bfs);
+        assert_eq!(beam, FrontierMode::Beam);
     }
 
     #[test]
     fn test_search_config_defaults_disable_beam() {
         let config = SearchConfig::default();
 
-        assert_eq!(config.search_mode, SearchMode::Mixed);
+        assert_eq!(config.frontier_mode, FrontierMode::Bfs);
+        assert_eq!(config.move_family_policy, MoveFamilyPolicy::Mixed);
         assert_eq!(config.beam_width, None);
         assert_eq!(DEFAULT_BEAM_WIDTH, 64);
     }

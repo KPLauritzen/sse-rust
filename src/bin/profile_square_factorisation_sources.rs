@@ -5,7 +5,7 @@ use sse_core::factorisation::visit_all_factorisations_with_family;
 use sse_core::matrix::DynMatrix;
 use sse_core::search::execute_search_request_and_observer;
 use sse_core::search_observer::{SearchEvent, SearchObserver};
-use sse_core::types::{SearchConfig, SearchMode, SearchRequest, SearchStage};
+use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchStage};
 
 #[derive(Default)]
 struct FactorSourceObserver {
@@ -72,7 +72,9 @@ fn main() -> Result<(), String> {
             max_lag: 6,
             max_intermediate_dim: 3,
             max_entry: 6,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
         },
         stage: SearchStage::EndpointSearch,
         guide_artifacts: Vec::new(),

@@ -14,7 +14,10 @@ use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
     SearchRootRecord, SearchStartRecord,
 };
-use crate::types::{SearchDirection, SearchMode, SearchRunResult, SearchStage, SearchTelemetry};
+use crate::types::{
+    FrontierMode, MoveFamilyPolicy, SearchConfig, SearchDirection, SearchRunResult, SearchStage,
+    SearchTelemetry,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SqliteGraphRecorder {
@@ -146,7 +149,7 @@ impl SqliteGraphRecorder {
                     start.request.config.max_lag as i64,
                     start.request.config.max_intermediate_dim as i64,
                     start.request.config.max_entry as i64,
-                    search_mode_label(start.request.config.search_mode),
+                    search_mode_label(&start.request.config),
                     search_stage_label(start.request.stage),
                 ],
             )
@@ -585,11 +588,12 @@ fn unix_timestamp_ms() -> i64 {
         .as_millis() as i64
 }
 
-fn search_mode_label(mode: SearchMode) -> &'static str {
-    match mode {
-        SearchMode::Mixed => "mixed",
-        SearchMode::GraphOnly => "graph_only",
-        SearchMode::Beam => "beam",
+fn search_mode_label(config: &SearchConfig) -> &'static str {
+    match (config.frontier_mode, config.move_family_policy) {
+        (FrontierMode::Bfs, MoveFamilyPolicy::Mixed) => "bfs_mixed",
+        (FrontierMode::Bfs, MoveFamilyPolicy::GraphOnly) => "bfs_graph_only",
+        (FrontierMode::Beam, MoveFamilyPolicy::Mixed) => "beam_mixed",
+        (FrontierMode::Beam, MoveFamilyPolicy::GraphOnly) => "beam_graph_only",
     }
 }
 
@@ -645,7 +649,8 @@ mod tests {
                 max_lag: 4,
                 max_intermediate_dim: 3,
                 max_entry: 4,
-                search_mode: SearchMode::Mixed,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::Mixed,
                 beam_width: None,
             };
 

@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sse_core::factorisation::visit_all_factorisations_with_family;
 use sse_core::graph_moves::enumerate_graph_move_successors;
 use sse_core::matrix::DynMatrix;
-use sse_core::types::{EsseStep, SearchMode};
+use sse_core::types::{EsseStep, MoveFamilyPolicy};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -25,7 +25,7 @@ fn main() {
     let mut min_gap = 2usize;
     let mut max_gap = usize::MAX;
     let mut refine_rounds = 1usize;
-    let mut search_mode = SearchMode::Mixed;
+    let mut search_mode = MoveFamilyPolicy::Mixed;
     let mut segment_timeout: Option<Duration> = None;
     let mut paths_db: Option<String> = None;
 
@@ -77,8 +77,8 @@ fn main() {
             "--search-mode" => {
                 let value = args.next().expect("--search-mode requires a value");
                 search_mode = match value.as_str() {
-                    "mixed" => SearchMode::Mixed,
-                    "graph-only" | "graph_only" => SearchMode::GraphOnly,
+                    "mixed" => MoveFamilyPolicy::Mixed,
+                    "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
                     _ => panic!("unknown search mode: {value}"),
                 };
             }
@@ -301,7 +301,7 @@ fn search_between_waypoints(
     max_dim: usize,
     max_entry: u32,
     segment_timeout: Option<Duration>,
-    search_mode: SearchMode,
+    search_mode: MoveFamilyPolicy,
 ) -> SearchResult {
     let start_canon = start.canonical_perm();
     let target_canon = target.canonical_perm();
@@ -480,7 +480,7 @@ fn search_guide_path(
     min_gap: usize,
     max_gap: usize,
     segment_timeout: Option<Duration>,
-    search_mode: SearchMode,
+    search_mode: MoveFamilyPolicy,
 ) -> GuideSearchOutcome {
     println!("guide moves = {}", guide.len() - 1);
     println!();
@@ -620,7 +620,7 @@ fn expand_frontier(
     orig: &HashMap<DynMatrix, DynMatrix>,
     max_dim: usize,
     max_entry: u32,
-    search_mode: SearchMode,
+    search_mode: MoveFamilyPolicy,
     source_trace: u64,
     source_trace_square: u64,
 ) -> Vec<FrontierExpansion> {
@@ -647,7 +647,7 @@ fn expand_frontier(
             }
         }
 
-        if search_mode == SearchMode::Mixed {
+        if search_mode == MoveFamilyPolicy::Mixed {
             visit_all_factorisations_with_family(current, max_dim, max_entry, |_family, u, v| {
                 let next = v.mul(&u);
                 if next.rows > max_dim {
@@ -1190,7 +1190,7 @@ struct ShortcutRunConfig {
     min_gap: usize,
     max_gap: usize,
     refine_rounds: usize,
-    search_mode: SearchMode,
+    search_mode: MoveFamilyPolicy,
     guide_count: usize,
 }
 
@@ -1452,11 +1452,10 @@ fn matrix_json(matrix: &DynMatrix) -> Result<String, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn search_mode_label(search_mode: SearchMode) -> &'static str {
+fn search_mode_label(search_mode: MoveFamilyPolicy) -> &'static str {
     match search_mode {
-        SearchMode::Mixed => "mixed",
-        SearchMode::GraphOnly => "graph_only",
-        SearchMode::Beam => "beam",
+        MoveFamilyPolicy::Mixed => "mixed",
+        MoveFamilyPolicy::GraphOnly => "graph_only",
     }
 }
 

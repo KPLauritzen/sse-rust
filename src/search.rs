@@ -18,12 +18,12 @@ use crate::search_observer::{
     SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, GuideArtifact, GuideArtifactCompatibility,
+    DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact, GuideArtifactCompatibility,
     GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
-    GuideArtifactValidation, GuidedRefinementConfig, SearchConfig, SearchDirection,
-    SearchLayerTelemetry, SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig, ShortcutSearchRoundTelemetry,
-    ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    GuideArtifactValidation, GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig,
+    SearchDirection, SearchLayerTelemetry, SearchMoveFamilyTelemetry, SearchRequest,
+    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
+    ShortcutSearchRoundTelemetry, ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1318,7 +1318,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         );
     }
 
-    if config.search_mode == SearchMode::Beam {
+    if config.frontier_mode == FrontierMode::Beam {
         return search_beam_dyn_with_telemetry(
             a,
             b,
@@ -1378,7 +1378,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         ],
     );
 
-    if config.search_mode == SearchMode::GraphOnly {
+    if config.move_family_policy == MoveFamilyPolicy::GraphOnly {
         return search_graph_only_dyn_with_telemetry(a, b, config, observer, &request, deadline);
     }
 
@@ -1447,7 +1447,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
-            config.search_mode,
+            config.move_family_policy,
             deadline,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
@@ -1722,7 +1722,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         );
     }
 
-    if config.search_mode == SearchMode::Beam {
+    if config.frontier_mode == FrontierMode::Beam {
         return search_beam_2x2_with_telemetry_and_observer(
             a,
             b,
@@ -1785,7 +1785,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         );
     }
 
-    if config.search_mode == SearchMode::GraphOnly {
+    if config.move_family_policy == MoveFamilyPolicy::GraphOnly {
         return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer, &request);
     }
 
@@ -1851,7 +1851,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
-            SearchMode::Mixed,
+            config.move_family_policy,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -2135,7 +2135,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
 
     // If bounded ESSE search exhausts on a finite essential pair, try the
     // aligned concrete-shift substrate before reporting `Unknown`.
-    if matches!(config.search_mode, SearchMode::Mixed | SearchMode::Beam)
+    if config.move_family_policy == MoveFamilyPolicy::Mixed
         && should_try_concrete_shift_fallback(a, b, config)
     {
         let concrete_config = ConcreteShiftSearchConfig2x2 {
@@ -2369,7 +2369,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
-            SearchMode::Mixed,
+            config.move_family_policy,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -2615,7 +2615,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-    if matches!(config.search_mode, SearchMode::Mixed | SearchMode::Beam)
+    if config.move_family_policy == MoveFamilyPolicy::Mixed
         && should_try_concrete_shift_fallback(a, b, config)
     {
         let concrete_config = ConcreteShiftSearchConfig2x2 {
@@ -2769,7 +2769,7 @@ fn search_beam_dyn_with_telemetry(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
-            config.search_mode,
+            config.move_family_policy,
             deadline,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
@@ -3609,7 +3609,7 @@ fn expand_frontier_layer_dyn(
     orig: &HashMap<DynMatrix, DynMatrix>,
     max_intermediate_dim: usize,
     max_entry: u32,
-    search_mode: SearchMode,
+    move_family_policy: MoveFamilyPolicy,
     deadline: Option<Instant>,
 ) -> (Vec<FrontierExpansion>, FrontierExpansionStats, bool) {
     let expand_node = |current_canon: &DynMatrix| {
@@ -3648,7 +3648,7 @@ fn expand_frontier_layer_dyn(
             });
         }
 
-        if search_mode == SearchMode::Mixed {
+        if move_family_policy == MoveFamilyPolicy::Mixed {
             visit_all_factorisations_with_family(
                 current,
                 max_intermediate_dim,
@@ -3836,7 +3836,7 @@ fn expand_frontier_layer(
     orig: &HashMap<DynMatrix, DynMatrix>,
     max_intermediate_dim: usize,
     max_entry: u32,
-    search_mode: SearchMode,
+    move_family_policy: MoveFamilyPolicy,
 ) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
@@ -3874,7 +3874,7 @@ fn expand_frontier_layer(
             });
         }
 
-        if search_mode == SearchMode::Mixed {
+        if move_family_policy == MoveFamilyPolicy::Mixed {
             visit_all_factorisations_with_family(
                 current,
                 max_intermediate_dim,
@@ -4383,7 +4383,8 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 2,
             max_entry: 10,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         }
     }
@@ -4439,7 +4440,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
             },
             stage: SearchStage::ShortcutSearch,
@@ -4529,7 +4531,8 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 6,
-            search_mode: SearchMode::Beam,
+            frontier_mode: FrontierMode::Beam,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(4),
         };
 
@@ -4542,6 +4545,26 @@ mod tests {
         }
         assert!(telemetry.frontier_nodes_expanded >= 1);
         assert!(telemetry.max_frontier_size <= 4);
+    }
+
+    #[test]
+    fn test_beam_graph_only_combination_uses_beam_frontier_without_factorisations() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 4,
+            max_entry: 6,
+            frontier_mode: FrontierMode::Beam,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: Some(3),
+        };
+
+        let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
+
+        assert!(telemetry.frontier_nodes_expanded >= 1);
+        assert_eq!(telemetry.factorisations_enumerated, 0);
+        assert!(telemetry.max_frontier_size <= 3);
     }
 
     #[test]
@@ -4677,7 +4700,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
             },
             stage: SearchStage::GuidedRefinement,
@@ -4724,7 +4748,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
             },
             stage: SearchStage::GuidedRefinement,
@@ -4771,7 +4796,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
             },
             stage: SearchStage::ShortcutSearch,
@@ -4843,7 +4869,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
             },
             stage: SearchStage::ShortcutSearch,
@@ -5127,7 +5154,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 6,
-                search_mode: SearchMode::GraphOnly,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
             },
             stage: SearchStage::ShortcutSearch,
@@ -5280,7 +5308,8 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 6,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
@@ -5299,7 +5328,8 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 4,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -5319,10 +5349,24 @@ mod tests {
         orig.insert(a_canon.clone(), a_dyn);
 
         let (expansions, stats) =
-            expand_frontier_layer(&[a_canon], &orig, 2, 10, SearchMode::Mixed);
+            expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::Mixed);
 
         assert!(!expansions.is_empty());
         assert!(stats.factorisations_enumerated > expansions.len());
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_graph_only_skips_factorisations() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let a_canon = a_dyn.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(a_canon.clone(), a_dyn);
+
+        let (_expansions, stats) =
+            expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::GraphOnly);
+
+        assert_eq!(stats.factorisations_enumerated, 0);
     }
 
     #[test]
@@ -5338,10 +5382,15 @@ mod tests {
             &orig,
             2,
             10,
-            SearchMode::Mixed,
+            MoveFamilyPolicy::Mixed,
         );
-        let (duplicate_frontier_expansions, _) =
-            expand_frontier_layer(&[a_canon.clone(), a_canon], &orig, 2, 10, SearchMode::Mixed);
+        let (duplicate_frontier_expansions, _) = expand_frontier_layer(
+            &[a_canon.clone(), a_canon],
+            &orig,
+            2,
+            10,
+            MoveFamilyPolicy::Mixed,
+        );
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
     }
@@ -5522,7 +5571,8 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let result = search_sse_2x2(&m1, &m2, &config);
@@ -5540,7 +5590,8 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let result = search_sse_2x2(&m1, &m3, &config);
@@ -5570,7 +5621,8 @@ mod tests {
             max_lag: 3,
             max_intermediate_dim: 2,
             max_entry: 15,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
@@ -5605,7 +5657,8 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 4,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
@@ -5629,7 +5682,8 @@ mod tests {
             max_lag: 22,
             max_intermediate_dim: 5,
             max_entry: 6,
-            search_mode: SearchMode::GraphOnly,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
@@ -5669,7 +5723,8 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 5,
-            search_mode: SearchMode::Mixed,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
