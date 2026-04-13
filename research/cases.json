@@ -581,7 +581,7 @@
     },
     {
       "id": "brix_ruiz_k3_guided_seeded",
-      "description": "Guided-refinement comparison case: replay a seeded benchmark-family guide through the generic staged solver boundary.",
+      "description": "Guided-refinement comparison case: replay the seeded 16-step benchmark-family guide through the generic staged solver boundary.",
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "seeded_guide_ids": ["endpoint_16_path"],
       "config": {
@@ -616,7 +616,7 @@
     },
     {
       "id": "brix_ruiz_k3_shortcut_seeded",
-      "description": "Shortcut-search comparison case: route the old bounded Brix-Ruiz seeded shortcut entry point through the generic stage surface.",
+      "description": "Shortcut-search comparison case: route the old bounded Brix-Ruiz seeded 16-step guide entry point through the generic stage surface.",
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "seeded_guide_ids": ["endpoint_16_path"],
       "config": {

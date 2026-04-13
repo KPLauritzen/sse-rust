@@ -331,6 +331,27 @@ architecture.
 - **Sidecar search:** An auxiliary search substrate (balanced, conjugacy,
   aligned) that runs alongside or as a fallback to the main BFS.
 
+### Path metrics
+
+Avoid bare **path length** in project docs and harness output. It is too easy
+to confuse four different counts.
+
+- **Lag / witness lag / witness step count:** the number of elementary SSE
+  steps in a validated witness. For a witness
+  `A = A_0 ~_e A_1 ~_e ... ~_e A_l = B`, the lag is `l`.
+- **Path matrix count:** the number of matrices listed in a witness path. This
+  is always `lag + 1` for a validated witness.
+- **Guide matrix sequence:** an ordered list of matrices used to seed guided
+  search. Consecutive guide matrices are waypoints; they do not by themselves
+  assert that each hop is already a direct elementary witness.
+- **Guide step count:** the number of transitions between consecutive guide
+  matrices in a stored guide matrix sequence. This is `guide_matrix_count - 1`.
+
+The practical consequence is important for seeded fixtures. A label such as
+`endpoint_16_path` refers to a guide with `17` listed matrices and `16` guide
+transitions. If the harness reconstructs direct witness segments between those
+waypoints, the resulting witness lag may be larger or smaller than `16`.
+
 ---
 
 ## Quick reference: "is X the same as Y?"

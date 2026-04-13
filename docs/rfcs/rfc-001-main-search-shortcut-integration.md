@@ -25,6 +25,11 @@ In practice, this means:
 The immediate target is square endpoints up to dimension `4`, with room to
 raise that bound later as the search stack improves.
 
+Terminology note: this RFC uses **lag** for the number of elementary SSE
+steps in a witness. A full witness with lag `l` contains `l + 1` matrices.
+When discussing reusable guide artifacts, avoid bare **path length** and say
+either **witness lag**, **guide step count**, or **matrix count** explicitly.
+
 ## Context
 
 The project has crossed two thresholds at once.
@@ -304,7 +309,7 @@ At minimum, a reusable guide artifact should describe:
   import,
 - validation status,
 - compatibility constraints for stages that consume it,
-- and quality metadata such as lag, cost, or score.
+- and quality metadata such as witness lag, matrix count, cost, or score.
 
 Guide artifacts should be generic solver inputs, not family labels wrapped in a
 database row.

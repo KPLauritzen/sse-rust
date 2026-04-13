@@ -20,6 +20,11 @@ one bounded configuration, try to replace subsegments with shorter witnesses.
 - retain improved witnesses as new guide artifacts,
 - and report the best witness found for the requested endpoints.
 
+Terminology note: this RFC uses **lag** for witness step count. A witness with
+lag `l` contains `l + 1` matrices. For imported seeded guides, a name such as
+`endpoint_16_path` refers to guide transitions between stored matrices, not
+necessarily to the lag of the reconstructed witness the harness later derives.
+
 This stage should be endpoint-agnostic for square matrices and should not
 reintroduce benchmark-family-specific sidecar logic into the solver.
 

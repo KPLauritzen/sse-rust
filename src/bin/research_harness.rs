@@ -679,7 +679,7 @@ fn materialize_seeded_guide_artifact(
         })?;
         let SearchRunResult::Equivalent(segment) = result else {
             return Err(format!(
-                "seeded guide {} segment {}x{} -> {}x{} did not produce a direct path",
+                "seeded guide {} segment {}x{} -> {}x{} did not produce a direct witness",
                 guide.id, window[0].rows, window[0].cols, window[1].rows, window[1].cols
             ));
         };
@@ -695,7 +695,7 @@ fn materialize_seeded_guide_artifact(
 
         if full_path.matrices.last() != segment.matrices.first() {
             return Err(format!(
-                "seeded guide {} reconstruction failed to stitch consecutive segments",
+                "seeded guide {} reconstruction failed to stitch consecutive witness segments",
                 guide.id
             ));
         }
@@ -709,11 +709,11 @@ fn materialize_seeded_guide_artifact(
         full_path
             .matrices
             .first()
-            .expect("seeded guide path should have a source matrix"),
+            .expect("seeded guide matrix sequence should have a source matrix"),
         full_path
             .matrices
             .last()
-            .expect("seeded guide path should have a target matrix"),
+            .expect("seeded guide matrix sequence should have a target matrix"),
         &full_path,
     )
     .map_err(|err| {
@@ -726,12 +726,12 @@ fn materialize_seeded_guide_artifact(
     let source = full_path
         .matrices
         .first()
-        .expect("seeded guide path should have a source matrix")
+        .expect("seeded guide matrix sequence should have a source matrix")
         .clone();
     let target = full_path
         .matrices
         .last()
-        .expect("seeded guide path should have a target matrix")
+        .expect("seeded guide matrix sequence should have a target matrix")
         .clone();
     let endpoint_label = format!("{}->{}", endpoint.source_dim, endpoint.target_dim);
     let label = guide
@@ -2106,7 +2106,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
         }
         out.push_str(&format!(
-            "  result: solver={:?} resolution={:?} witness_lag={:?} path_matrices={:?} frontier_layers={}\n",
+            "  result: solver={:?} resolution={:?} witness_lag={:?} path_matrix_count={:?} frontier_layers={}\n",
             case.result_model.solver_path,
             case.result_model.resolution_kind,
             case.result_model.witness_lag,
