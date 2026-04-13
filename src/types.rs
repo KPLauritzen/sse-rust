@@ -105,11 +105,13 @@ pub struct GuideArtifact {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GuidedRefinementConfig {
     pub max_shortcut_lag: usize,
     pub min_gap: usize,
     pub max_gap: Option<usize>,
     pub rounds: usize,
+    pub segment_timeout_secs: Option<u64>,
 }
 
 impl Default for GuidedRefinementConfig {
@@ -119,6 +121,7 @@ impl Default for GuidedRefinementConfig {
             min_gap: 2,
             max_gap: None,
             rounds: 1,
+            segment_timeout_secs: None,
         }
     }
 }
@@ -455,5 +458,19 @@ mod tests {
         assert_eq!(config.min_gap, 2);
         assert_eq!(config.max_gap, None);
         assert_eq!(config.rounds, 1);
+        assert_eq!(config.segment_timeout_secs, None);
+    }
+
+    #[test]
+    fn test_guided_refinement_config_deserializes_missing_timeout_as_none() {
+        let config: GuidedRefinementConfig =
+            serde_json::from_str(r#"{"max_shortcut_lag":1,"min_gap":2,"max_gap":2,"rounds":1}"#)
+                .unwrap();
+
+        assert_eq!(config.max_shortcut_lag, 1);
+        assert_eq!(config.min_gap, 2);
+        assert_eq!(config.max_gap, Some(2));
+        assert_eq!(config.rounds, 1);
+        assert_eq!(config.segment_timeout_secs, None);
     }
 }
