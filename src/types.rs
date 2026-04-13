@@ -34,6 +34,95 @@ impl Default for SearchStage {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuideArtifactValidation {
+    Unchecked,
+    WitnessValidated,
+}
+
+impl Default for GuideArtifactValidation {
+    fn default() -> Self {
+        Self::Unchecked
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GuideArtifactEndpoints {
+    pub source: DynMatrix,
+    pub target: DynMatrix,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GuideArtifactProvenance {
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub source_ref: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GuideArtifactCompatibility {
+    #[serde(default)]
+    pub supported_stages: Vec<SearchStage>,
+    #[serde(default)]
+    pub max_endpoint_dim: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GuideArtifactQuality {
+    #[serde(default)]
+    pub lag: Option<usize>,
+    #[serde(default)]
+    pub cost: Option<usize>,
+    #[serde(default)]
+    pub score: Option<f64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GuideArtifactPayload {
+    FullPath { path: DynSsePath },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuideArtifact {
+    #[serde(default)]
+    pub artifact_id: Option<String>,
+    pub endpoints: GuideArtifactEndpoints,
+    #[serde(flatten)]
+    pub payload: GuideArtifactPayload,
+    #[serde(default)]
+    pub provenance: GuideArtifactProvenance,
+    #[serde(default)]
+    pub validation: GuideArtifactValidation,
+    #[serde(default)]
+    pub compatibility: GuideArtifactCompatibility,
+    #[serde(default)]
+    pub quality: GuideArtifactQuality,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GuidedRefinementConfig {
+    pub max_shortcut_lag: usize,
+    pub min_gap: usize,
+    pub max_gap: Option<usize>,
+    pub rounds: usize,
+}
+
+impl Default for GuidedRefinementConfig {
+    fn default() -> Self {
+        Self {
+            max_shortcut_lag: 3,
+            min_gap: 2,
+            max_gap: None,
+            rounds: 1,
+        }
+    }
+}
+
 /// Configuration for the SSE search.
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -66,17 +155,19 @@ pub struct SearchRequest {
     pub target: DynMatrix,
     pub config: SearchConfig,
     pub stage: SearchStage,
+    pub guide_artifacts: Vec<GuideArtifact>,
+    pub guided_refinement: GuidedRefinementConfig,
 }
 
 /// One elementary SSE step: A = UV, B = VU.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EsseStep {
     pub u: DynMatrix,
     pub v: DynMatrix,
 }
 
 /// A chain of elementary SSE steps connecting A to B.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SsePath<const N: usize> {
     /// The sequence of matrices: A = matrices[0], B = matrices[last].
     pub matrices: Vec<SqMatrix<N>>,
@@ -86,7 +177,7 @@ pub struct SsePath<const N: usize> {
 }
 
 /// A chain of elementary SSE steps connecting arbitrary square endpoints.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DynSsePath {
     /// The sequence of matrices: A = matrices[0], B = matrices[last].
     pub matrices: Vec<DynMatrix>,
@@ -229,13 +320,23 @@ pub struct SearchTelemetry {
     pub enqueued_nodes: usize,
     pub max_frontier_size: usize,
     pub total_visited_nodes: usize,
+    pub guide_artifacts_considered: usize,
+    pub guide_artifacts_accepted: usize,
+    pub guided_segments_considered: usize,
+    pub guided_segments_improved: usize,
+    pub guided_refinement_rounds: usize,
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
     pub layers: Vec<SearchLayerTelemetry>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SearchMode;
+    use super::{
+        DynMatrix, DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility,
+        GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance,
+        GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, SearchMode,
+        SearchStage,
+    };
 
     #[test]
     fn test_search_mode_deserializes_snake_and_kebab_case_graph_only() {
@@ -244,5 +345,56 @@ mod tests {
 
         assert_eq!(snake, SearchMode::GraphOnly);
         assert_eq!(kebab, SearchMode::GraphOnly);
+    }
+
+    #[test]
+    fn test_guide_artifact_round_trips_as_full_path() {
+        let artifact = GuideArtifact {
+            artifact_id: Some("artifact-1".to_string()),
+            endpoints: GuideArtifactEndpoints {
+                source: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+                target: DynMatrix::new(2, 2, vec![0, 1, 1, 0]),
+            },
+            payload: GuideArtifactPayload::FullPath {
+                path: DynSsePath {
+                    matrices: vec![
+                        DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+                        DynMatrix::new(2, 2, vec![0, 1, 1, 0]),
+                    ],
+                    steps: vec![EsseStep {
+                        u: DynMatrix::new(2, 2, vec![0, 1, 1, 0]),
+                        v: DynMatrix::new(2, 2, vec![0, 1, 1, 0]),
+                    }],
+                },
+            },
+            provenance: GuideArtifactProvenance {
+                source_kind: Some("fixture".to_string()),
+                label: Some("swap".to_string()),
+                source_ref: Some("unit-test".to_string()),
+            },
+            validation: GuideArtifactValidation::WitnessValidated,
+            compatibility: GuideArtifactCompatibility {
+                supported_stages: vec![SearchStage::GuidedRefinement],
+                max_endpoint_dim: Some(4),
+            },
+            quality: GuideArtifactQuality {
+                lag: Some(1),
+                cost: Some(1),
+                score: Some(1.0),
+            },
+        };
+
+        let json = serde_json::to_string(&artifact).unwrap();
+        let decoded: GuideArtifact = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, artifact);
+    }
+
+    #[test]
+    fn test_guided_refinement_config_defaults_to_single_round() {
+        let config = GuidedRefinementConfig::default();
+        assert_eq!(config.max_shortcut_lag, 3);
+        assert_eq!(config.min_gap, 2);
+        assert_eq!(config.max_gap, None);
+        assert_eq!(config.rounds, 1);
     }
 }

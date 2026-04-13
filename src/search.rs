@@ -15,9 +15,10 @@ use crate::search_observer::{
     SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry,
-    SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult, SearchStage,
-    SearchTelemetry, SsePath, SseResult,
+    DynSsePath, DynSseResult, EsseStep, GuideArtifact, GuideArtifactPayload,
+    GuidedRefinementConfig, SearchConfig, SearchDirection, SearchLayerTelemetry, SearchMode,
+    SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
+    SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -130,6 +131,45 @@ fn search_request(
         target: b.clone(),
         config: config.clone(),
         stage,
+        guide_artifacts: Vec::new(),
+        guided_refinement: GuidedRefinementConfig::default(),
+    }
+}
+
+/// Execute one search request across the staged solver boundary.
+pub fn execute_search_request(
+    request: &SearchRequest,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    execute_search_request_and_observer(request, None)
+}
+
+/// Execute one search request and optionally stream observer events.
+pub fn execute_search_request_and_observer(
+    request: &SearchRequest,
+    observer: Option<&mut dyn SearchObserver>,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    match request.stage {
+        SearchStage::EndpointSearch => {
+            let a_sq = request.source.to_sq::<2>();
+            let b_sq = request.target.to_sq::<2>();
+            if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
+                let (result, telemetry) =
+                    search_sse_2x2_with_telemetry_and_observer(a, b, &request.config, observer);
+                Ok((result.into(), telemetry))
+            } else {
+                let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
+                    &request.source,
+                    &request.target,
+                    &request.config,
+                    observer,
+                );
+                Ok((result.into(), telemetry))
+            }
+        }
+        SearchStage::GuidedRefinement => search_guided_refinement_with_observer(request, observer),
+        SearchStage::ShortcutSearch => {
+            Err("shortcut_search is not integrated into the generic solver yet".to_string())
+        }
     }
 }
 
@@ -193,6 +233,462 @@ fn finish_search_dyn(
 ) -> (DynSseResult, SearchTelemetry) {
     emit_finished(&mut observer, request, result.clone().into(), &telemetry);
     (result, telemetry)
+}
+
+#[derive(Clone)]
+struct GuidedEdge {
+    from: usize,
+    to: usize,
+    lag: usize,
+    path: DynSsePath,
+}
+
+/// Validate a 2x2 witness path against its endpoints.
+pub fn validate_sse_path_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    path: &SsePath<2>,
+) -> Result<(), String> {
+    validate_sse_path_dyn(
+        &DynMatrix::from_sq(a),
+        &DynMatrix::from_sq(b),
+        &path.clone().into(),
+    )
+}
+
+/// Validate a dynamic witness path against its endpoints.
+pub fn validate_sse_path_dyn(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    path: &DynSsePath,
+) -> Result<(), String> {
+    if path.matrices.len() != path.steps.len() + 1 {
+        return Err(format!(
+            "path contains {} matrices but {} steps",
+            path.matrices.len(),
+            path.steps.len()
+        ));
+    }
+
+    if path.steps.is_empty() {
+        if path.matrices.len() != 1 {
+            return Err(format!(
+                "empty-step path should contain exactly one matrix, got {}",
+                path.matrices.len()
+            ));
+        }
+        if path.matrices[0] != *a || path.matrices[0] != *b {
+            return Err("empty-step path does not match the endpoint matrices".to_string());
+        }
+        return Ok(());
+    }
+
+    if path.matrices.first() != Some(a) {
+        return Err("path.matrices does not start at A".to_string());
+    }
+    if path.matrices.last() != Some(b) {
+        return Err("path.matrices does not end at B".to_string());
+    }
+
+    for (idx, step) in path.steps.iter().enumerate() {
+        let uv = step.u.mul(&step.v);
+        let vu = step.v.mul(&step.u);
+        if uv != path.matrices[idx] {
+            return Err(format!("step {idx} does not start at path.matrices[{idx}]"));
+        }
+        if vu != path.matrices[idx + 1] {
+            return Err(format!(
+                "step {idx} does not end at path.matrices[{}]",
+                idx + 1
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn search_guided_refinement_with_observer(
+    request: &SearchRequest,
+    mut observer: Option<&mut dyn SearchObserver>,
+) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    if request.guided_refinement.max_shortcut_lag == 0 {
+        return Err("guided_refinement requires max_shortcut_lag >= 1".to_string());
+    }
+    if request.guided_refinement.min_gap < 2 {
+        return Err("guided_refinement requires min_gap >= 2".to_string());
+    }
+    if request.guided_refinement.rounds == 0 {
+        return Err("guided_refinement requires rounds >= 1".to_string());
+    }
+
+    let mut prepared_guides = Vec::new();
+    for artifact in &request.guide_artifacts {
+        let Some(path) = prepare_full_path_guide(request, artifact)? else {
+            continue;
+        };
+        prepared_guides.push(path);
+    }
+
+    if prepared_guides.is_empty() {
+        return Err(
+            "guided_refinement requires at least one compatible full_path guide artifact"
+                .to_string(),
+        );
+    }
+
+    let mut telemetry = SearchTelemetry {
+        guide_artifacts_considered: request.guide_artifacts.len(),
+        guide_artifacts_accepted: prepared_guides.len(),
+        ..SearchTelemetry::default()
+    };
+    let source_canonical = request.source.canonical_perm();
+    let target_canonical = request.target.canonical_perm();
+    emit_started(&mut observer, request, &source_canonical, &target_canonical);
+
+    let mut best: Option<DynSsePath> = None;
+    for path in prepared_guides {
+        let refined = refine_guide_path(request, &path, &mut telemetry);
+        if refined.steps.len() < best.as_ref().map_or(usize::MAX, |path| path.steps.len())
+            || (best.is_some()
+                && refined.steps.len() == best.as_ref().unwrap().steps.len()
+                && refined.matrices.len() < best.as_ref().unwrap().matrices.len())
+        {
+            best = Some(refined);
+        } else if best.is_none() {
+            best = Some(refined);
+        }
+    }
+
+    let best = best.expect("prepared guides should produce a candidate path");
+    let result = SearchRunResult::Equivalent(best);
+    emit_finished(&mut observer, request, result.clone(), &telemetry);
+    Ok((result, telemetry))
+}
+
+fn prepare_full_path_guide(
+    request: &SearchRequest,
+    artifact: &GuideArtifact,
+) -> Result<Option<DynSsePath>, String> {
+    if !guide_artifact_supports_stage(artifact, request.stage) {
+        return Ok(None);
+    }
+
+    if let Some(max_endpoint_dim) = artifact.compatibility.max_endpoint_dim {
+        if request.source.rows > max_endpoint_dim || request.target.rows > max_endpoint_dim {
+            return Ok(None);
+        }
+    }
+
+    let GuideArtifactPayload::FullPath { path } = &artifact.payload;
+    validate_sse_path_dyn(&artifact.endpoints.source, &artifact.endpoints.target, path).map_err(
+        |err| {
+            format!(
+                "guide artifact {} is not a valid full-path witness: {err}",
+                artifact_label(artifact)
+            )
+        },
+    )?;
+
+    let oriented = if endpoint_identity_matches(
+        &artifact.endpoints.source,
+        &artifact.endpoints.target,
+        &request.source,
+        &request.target,
+    ) {
+        path.clone()
+    } else if endpoint_identity_matches(
+        &artifact.endpoints.target,
+        &artifact.endpoints.source,
+        &request.source,
+        &request.target,
+    ) {
+        reverse_dyn_sse_path(path)
+    } else {
+        return Ok(None);
+    };
+
+    let reanchored =
+        reanchor_dyn_sse_path(&oriented, &request.source, &request.target).map_err(|err| {
+            format!(
+                "guide artifact {} cannot be re-anchored: {err}",
+                artifact_label(artifact)
+            )
+        })?;
+    validate_sse_path_dyn(&request.source, &request.target, &reanchored).map_err(|err| {
+        format!(
+            "guide artifact {} does not validate against the requested endpoints: {err}",
+            artifact_label(artifact)
+        )
+    })?;
+    Ok(Some(reanchored))
+}
+
+fn guide_artifact_supports_stage(artifact: &GuideArtifact, stage: SearchStage) -> bool {
+    artifact.compatibility.supported_stages.is_empty()
+        || artifact.compatibility.supported_stages.contains(&stage)
+}
+
+fn artifact_label(artifact: &GuideArtifact) -> &str {
+    artifact
+        .artifact_id
+        .as_deref()
+        .or(artifact.provenance.label.as_deref())
+        .unwrap_or("<unnamed>")
+}
+
+fn endpoint_identity_matches(
+    source_a: &DynMatrix,
+    target_a: &DynMatrix,
+    source_b: &DynMatrix,
+    target_b: &DynMatrix,
+) -> bool {
+    matrices_share_endpoint_identity(source_a, source_b)
+        && matrices_share_endpoint_identity(target_a, target_b)
+}
+
+fn matrices_share_endpoint_identity(left: &DynMatrix, right: &DynMatrix) -> bool {
+    left.rows == right.rows
+        && left.cols == right.cols
+        && left.is_square()
+        && right.is_square()
+        && left.canonical_perm() == right.canonical_perm()
+}
+
+fn reverse_dyn_sse_path(path: &DynSsePath) -> DynSsePath {
+    DynSsePath {
+        matrices: path.matrices.iter().cloned().rev().collect(),
+        steps: path
+            .steps
+            .iter()
+            .rev()
+            .map(|step| EsseStep {
+                u: step.v.clone(),
+                v: step.u.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn reanchor_dyn_sse_path(
+    path: &DynSsePath,
+    source: &DynMatrix,
+    target: &DynMatrix,
+) -> Result<DynSsePath, String> {
+    let mut path = path.clone();
+    if path.matrices.is_empty() {
+        return Err("guide path contains no matrices".to_string());
+    }
+
+    if path.matrices.first() != Some(source) {
+        let first = path
+            .matrices
+            .first()
+            .expect("non-empty path should have a first matrix")
+            .clone();
+        let step = permutation_step_between(source, &first).ok_or_else(|| {
+            "guide start is not permutation-compatible with the request".to_string()
+        })?;
+        path.steps.insert(0, step);
+        path.matrices.insert(0, source.clone());
+    }
+
+    if path.matrices.last() != Some(target) {
+        let last = path
+            .matrices
+            .last()
+            .expect("non-empty path should have a last matrix")
+            .clone();
+        let step = permutation_step_between(&last, target).ok_or_else(|| {
+            "guide end is not permutation-compatible with the request".to_string()
+        })?;
+        path.steps.push(step);
+        path.matrices.push(target.clone());
+    }
+
+    Ok(path)
+}
+
+fn refine_guide_path(
+    request: &SearchRequest,
+    initial: &DynSsePath,
+    telemetry: &mut SearchTelemetry,
+) -> DynSsePath {
+    let mut current = initial.clone();
+    for _ in 0..request.guided_refinement.rounds {
+        telemetry.guided_refinement_rounds += 1;
+        let next = refine_guide_path_once(
+            &current,
+            &request.config,
+            &request.guided_refinement,
+            telemetry,
+        );
+        if next.steps.len() >= current.steps.len() {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
+fn refine_guide_path_once(
+    guide: &DynSsePath,
+    base_config: &SearchConfig,
+    guided_config: &GuidedRefinementConfig,
+    telemetry: &mut SearchTelemetry,
+) -> DynSsePath {
+    if guide.steps.is_empty() {
+        return guide.clone();
+    }
+
+    let mut edges = Vec::with_capacity(guide.steps.len());
+    for idx in 0..guide.steps.len() {
+        edges.push(GuidedEdge {
+            from: idx,
+            to: idx + 1,
+            lag: 1,
+            path: DynSsePath {
+                matrices: vec![guide.matrices[idx].clone(), guide.matrices[idx + 1].clone()],
+                steps: vec![guide.steps[idx].clone()],
+            },
+        });
+    }
+
+    let max_gap = guided_config.max_gap.unwrap_or(guide.steps.len());
+    for start in 0..guide.steps.len() {
+        let min_end = start + guided_config.min_gap;
+        if min_end >= guide.matrices.len() {
+            continue;
+        }
+        let max_end = (start + max_gap).min(guide.steps.len());
+        for end in min_end..=max_end {
+            let gap = end - start;
+            let lag_cap = guided_config.max_shortcut_lag.min(gap - 1);
+            if lag_cap == 0 {
+                continue;
+            }
+
+            telemetry.guided_segments_considered += 1;
+            let mut config = base_config.clone();
+            config.max_lag = lag_cap;
+            let (result, segment_telemetry) = search_sse_with_telemetry_dyn(
+                &guide.matrices[start],
+                &guide.matrices[end],
+                &config,
+            );
+            merge_search_telemetry(telemetry, &segment_telemetry);
+            if let DynSseResult::Equivalent(path) = result {
+                if path.steps.len() < gap {
+                    telemetry.guided_segments_improved += 1;
+                    edges.push(GuidedEdge {
+                        from: start,
+                        to: end,
+                        lag: path.steps.len(),
+                        path,
+                    });
+                }
+            }
+        }
+    }
+
+    let Some(best_route) = shortest_guided_path(guide.matrices.len(), &edges) else {
+        return guide.clone();
+    };
+    stitch_guided_route(&best_route)
+}
+
+fn merge_search_telemetry(into: &mut SearchTelemetry, from: &SearchTelemetry) {
+    into.invariant_filtered |= from.invariant_filtered;
+    into.permutation_shortcut |= from.permutation_shortcut;
+    into.canonical_shortcut |= from.canonical_shortcut;
+    into.concrete_shift_shortcut |= from.concrete_shift_shortcut;
+    into.frontier_nodes_expanded += from.frontier_nodes_expanded;
+    into.factorisation_calls += from.factorisation_calls;
+    into.factorisations_enumerated += from.factorisations_enumerated;
+    into.candidates_generated += from.candidates_generated;
+    into.pruned_by_size += from.pruned_by_size;
+    into.pruned_by_spectrum += from.pruned_by_spectrum;
+    into.candidates_after_pruning += from.candidates_after_pruning;
+    into.collisions_with_seen += from.collisions_with_seen;
+    into.collisions_with_other_frontier += from.collisions_with_other_frontier;
+    into.approximate_other_side_hits += from.approximate_other_side_hits;
+    into.same_future_past_collisions += from.same_future_past_collisions;
+    into.discovered_nodes += from.discovered_nodes;
+    into.dead_end_nodes += from.dead_end_nodes;
+    into.enqueued_nodes += from.enqueued_nodes;
+    into.max_frontier_size = into.max_frontier_size.max(from.max_frontier_size);
+    into.total_visited_nodes += from.total_visited_nodes;
+    for (family, family_telemetry) in &from.move_family_telemetry {
+        let entry = into
+            .move_family_telemetry
+            .entry(family.clone())
+            .or_default();
+        entry.candidates_generated += family_telemetry.candidates_generated;
+        entry.candidates_after_pruning += family_telemetry.candidates_after_pruning;
+        entry.discovered_nodes += family_telemetry.discovered_nodes;
+        entry.exact_meets += family_telemetry.exact_meets;
+        entry.approximate_other_side_hits += family_telemetry.approximate_other_side_hits;
+    }
+    into.layers.extend(from.layers.clone());
+}
+
+fn shortest_guided_path(node_count: usize, edges: &[GuidedEdge]) -> Option<Vec<GuidedEdge>> {
+    if node_count == 0 {
+        return None;
+    }
+    if node_count == 1 {
+        return Some(Vec::new());
+    }
+
+    let mut best_cost = vec![usize::MAX; node_count];
+    let mut best_prev: Vec<Option<usize>> = vec![None; node_count];
+    let mut best_edge: Vec<Option<usize>> = vec![None; node_count];
+    best_cost[0] = 0;
+
+    for node in 0..node_count {
+        if best_cost[node] == usize::MAX {
+            continue;
+        }
+        for (idx, edge) in edges
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.from == node)
+        {
+            let candidate = best_cost[node] + edge.lag;
+            if candidate < best_cost[edge.to] {
+                best_cost[edge.to] = candidate;
+                best_prev[edge.to] = Some(node);
+                best_edge[edge.to] = Some(idx);
+            }
+        }
+    }
+
+    if best_cost[node_count - 1] == usize::MAX {
+        return None;
+    }
+
+    let mut route = Vec::new();
+    let mut current = node_count - 1;
+    while current != 0 {
+        let edge_idx = best_edge[current].expect("reachable node should have an incoming edge");
+        route.push(edges[edge_idx].clone());
+        current = best_prev[current].expect("reachable node should have a predecessor");
+    }
+    route.reverse();
+    Some(route)
+}
+
+fn stitch_guided_route(route: &[GuidedEdge]) -> DynSsePath {
+    let mut matrices = Vec::new();
+    let mut steps = Vec::new();
+    for (idx, edge) in route.iter().enumerate() {
+        if idx == 0 {
+            matrices.extend(edge.path.matrices.iter().cloned());
+        } else {
+            matrices.extend(edge.path.matrices.iter().skip(1).cloned());
+        }
+        steps.extend(edge.path.steps.iter().cloned());
+    }
+    DynSsePath { matrices, steps }
 }
 
 /// Search for a strong shift equivalence path between arbitrary square endpoints,
@@ -2494,6 +2990,11 @@ fn reconstruct_bidirectional_dyn_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{
+        GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints, GuideArtifactPayload,
+        GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
+        GuidedRefinementConfig,
+    };
 
     fn default_config() -> SearchConfig {
         SearchConfig {
@@ -2501,6 +3002,40 @@ mod tests {
             max_intermediate_dim: 2,
             max_entry: 10,
             search_mode: SearchMode::Mixed,
+        }
+    }
+
+    fn full_path_artifact(id: &str, path: DynSsePath) -> GuideArtifact {
+        GuideArtifact {
+            artifact_id: Some(id.to_string()),
+            endpoints: GuideArtifactEndpoints {
+                source: path
+                    .matrices
+                    .first()
+                    .expect("guide path should have a source matrix")
+                    .clone(),
+                target: path
+                    .matrices
+                    .last()
+                    .expect("guide path should have a target matrix")
+                    .clone(),
+            },
+            payload: GuideArtifactPayload::FullPath { path: path.clone() },
+            provenance: GuideArtifactProvenance {
+                source_kind: Some("unit_test".to_string()),
+                label: Some(id.to_string()),
+                source_ref: None,
+            },
+            validation: GuideArtifactValidation::WitnessValidated,
+            compatibility: GuideArtifactCompatibility {
+                supported_stages: vec![SearchStage::GuidedRefinement],
+                max_endpoint_dim: Some(4),
+            },
+            quality: GuideArtifactQuality {
+                lag: Some(path.steps.len()),
+                cost: Some(path.steps.len()),
+                score: None,
+            },
         }
     }
 
@@ -2548,6 +3083,80 @@ mod tests {
             }
             _ => panic!("Expected NotEquivalent"),
         }
+    }
+
+    #[test]
+    fn test_guided_refinement_stage_accepts_full_path_artifact() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![permutation_step_between(&a, &b).unwrap()],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: default_config(),
+            stage: SearchStage::GuidedRefinement,
+            guide_artifacts: vec![full_path_artifact("direct-guide", guide)],
+            guided_refinement: GuidedRefinementConfig::default(),
+        };
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from guided refinement, got {other:?}"),
+        }
+        assert_eq!(telemetry.guide_artifacts_considered, 1);
+        assert_eq!(telemetry.guide_artifacts_accepted, 1);
+    }
+
+    #[test]
+    fn test_guided_refinement_stage_shortens_permutation_guide() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid).unwrap(),
+                permutation_step_between(&mid, &b).unwrap(),
+            ],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::GuidedRefinement,
+            guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
+            guided_refinement: GuidedRefinementConfig {
+                max_shortcut_lag: 1,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+            },
+        };
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from guided refinement, got {other:?}"),
+        }
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(telemetry.guided_segments_improved, 1);
     }
 
     #[test]
