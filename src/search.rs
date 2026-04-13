@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
+
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::aligned::{
     search_concrete_shift_equivalence_2x2, ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2,

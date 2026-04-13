@@ -196,3 +196,6 @@
 
 - `worktree` Surveyed Boyle-Kim-Roush, Bilich-Dor-On-Ruiz, Eilers-Ruiz, Eilers-Kiming, Brix, and Brix-Ruiz for bounded solver ideas.
   Ranked six concrete experiments in `research/notes/2026-04-13-solver-literature-ideas.md`, with quotient-state compression and narrow diagonal-refactorization at the top because they fit the recent cache win/failure pattern and the current frontier-growth bottleneck.
+
+- `main-search-graph-hash` Swapped the main `src/search.rs` visited/frontier maps to `AHashMap`/`AHashSet`.
+  Kept. Profiling the in-harness graph-only `brix_ruiz_k3` case showed large-state bookkeeping dominating runtime; the faster hash tables cut that case from about `9.6s` to `8.75s` and reduced total harness time from `11.37s` to `10.51s` with identical outcomes.
