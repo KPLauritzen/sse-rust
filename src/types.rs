@@ -12,6 +12,8 @@ pub enum SearchMode {
     GraphOnly,
 }
 
+pub const DEFAULT_BEAM_WIDTH: usize = 64;
+
 impl Default for SearchMode {
     fn default() -> Self {
         Self::Mixed
@@ -191,6 +193,8 @@ pub struct SearchConfig {
     pub max_entry: u32,
     /// Search move mode.
     pub search_mode: SearchMode,
+    /// Optional best-first beam frontier cap. `None` preserves layer-synchronous BFS.
+    pub beam_width: Option<usize>,
 }
 
 impl Default for SearchConfig {
@@ -200,6 +204,7 @@ impl Default for SearchConfig {
             max_intermediate_dim: 2,
             max_entry: 25,
             search_mode: SearchMode::Mixed,
+            beam_width: None,
         }
     }
 }
@@ -462,9 +467,9 @@ mod tests {
     use super::{
         DynMatrix, DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility,
         GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance,
-        GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, SearchMode,
-        SearchStage, ShortcutGuideRankingPolicy, ShortcutPromotionPolicy, ShortcutSearchConfig,
-        SsePath,
+        GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, SearchConfig,
+        SearchMode, SearchStage, ShortcutGuideRankingPolicy, ShortcutPromotionPolicy,
+        ShortcutSearchConfig, SsePath, DEFAULT_BEAM_WIDTH,
     };
     use crate::matrix::SqMatrix;
 
@@ -475,6 +480,15 @@ mod tests {
 
         assert_eq!(snake, SearchMode::GraphOnly);
         assert_eq!(kebab, SearchMode::GraphOnly);
+    }
+
+    #[test]
+    fn test_search_config_defaults_disable_beam() {
+        let config = SearchConfig::default();
+
+        assert_eq!(config.search_mode, SearchMode::Mixed);
+        assert_eq!(config.beam_width, None);
+        assert_eq!(DEFAULT_BEAM_WIDTH, 64);
     }
 
     #[test]

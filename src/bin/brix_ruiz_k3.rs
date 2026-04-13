@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SearchMode, SseResult};
+use sse_core::types::{SearchConfig, SearchMode, SseResult, DEFAULT_BEAM_WIDTH};
 
 fn main() {
     let a = SqMatrix::new([[1, 3], [2, 1]]);
@@ -15,6 +15,7 @@ fn main() {
     let mut max_intermediate_dim = 4usize;
     let mut max_entry = 10u32;
     let mut search_mode = SearchMode::Mixed;
+    let mut beam_width = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -48,12 +49,25 @@ fn main() {
                 search_mode = match mode.as_str() {
                     "mixed" => SearchMode::Mixed,
                     "graph-only" => SearchMode::GraphOnly,
+                    "beam" => {
+                        beam_width = Some(beam_width.unwrap_or(DEFAULT_BEAM_WIDTH));
+                        SearchMode::Mixed
+                    }
                     _ => panic!("invalid --search-mode value: {mode}"),
                 };
             }
+            "--beam-width" => {
+                let width = args
+                    .next()
+                    .expect("--beam-width requires a value")
+                    .parse::<usize>()
+                    .expect("invalid beam width");
+                assert!(width > 0, "--beam-width must be at least 1");
+                beam_width = Some(width);
+            }
             "--help" | "-h" => {
                 println!(
-                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--graph-only] [--search-mode mixed|graph-only]"
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
                 );
                 return;
             }
@@ -66,6 +80,7 @@ fn main() {
         max_intermediate_dim,
         max_entry,
         search_mode,
+        beam_width,
     };
 
     println!("Brix-Ruiz k=3: A = {:?}, B = {:?}", a, b);

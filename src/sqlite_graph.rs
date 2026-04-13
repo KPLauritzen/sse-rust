@@ -645,6 +645,7 @@ mod tests {
                 max_intermediate_dim: 3,
                 max_entry: 4,
                 search_mode: SearchMode::Mixed,
+                beam_width: None,
             };
 
             let (_result, _telemetry) =

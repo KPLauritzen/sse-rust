@@ -15,6 +15,7 @@ use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
     GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig, SearchConfig,
     SearchMode, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
+    DEFAULT_BEAM_WIDTH,
 };
 
 #[derive(Debug)]
@@ -182,7 +183,8 @@ where
                        --max-lag N              max elementary SSE steps (default: 4)\n\
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
-                       --search-mode MODE       mixed | graph-only (default: mixed)\n\
+                       --search-mode MODE       mixed | graph-only | beam (default: mixed)\n\
+                       --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
                                               (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
@@ -222,8 +224,19 @@ where
                 config.search_mode = match value.as_str() {
                     "mixed" => SearchMode::Mixed,
                     "graph-only" | "graph_only" => SearchMode::GraphOnly,
+                    "beam" => {
+                        config.beam_width = Some(config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH));
+                        SearchMode::Mixed
+                    }
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
+            }
+            "--beam-width" => {
+                let width: usize = next_parsed(&mut args, "--beam-width")?;
+                if width == 0 {
+                    return Err("--beam-width must be at least 1".to_string());
+                }
+                config.beam_width = Some(width);
             }
             "--stage" => {
                 let value = args.next().ok_or("--stage requires a value")?;
@@ -729,7 +742,7 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 mod tests {
     use super::{parse_cli, parse_matrix, run_with_args};
     use rusqlite::Connection;
-    use sse_core::types::{GuideArtifact, GuideArtifactPayload, SearchStage};
+    use sse_core::types::{GuideArtifact, GuideArtifactPayload, SearchMode, SearchStage};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -822,6 +835,41 @@ mod tests {
         assert_eq!(cli.shortcut_search.rounds, 2);
         assert_eq!(cli.shortcut_search.max_total_segment_attempts, 16);
         assert!(cli.shortcut_search.artifacts.emit_promoted_guides);
+    }
+
+    #[test]
+    fn parse_cli_accepts_beam_mode_and_width() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--search-mode".to_string(),
+                "beam".to_string(),
+                "--beam-width".to_string(),
+                "7".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.config.search_mode, SearchMode::Mixed);
+        assert_eq!(cli.config.beam_width, Some(7));
+    }
+
+    #[test]
+    fn parse_cli_rejects_zero_beam_width() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--beam-width".to_string(),
+                "0".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "--beam-width must be at least 1");
     }
 
     #[test]
