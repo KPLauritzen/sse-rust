@@ -21,6 +21,7 @@ struct Cli {
     cases_path: PathBuf,
     format: OutputFormat,
     worker_case: Option<String>,
+    worker_output: Option<PathBuf>,
     reuse_runs: Vec<PathBuf>,
     reuse_dirs: Vec<PathBuf>,
 }
@@ -380,11 +381,15 @@ fn run() -> Result<ExitCode, String> {
             .find(|case| case.id == case_id)
             .ok_or_else(|| format!("unknown worker case id: {case_id}"))?;
         let result = run_case(case, &cli.cases_path);
-        println!(
-            "{}",
-            serde_json::to_string(&result)
-                .map_err(|err| format!("failed to serialise worker result: {err}"))?
-        );
+        let encoded = serde_json::to_string(&result)
+            .map_err(|err| format!("failed to serialise worker result: {err}"))?;
+        if let Some(path) = cli.worker_output {
+            fs::write(&path, encoded).map_err(|err| {
+                format!("failed to write worker result {}: {err}", path.display())
+            })?;
+        } else {
+            println!("{encoded}");
+        }
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -412,6 +417,7 @@ where
     let mut cases_path = PathBuf::from("research/cases.json");
     let mut format = OutputFormat::Pretty;
     let mut worker_case = None;
+    let mut worker_output = None;
     let mut reuse_runs = Vec::new();
     let mut reuse_dirs = Vec::new();
 
@@ -439,6 +445,12 @@ where
                     .ok_or_else(|| "--worker-case requires a case id".to_string())?;
                 worker_case = Some(value);
             }
+            "--worker-output" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--worker-output requires a path".to_string())?;
+                worker_output = Some(PathBuf::from(value));
+            }
             "--reuse-run" => {
                 let value = args
                     .next()
@@ -465,6 +477,7 @@ where
         cases_path,
         format,
         worker_case,
+        worker_output,
         reuse_runs,
         reuse_dirs,
     })
@@ -1790,6 +1803,11 @@ fn run_case_in_subprocess(
     cases_path: &Path,
     case: &ResearchCase,
 ) -> Result<WorkerCaseResult, String> {
+    let worker_output_path = env::temp_dir().join(format!(
+        "research-harness-worker-{}-{}.json",
+        std::process::id(),
+        case.id
+    ));
     let resolved = resolve_case(case, cases_path).ok();
     let source_dim = resolved
         .as_ref()
@@ -1805,7 +1823,9 @@ fn run_case_in_subprocess(
         .arg(cases_path)
         .arg("--worker-case")
         .arg(&case.id)
-        .stdout(Stdio::piped())
+        .arg("--worker-output")
+        .arg(&worker_output_path)
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("failed to spawn worker for {}: {err}", case.id))?;
@@ -1821,6 +1841,7 @@ fn run_case_in_subprocess(
             let output = child
                 .wait_with_output()
                 .map_err(|err| format!("failed to collect timed out worker {}: {err}", case.id))?;
+            let _ = fs::remove_file(&worker_output_path);
             let reason = stderr_snippet(&output.stderr);
             return Ok(WorkerCaseResult {
                 id: case.id.clone(),
@@ -1851,6 +1872,7 @@ fn run_case_in_subprocess(
                 })?;
 
                 if !status.success() {
+                    let _ = fs::remove_file(&worker_output_path);
                     return Ok(WorkerCaseResult {
                         id: case.id.clone(),
                         actual_outcome: "panic".to_string(),
@@ -1871,9 +1893,15 @@ fn run_case_in_subprocess(
                     });
                 }
 
-                let stdout = String::from_utf8(output.stdout)
-                    .map_err(|err| format!("worker {} produced non-utf8 stdout: {err}", case.id))?;
-                let parsed: WorkerCaseResult = serde_json::from_str(stdout.trim())
+                let worker_output = fs::read_to_string(&worker_output_path).map_err(|err| {
+                    format!(
+                        "worker {} did not produce readable output {}: {err}",
+                        case.id,
+                        worker_output_path.display()
+                    )
+                })?;
+                let _ = fs::remove_file(&worker_output_path);
+                let parsed: WorkerCaseResult = serde_json::from_str(worker_output.trim())
                     .map_err(|err| format!("worker {} produced invalid json: {err}", case.id))?;
                 return Ok(parsed);
             }
