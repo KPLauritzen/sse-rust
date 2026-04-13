@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,8 @@ struct Cli {
     cases_path: PathBuf,
     format: OutputFormat,
     worker_case: Option<String>,
+    reuse_runs: Vec<PathBuf>,
+    reuse_dirs: Vec<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,6 +48,16 @@ struct ResearchCase {
     points: OutcomePoints,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    campaign: Option<CampaignConfig>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct CampaignConfig {
+    id: String,
+    strategy: String,
+    #[serde(default)]
+    schedule_order: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -84,8 +97,11 @@ struct WorkerCaseResult {
 struct HarnessSummary {
     schema_version: u32,
     cases_path: String,
+    reused_history_sources: usize,
     fitness: FitnessSummary,
     comparisons: Vec<ComparisonSummary>,
+    campaigns: Vec<CampaignSummary>,
+    strategies: Vec<StrategySummary>,
     cases: Vec<CaseSummary>,
 }
 
@@ -96,8 +112,17 @@ struct FitnessSummary {
     target_hits: usize,
     total_points: i64,
     total_elapsed_ms: u128,
+    current_witness_cases: usize,
+    current_witness_lag_total: usize,
+    current_lag_score: i64,
+    best_known_witness_cases: usize,
+    best_known_witness_lag_total: usize,
+    best_known_lag_score: i64,
+    best_known_improvements: usize,
     generalized_cases: usize,
     comparison_groups: usize,
+    campaign_groups: usize,
+    strategy_groups: usize,
     telemetry_focus_cases: usize,
     telemetry_focus_score: u64,
     telemetry_focus_reach_score: u64,
@@ -108,6 +133,7 @@ struct FitnessSummary {
 struct CaseSummary {
     id: String,
     description: String,
+    campaign: Option<CampaignConfig>,
     endpoint: EndpointSummary,
     config: JsonSearchConfig,
     actual_outcome: String,
@@ -121,12 +147,14 @@ struct CaseSummary {
     steps: Option<usize>,
     reason: Option<String>,
     result_model: ResultModel,
+    best_known_witness: Option<BestKnownWitness>,
+    improved_best_known_witness: bool,
     telemetry: SearchTelemetry,
     telemetry_summary: DerivedTelemetrySummary,
     tags: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct EndpointSummary {
     source_dim: usize,
     target_dim: usize,
@@ -178,13 +206,69 @@ struct ComparisonSummary {
 struct ComparisonVariantSummary {
     case_id: String,
     description: String,
+    campaign: Option<CampaignConfig>,
     config: JsonSearchConfig,
     actual_outcome: String,
     result_model: ResultModel,
+    best_known_witness: Option<BestKnownWitness>,
+    improved_best_known_witness: bool,
     passed: bool,
     hit_target: bool,
     points: i64,
     elapsed_ms: u128,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BestKnownWitness {
+    lag: usize,
+    elapsed_ms: u128,
+    source: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CampaignSummary {
+    id: String,
+    cases: usize,
+    current_witness_cases: usize,
+    current_witness_lag_total: usize,
+    current_lag_score: i64,
+    best_known_witness_cases: usize,
+    best_known_witness_lag_total: usize,
+    best_known_lag_score: i64,
+    total_points: i64,
+    total_elapsed_ms: u128,
+    scheduled_cases: Vec<CampaignCaseSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct CampaignCaseSummary {
+    case_id: String,
+    strategy: String,
+    schedule_order: usize,
+    actual_outcome: String,
+    current_witness_lag: Option<usize>,
+    best_known_witness: Option<BestKnownWitness>,
+    improved_best_known_witness: bool,
+    points: i64,
+    elapsed_ms: u128,
+}
+
+#[derive(Debug, Serialize)]
+struct StrategySummary {
+    strategy: String,
+    cases: usize,
+    campaigns: usize,
+    passed_required_cases: usize,
+    target_hits: usize,
+    total_points: i64,
+    total_elapsed_ms: u128,
+    current_witness_cases: usize,
+    current_witness_lag_total: usize,
+    current_lag_score: i64,
+    best_known_witness_cases: usize,
+    best_known_witness_lag_total: usize,
+    best_known_lag_score: i64,
+    best_known_improvements: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -219,6 +303,7 @@ fn main() -> ExitCode {
 fn run() -> Result<ExitCode, String> {
     let cli = parse_cli(env::args().skip(1))?;
     let corpus = load_corpus(&cli.cases_path)?;
+    let reused_results = load_reused_results(&cli.reuse_runs, &cli.reuse_dirs)?;
 
     if let Some(case_id) = cli.worker_case.as_deref() {
         let case = corpus
@@ -235,7 +320,7 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let summary = run_harness(&cli.cases_path, &corpus)?;
+    let summary = run_harness(&cli.cases_path, &corpus, &reused_results)?;
     match cli.format {
         OutputFormat::Pretty => print!("{}", format_pretty_summary(&summary)),
         OutputFormat::Json => println!(
@@ -259,6 +344,8 @@ where
     let mut cases_path = PathBuf::from("research/cases.json");
     let mut format = OutputFormat::Pretty;
     let mut worker_case = None;
+    let mut reuse_runs = Vec::new();
+    let mut reuse_dirs = Vec::new();
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -284,9 +371,21 @@ where
                     .ok_or_else(|| "--worker-case requires a case id".to_string())?;
                 worker_case = Some(value);
             }
+            "--reuse-run" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--reuse-run requires a path".to_string())?;
+                reuse_runs.push(PathBuf::from(value));
+            }
+            "--reuse-dir" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--reuse-dir requires a directory".to_string())?;
+                reuse_dirs.push(PathBuf::from(value));
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: research_harness [--cases research/cases.json] [--format pretty|json] [--worker-case CASE_ID]"
+                    "usage: research_harness [--cases research/cases.json] [--format pretty|json] [--worker-case CASE_ID] [--reuse-run PATH]... [--reuse-dir DIR]..."
                         .to_string(),
                 );
             }
@@ -298,6 +397,8 @@ where
         cases_path,
         format,
         worker_case,
+        reuse_runs,
+        reuse_dirs,
     })
 }
 
@@ -305,6 +406,103 @@ fn load_corpus(path: &Path) -> Result<CaseCorpus, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     serde_json::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+}
+
+#[derive(Debug, Default)]
+struct ReusedResults {
+    endpoint_best_witness: BTreeMap<String, BestKnownWitness>,
+    sources: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PersistedHarnessSummary {
+    #[serde(default)]
+    cases: Vec<PersistedCaseSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PersistedCaseSummary {
+    endpoint: EndpointSummary,
+    elapsed_ms: u128,
+    result_model: PersistedResultModel,
+}
+
+#[derive(Debug, Deserialize)]
+struct PersistedResultModel {
+    witness_lag: Option<usize>,
+}
+
+fn load_reused_results(
+    reuse_runs: &[PathBuf],
+    reuse_dirs: &[PathBuf],
+) -> Result<ReusedResults, String> {
+    let mut sources = reuse_runs.to_vec();
+    for dir in reuse_dirs {
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(format!(
+                    "failed to read reuse directory {}: {err}",
+                    dir.display()
+                ))
+            }
+        };
+        let mut dir_sources = Vec::new();
+        for entry in entries {
+            let entry =
+                entry.map_err(|err| format!("failed to read entry in {}: {err}", dir.display()))?;
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                dir_sources.push(path);
+            }
+        }
+        dir_sources.sort();
+        sources.extend(dir_sources);
+    }
+
+    let mut reused = ReusedResults::default();
+    for source in sources {
+        let raw = fs::read_to_string(&source)
+            .map_err(|err| format!("failed to read reuse artifact {}: {err}", source.display()))?;
+        let parsed: PersistedHarnessSummary = serde_json::from_str(&raw)
+            .map_err(|err| format!("failed to parse reuse artifact {}: {err}", source.display()))?;
+        let source_label = source.display().to_string();
+        reused.sources.push(source_label.clone());
+
+        for case in parsed.cases {
+            let Some(lag) = case.result_model.witness_lag else {
+                continue;
+            };
+            let endpoint_key = endpoint_identity_key(&case.endpoint);
+            let candidate = BestKnownWitness {
+                lag,
+                elapsed_ms: case.elapsed_ms,
+                source: source_label.clone(),
+            };
+            match reused.endpoint_best_witness.get(&endpoint_key) {
+                Some(existing) if !best_known_witness_beats(&candidate, existing) => {}
+                _ => {
+                    reused.endpoint_best_witness.insert(endpoint_key, candidate);
+                }
+            }
+        }
+    }
+
+    Ok(reused)
+}
+
+fn endpoint_identity_key(endpoint: &EndpointSummary) -> String {
+    serde_json::to_string(&(
+        endpoint.source_dim,
+        endpoint.target_dim,
+        &endpoint.a,
+        &endpoint.b,
+    ))
+    .expect("endpoint identity key should serialise")
 }
 
 fn run_case(case: &ResearchCase) -> WorkerCaseResult {
@@ -583,6 +781,36 @@ fn result_model(
     }
 }
 
+fn best_known_witness_beats(candidate: &BestKnownWitness, existing: &BestKnownWitness) -> bool {
+    candidate.lag < existing.lag
+        || (candidate.lag == existing.lag && candidate.elapsed_ms < existing.elapsed_ms)
+        || (candidate.lag == existing.lag
+            && candidate.elapsed_ms == existing.elapsed_ms
+            && candidate.source < existing.source)
+}
+
+fn merge_best_known_witness(
+    current: Option<BestKnownWitness>,
+    historical: Option<&BestKnownWitness>,
+) -> (Option<BestKnownWitness>, bool) {
+    match (current, historical) {
+        (Some(current), Some(historical)) => {
+            if best_known_witness_beats(&current, historical) {
+                (Some(current), true)
+            } else {
+                (Some(historical.clone()), false)
+            }
+        }
+        (Some(current), None) => (Some(current), true),
+        (None, Some(historical)) => (Some(historical.clone()), false),
+        (None, None) => (None, false),
+    }
+}
+
+fn lag_score(witness_cases: usize, witness_lag_total: usize) -> i64 {
+    witness_cases as i64 * 1_000_000 - witness_lag_total as i64
+}
+
 fn solver_path_for_dims(source_dim: usize, target_dim: usize) -> HarnessSolverPath {
     if source_dim == 2 && target_dim == 2 {
         HarnessSolverPath::TwoByTwo
@@ -641,21 +869,45 @@ fn not_equivalent_result_model(
     )
 }
 
-fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary, String> {
+fn run_harness(
+    cases_path: &Path,
+    corpus: &CaseCorpus,
+    reused_results: &ReusedResults,
+) -> Result<HarnessSummary, String> {
     let current_exe =
         env::current_exe().map_err(|err| format!("failed to resolve current executable: {err}"))?;
 
     let mut cases = Vec::with_capacity(corpus.cases.len());
+    let mut scheduled_cases = corpus.cases.iter().collect::<Vec<_>>();
+    scheduled_cases.sort_by_key(|case| {
+        case.campaign
+            .as_ref()
+            .map(|campaign| {
+                (
+                    0usize,
+                    campaign.id.clone(),
+                    campaign.schedule_order,
+                    case.id.clone(),
+                )
+            })
+            .unwrap_or_else(|| (1usize, String::new(), 0usize, case.id.clone()))
+    });
+
     let mut passed_required_cases = 0usize;
     let mut target_hits = 0usize;
     let mut total_points = 0i64;
     let mut total_elapsed_ms = 0u128;
+    let mut current_witness_cases = 0usize;
+    let mut current_witness_lag_total = 0usize;
+    let mut best_known_witness_cases = 0usize;
+    let mut best_known_witness_lag_total = 0usize;
+    let mut best_known_improvements = 0usize;
     let mut generalized_cases = 0usize;
     let mut telemetry_focus_cases = 0usize;
     let mut telemetry_focus_score = 0u64;
     let mut telemetry_focus_directed_score = 0i64;
 
-    for case in &corpus.cases {
+    for case in scheduled_cases {
         let executed = run_case_in_subprocess(&current_exe, cases_path, case)?;
         let passed = case
             .allowed_outcomes
@@ -676,12 +928,17 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
 
         total_points += points;
         total_elapsed_ms += executed.elapsed_ms;
+        if let Some(lag) = executed.result_model.witness_lag {
+            current_witness_cases += 1;
+            current_witness_lag_total += lag;
+        }
         let endpoint = EndpointSummary {
             source_dim: case.a.len(),
             target_dim: case.b.len(),
             a: case.a.clone(),
             b: case.b.clone(),
         };
+        let endpoint_key = endpoint_identity_key(&endpoint);
         if endpoint.source_dim != 2 || endpoint.target_dim != 2 {
             generalized_cases += 1;
         }
@@ -696,9 +953,29 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
             telemetry_focus_directed_score += telemetry_summary.directed_progress_score;
         }
 
+        let (best_known_witness, improved_best_known_witness) = merge_best_known_witness(
+            executed
+                .result_model
+                .witness_lag
+                .map(|lag| BestKnownWitness {
+                    lag,
+                    elapsed_ms: executed.elapsed_ms,
+                    source: "current-run".to_string(),
+                }),
+            reused_results.endpoint_best_witness.get(&endpoint_key),
+        );
+        if let Some(best_known) = &best_known_witness {
+            best_known_witness_cases += 1;
+            best_known_witness_lag_total += best_known.lag;
+        }
+        if improved_best_known_witness {
+            best_known_improvements += 1;
+        }
+
         cases.push(CaseSummary {
             id: case.id.clone(),
             description: case.description.clone(),
+            campaign: case.campaign.clone(),
             endpoint,
             config: case.config.clone(),
             actual_outcome: executed.actual_outcome,
@@ -712,6 +989,8 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
             steps: executed.steps,
             reason: executed.reason,
             result_model: executed.result_model,
+            best_known_witness,
+            improved_best_known_witness,
             telemetry: executed.telemetry,
             telemetry_summary,
             tags: case.tags.clone(),
@@ -719,47 +998,58 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
     }
 
     let comparisons = build_comparison_summaries(&cases);
+    let campaigns = build_campaign_summaries(&cases);
+    let strategies = build_strategy_summaries(&cases);
 
     Ok(HarnessSummary {
         schema_version: corpus.schema_version,
         cases_path: cases_path.display().to_string(),
+        reused_history_sources: reused_results.sources.len(),
         fitness: FitnessSummary {
             required_cases: corpus.cases.len(),
             passed_required_cases,
             target_hits,
             total_points,
             total_elapsed_ms,
+            current_witness_cases,
+            current_witness_lag_total,
+            current_lag_score: lag_score(current_witness_cases, current_witness_lag_total),
+            best_known_witness_cases,
+            best_known_witness_lag_total,
+            best_known_lag_score: lag_score(best_known_witness_cases, best_known_witness_lag_total),
+            best_known_improvements,
             generalized_cases,
             comparison_groups: comparisons.len(),
+            campaign_groups: campaigns.len(),
+            strategy_groups: strategies.len(),
             telemetry_focus_cases,
             telemetry_focus_score,
             telemetry_focus_reach_score: telemetry_focus_score,
             telemetry_focus_directed_score,
         },
         comparisons,
+        campaigns,
+        strategies,
         cases,
     })
 }
 
 fn build_comparison_summaries(cases: &[CaseSummary]) -> Vec<ComparisonSummary> {
     let mut groups = Vec::<ComparisonSummary>::new();
-    let mut group_indices = std::collections::BTreeMap::<String, usize>::new();
+    let mut group_indices = BTreeMap::<String, usize>::new();
 
     for case in cases {
-        let key = serde_json::to_string(&(
-            case.endpoint.source_dim,
-            case.endpoint.target_dim,
-            &case.endpoint.a,
-            &case.endpoint.b,
-        ))
-        .expect("endpoint comparison key should serialise");
+        let key = endpoint_identity_key(&case.endpoint);
 
         let variant = ComparisonVariantSummary {
             case_id: case.id.clone(),
             description: case.description.clone(),
+            campaign: case.campaign.clone(),
             config: case.config.clone(),
             actual_outcome: case.actual_outcome.clone(),
             result_model: case.result_model.clone(),
+            best_known_witness: case.best_known_witness.clone(),
+            improved_best_known_witness: case.improved_best_known_witness,
             passed: case.passed,
             hit_target: case.hit_target,
             points: case.points,
@@ -781,6 +1071,161 @@ fn build_comparison_summaries(cases: &[CaseSummary]) -> Vec<ComparisonSummary> {
     groups
         .into_iter()
         .filter(|group| group.variants.len() > 1)
+        .collect()
+}
+
+fn build_campaign_summaries(cases: &[CaseSummary]) -> Vec<CampaignSummary> {
+    let mut groups = BTreeMap::<String, Vec<&CaseSummary>>::new();
+    for case in cases {
+        let Some(campaign) = case.campaign.as_ref() else {
+            continue;
+        };
+        groups.entry(campaign.id.clone()).or_default().push(case);
+    }
+
+    groups
+        .into_iter()
+        .map(|(id, mut group_cases)| {
+            group_cases.sort_by_key(|case| {
+                let campaign = case
+                    .campaign
+                    .as_ref()
+                    .expect("campaign grouping only contains campaign cases");
+                (
+                    campaign.schedule_order,
+                    campaign.strategy.clone(),
+                    case.id.clone(),
+                )
+            });
+
+            let mut current_witness_cases = 0usize;
+            let mut current_witness_lag_total = 0usize;
+            let mut best_known_witness_cases = 0usize;
+            let mut best_known_witness_lag_total = 0usize;
+            let mut total_points = 0i64;
+            let mut total_elapsed_ms = 0u128;
+            let mut scheduled_cases = Vec::with_capacity(group_cases.len());
+
+            for case in group_cases {
+                total_points += case.points;
+                total_elapsed_ms += case.elapsed_ms;
+                if let Some(lag) = case.result_model.witness_lag {
+                    current_witness_cases += 1;
+                    current_witness_lag_total += lag;
+                }
+                if let Some(best_known) = &case.best_known_witness {
+                    best_known_witness_cases += 1;
+                    best_known_witness_lag_total += best_known.lag;
+                }
+
+                let campaign = case
+                    .campaign
+                    .as_ref()
+                    .expect("campaign grouping only contains campaign cases");
+                scheduled_cases.push(CampaignCaseSummary {
+                    case_id: case.id.clone(),
+                    strategy: campaign.strategy.clone(),
+                    schedule_order: campaign.schedule_order,
+                    actual_outcome: case.actual_outcome.clone(),
+                    current_witness_lag: case.result_model.witness_lag,
+                    best_known_witness: case.best_known_witness.clone(),
+                    improved_best_known_witness: case.improved_best_known_witness,
+                    points: case.points,
+                    elapsed_ms: case.elapsed_ms,
+                });
+            }
+
+            CampaignSummary {
+                id,
+                cases: scheduled_cases.len(),
+                current_witness_cases,
+                current_witness_lag_total,
+                current_lag_score: lag_score(current_witness_cases, current_witness_lag_total),
+                best_known_witness_cases,
+                best_known_witness_lag_total,
+                best_known_lag_score: lag_score(
+                    best_known_witness_cases,
+                    best_known_witness_lag_total,
+                ),
+                total_points,
+                total_elapsed_ms,
+                scheduled_cases,
+            }
+        })
+        .collect()
+}
+
+fn build_strategy_summaries(cases: &[CaseSummary]) -> Vec<StrategySummary> {
+    let mut groups = BTreeMap::<String, Vec<&CaseSummary>>::new();
+    for case in cases {
+        let Some(campaign) = case.campaign.as_ref() else {
+            continue;
+        };
+        groups
+            .entry(campaign.strategy.clone())
+            .or_default()
+            .push(case);
+    }
+
+    groups
+        .into_iter()
+        .map(|(strategy, group_cases)| {
+            let mut campaigns = BTreeMap::<String, ()>::new();
+            let mut passed_required_cases = 0usize;
+            let mut target_hits = 0usize;
+            let mut total_points = 0i64;
+            let mut total_elapsed_ms = 0u128;
+            let mut current_witness_cases = 0usize;
+            let mut current_witness_lag_total = 0usize;
+            let mut best_known_witness_cases = 0usize;
+            let mut best_known_witness_lag_total = 0usize;
+            let mut best_known_improvements = 0usize;
+
+            for case in &group_cases {
+                if case.passed {
+                    passed_required_cases += 1;
+                }
+                if case.hit_target {
+                    target_hits += 1;
+                }
+                total_points += case.points;
+                total_elapsed_ms += case.elapsed_ms;
+                if let Some(lag) = case.result_model.witness_lag {
+                    current_witness_cases += 1;
+                    current_witness_lag_total += lag;
+                }
+                if let Some(best_known) = &case.best_known_witness {
+                    best_known_witness_cases += 1;
+                    best_known_witness_lag_total += best_known.lag;
+                }
+                if case.improved_best_known_witness {
+                    best_known_improvements += 1;
+                }
+                if let Some(campaign) = case.campaign.as_ref() {
+                    campaigns.insert(campaign.id.clone(), ());
+                }
+            }
+
+            StrategySummary {
+                strategy,
+                cases: group_cases.len(),
+                campaigns: campaigns.len(),
+                passed_required_cases,
+                target_hits,
+                total_points,
+                total_elapsed_ms,
+                current_witness_cases,
+                current_witness_lag_total,
+                current_lag_score: lag_score(current_witness_cases, current_witness_lag_total),
+                best_known_witness_cases,
+                best_known_witness_lag_total,
+                best_known_lag_score: lag_score(
+                    best_known_witness_cases,
+                    best_known_witness_lag_total,
+                ),
+                best_known_improvements,
+            }
+        })
         .collect()
 }
 
@@ -1116,11 +1561,28 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
     out.push_str("Research Harness\n");
     out.push_str(&format!("cases: {}\n", summary.cases_path));
     out.push_str(&format!(
+        "reused_history_sources: {}\n",
+        summary.reused_history_sources
+    ));
+    out.push_str(&format!(
         "required_passes: {}/{}\n",
         summary.fitness.passed_required_cases, summary.fitness.required_cases
     ));
     out.push_str(&format!("target_hits: {}\n", summary.fitness.target_hits));
     out.push_str(&format!("total_points: {}\n", summary.fitness.total_points));
+    out.push_str(&format!(
+        "current_lag_score: {} across {} witness case(s), total lag {}\n",
+        summary.fitness.current_lag_score,
+        summary.fitness.current_witness_cases,
+        summary.fitness.current_witness_lag_total
+    ));
+    out.push_str(&format!(
+        "best_known_lag_score: {} across {} witness case(s), total lag {}, improvements {}\n",
+        summary.fitness.best_known_lag_score,
+        summary.fitness.best_known_witness_cases,
+        summary.fitness.best_known_witness_lag_total,
+        summary.fitness.best_known_improvements
+    ));
     out.push_str(&format!(
         "generalized_cases: {}\n",
         summary.fitness.generalized_cases
@@ -1128,6 +1590,14 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
     out.push_str(&format!(
         "comparison_groups: {}\n",
         summary.fitness.comparison_groups
+    ));
+    out.push_str(&format!(
+        "campaign_groups: {}\n",
+        summary.fitness.campaign_groups
+    ));
+    out.push_str(&format!(
+        "strategy_groups: {}\n",
+        summary.fitness.strategy_groups
     ));
     out.push_str(&format!(
         "telemetry_focus_score: {} across {} case(s)\n",
@@ -1153,8 +1623,13 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
             for variant in &comparison.variants {
                 out.push_str(&format!(
-                    "  {}: mode={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} points={} elapsed={}ms\n",
+                    "  {}: strategy={} mode={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
                     variant.case_id,
+                    variant
+                        .campaign
+                        .as_ref()
+                        .map(|campaign| campaign.strategy.as_str())
+                        .unwrap_or("-"),
                     variant.config.search_mode,
                     variant.config.max_lag,
                     variant.config.max_intermediate_dim,
@@ -1162,10 +1637,62 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
                     variant.actual_outcome,
                     variant.result_model.resolution_kind,
                     variant.result_model.witness_lag,
+                    variant.best_known_witness.as_ref().map(|best| best.lag),
+                    variant.improved_best_known_witness,
                     variant.points,
                     variant.elapsed_ms,
                 ));
             }
+        }
+        out.push('\n');
+    }
+
+    if !summary.campaigns.is_empty() {
+        out.push_str("Campaigns\n");
+        for campaign in &summary.campaigns {
+            out.push_str(&format!(
+                "- {}: cases={} current_lag_score={} best_known_lag_score={} points={} elapsed={}ms\n",
+                campaign.id,
+                campaign.cases,
+                campaign.current_lag_score,
+                campaign.best_known_lag_score,
+                campaign.total_points,
+                campaign.total_elapsed_ms,
+            ));
+            for scheduled_case in &campaign.scheduled_cases {
+                out.push_str(&format!(
+                    "  order={} {} strategy={} outcome={} current_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
+                    scheduled_case.schedule_order,
+                    scheduled_case.case_id,
+                    scheduled_case.strategy,
+                    scheduled_case.actual_outcome,
+                    scheduled_case.current_witness_lag,
+                    scheduled_case.best_known_witness.as_ref().map(|best| best.lag),
+                    scheduled_case.improved_best_known_witness,
+                    scheduled_case.points,
+                    scheduled_case.elapsed_ms,
+                ));
+            }
+        }
+        out.push('\n');
+    }
+
+    if !summary.strategies.is_empty() {
+        out.push_str("Strategies\n");
+        for strategy in &summary.strategies {
+            out.push_str(&format!(
+                "- {}: cases={} campaigns={} passes={} target_hits={} points={} current_lag_score={} best_known_lag_score={} improvements={} elapsed={}ms\n",
+                strategy.strategy,
+                strategy.cases,
+                strategy.campaigns,
+                strategy.passed_required_cases,
+                strategy.target_hits,
+                strategy.total_points,
+                strategy.current_lag_score,
+                strategy.best_known_lag_score,
+                strategy.best_known_improvements,
+                strategy.total_elapsed_ms,
+            ));
         }
         out.push('\n');
     }
@@ -1200,6 +1727,21 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
         ));
         if let Some(reason) = &case.reason {
             out.push_str(&format!("  reason: {}\n", reason));
+        }
+        if let Some(campaign) = &case.campaign {
+            out.push_str(&format!(
+                "  campaign: id={} strategy={} order={}\n",
+                campaign.id, campaign.strategy, campaign.schedule_order
+            ));
+        }
+        if let Some(best_known) = &case.best_known_witness {
+            out.push_str(&format!(
+                "  best_known_witness: lag={} elapsed={}ms source={} improved_best={}\n",
+                best_known.lag,
+                best_known.elapsed_ms,
+                best_known.source,
+                case.improved_best_known_witness,
+            ));
         }
         out.push_str(&format!(
             "  telemetry: layers={} expanded={} factorisations={} kept={} pruned_size={} pruned_spectrum={} discovered={} approx_hits={} dead_ends={} seen_collisions={} max_frontier={} visited={}\n",
@@ -1253,6 +1795,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn run_case_handles_non_2x2_square_endpoints() {
@@ -1278,6 +1821,7 @@ mod tests {
                 panic: 0,
             },
             tags: vec![],
+            campaign: None,
         };
 
         let result = run_case(&case);
@@ -1317,6 +1861,7 @@ mod tests {
                 panic: 0,
             },
             tags: vec![],
+            campaign: None,
         };
 
         let result = run_case(&case);
@@ -1356,6 +1901,11 @@ mod tests {
             CaseSummary {
                 id: "case-a".to_string(),
                 description: "A".to_string(),
+                campaign: Some(CampaignConfig {
+                    id: "identity".to_string(),
+                    strategy: "mixed".to_string(),
+                    schedule_order: 10,
+                }),
                 endpoint: endpoint.clone(),
                 config: JsonSearchConfig {
                     max_lag: 1,
@@ -1374,6 +1924,12 @@ mod tests {
                 steps: Some(0),
                 reason: None,
                 result_model: result_model.clone(),
+                best_known_witness: Some(BestKnownWitness {
+                    lag: 0,
+                    elapsed_ms: 1,
+                    source: "current-run".to_string(),
+                }),
+                improved_best_known_witness: true,
                 telemetry: SearchTelemetry::default(),
                 telemetry_summary: derive_telemetry_summary(
                     "equivalent",
@@ -1385,6 +1941,11 @@ mod tests {
             CaseSummary {
                 id: "case-b".to_string(),
                 description: "B".to_string(),
+                campaign: Some(CampaignConfig {
+                    id: "identity".to_string(),
+                    strategy: "graph-only".to_string(),
+                    schedule_order: 20,
+                }),
                 endpoint,
                 config: JsonSearchConfig {
                     max_lag: 2,
@@ -1403,6 +1964,12 @@ mod tests {
                 steps: Some(0),
                 reason: None,
                 result_model,
+                best_known_witness: Some(BestKnownWitness {
+                    lag: 0,
+                    elapsed_ms: 1,
+                    source: "current-run".to_string(),
+                }),
+                improved_best_known_witness: true,
                 telemetry: SearchTelemetry::default(),
                 telemetry_summary: derive_telemetry_summary(
                     "equivalent",
@@ -1416,5 +1983,247 @@ mod tests {
         let comparisons = build_comparison_summaries(&cases);
         assert_eq!(comparisons.len(), 1);
         assert_eq!(comparisons[0].variants.len(), 2);
+    }
+
+    #[test]
+    fn load_reused_results_shares_endpoint_history_across_case_ids() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!(
+            "research-harness-reuse-{}-{}",
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&temp_dir).expect("temporary reuse directory should be created");
+
+        let first = temp_dir.join("first.json");
+        let second = temp_dir.join("second.json");
+        fs::write(
+            &first,
+            r#"{
+  "cases": [
+    {
+      "id": "brix_ruiz_k3_graph_only",
+      "endpoint": {
+        "source_dim": 2,
+        "target_dim": 2,
+        "a": [[1, 3], [2, 1]],
+        "b": [[1, 6], [1, 1]]
+      },
+      "elapsed_ms": 50,
+      "result_model": { "witness_lag": 11 }
+    }
+  ]
+}"#,
+        )
+        .expect("first reuse artifact should be written");
+        fs::write(
+            &second,
+            r#"{
+  "cases": [
+    {
+      "id": "brix_ruiz_k3_graph_only",
+      "endpoint": {
+        "source_dim": 2,
+        "target_dim": 2,
+        "a": [[1, 3], [2, 1]],
+        "b": [[1, 6], [1, 1]]
+      },
+      "elapsed_ms": 40,
+      "result_model": { "witness_lag": 7 }
+    },
+    {
+      "id": "identity",
+      "endpoint": {
+        "source_dim": 2,
+        "target_dim": 2,
+        "a": [[1, 0], [0, 1]],
+        "b": [[1, 0], [0, 1]]
+      },
+      "elapsed_ms": 2,
+      "result_model": { "witness_lag": 0 }
+    }
+  ]
+}"#,
+        )
+        .expect("second reuse artifact should be written");
+
+        let reused =
+            load_reused_results(&[], &[temp_dir.clone()]).expect("reuse artifacts should load");
+        let endpoint_key = endpoint_identity_key(&EndpointSummary {
+            source_dim: 2,
+            target_dim: 2,
+            a: vec![vec![1, 3], vec![2, 1]],
+            b: vec![vec![1, 6], vec![1, 1]],
+        });
+        let brix = reused
+            .endpoint_best_witness
+            .get(&endpoint_key)
+            .expect("shared endpoint witness should exist");
+        assert_eq!(brix.lag, 7);
+        assert_eq!(brix.elapsed_ms, 40);
+        assert_eq!(reused.sources.len(), 2);
+
+        let merged_for_other_case =
+            merge_best_known_witness(None, reused.endpoint_best_witness.get(&endpoint_key));
+        assert_eq!(
+            merged_for_other_case.0.as_ref().map(|witness| witness.lag),
+            Some(7)
+        );
+        assert!(!merged_for_other_case.1);
+
+        let endpoint = EndpointSummary {
+            source_dim: 2,
+            target_dim: 2,
+            a: vec![vec![1, 3], vec![2, 1]],
+            b: vec![vec![1, 6], vec![1, 1]],
+        };
+        let case = |id: &str, strategy: &str| CaseSummary {
+            id: id.to_string(),
+            description: id.to_string(),
+            campaign: Some(CampaignConfig {
+                id: "brix_ruiz_k3".to_string(),
+                strategy: strategy.to_string(),
+                schedule_order: 10,
+            }),
+            endpoint: endpoint.clone(),
+            config: JsonSearchConfig {
+                max_lag: 6,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::Mixed,
+            },
+            actual_outcome: "unknown".to_string(),
+            allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            passed: true,
+            hit_target: false,
+            points: 0,
+            elapsed_ms: 10,
+            timeout_ms: 100,
+            steps: None,
+            reason: None,
+            result_model: ResultModel {
+                solver_path: HarnessSolverPath::TwoByTwo,
+                source_dim: 2,
+                target_dim: 2,
+                resolution_kind: ResultResolutionKind::SearchExhausted,
+                witness_lag: None,
+                path_matrix_count: None,
+                frontier_layers: 0,
+            },
+            best_known_witness: merged_for_other_case.0.clone(),
+            improved_best_known_witness: false,
+            telemetry: SearchTelemetry::default(),
+            telemetry_summary: derive_telemetry_summary("unknown", &SearchTelemetry::default(), 6),
+            tags: vec![],
+        };
+
+        let strategies = build_strategy_summaries(&[
+            case("brix_ruiz_k3", "mixed_baseline"),
+            case("brix_ruiz_k3_wide_probe", "mixed_wide_probe"),
+        ]);
+        assert_eq!(strategies.len(), 2);
+        for strategy in strategies {
+            assert_eq!(strategy.best_known_witness_cases, 1);
+            assert_eq!(strategy.best_known_witness_lag_total, 7);
+        }
+
+        fs::remove_dir_all(temp_dir).expect("temporary reuse directory should be removed");
+    }
+
+    #[test]
+    fn strategy_summaries_aggregate_campaign_cases() {
+        let endpoint = EndpointSummary {
+            source_dim: 2,
+            target_dim: 2,
+            a: vec![vec![1, 0], vec![0, 1]],
+            b: vec![vec![1, 0], vec![0, 1]],
+        };
+        let case = |id: &str,
+                    campaign_id: &str,
+                    strategy: &str,
+                    schedule_order: usize,
+                    witness_lag: Option<usize>,
+                    best_known_lag: Option<usize>,
+                    elapsed_ms: u128| CaseSummary {
+            id: id.to_string(),
+            description: id.to_string(),
+            campaign: Some(CampaignConfig {
+                id: campaign_id.to_string(),
+                strategy: strategy.to_string(),
+                schedule_order,
+            }),
+            endpoint: endpoint.clone(),
+            config: JsonSearchConfig {
+                max_lag: 4,
+                max_intermediate_dim: 2,
+                max_entry: 4,
+                search_mode: SearchMode::Mixed,
+            },
+            actual_outcome: "equivalent".to_string(),
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            passed: true,
+            hit_target: true,
+            points: 10,
+            elapsed_ms,
+            timeout_ms: 10,
+            steps: witness_lag,
+            reason: None,
+            result_model: ResultModel {
+                solver_path: HarnessSolverPath::TwoByTwo,
+                source_dim: 2,
+                target_dim: 2,
+                resolution_kind: ResultResolutionKind::FrontierPath,
+                witness_lag,
+                path_matrix_count: witness_lag.map(|lag| lag + 1),
+                frontier_layers: witness_lag.unwrap_or(0),
+            },
+            best_known_witness: best_known_lag.map(|lag| BestKnownWitness {
+                lag,
+                elapsed_ms,
+                source: "current-run".to_string(),
+            }),
+            improved_best_known_witness: best_known_lag.is_some(),
+            telemetry: SearchTelemetry::default(),
+            telemetry_summary: derive_telemetry_summary(
+                "equivalent",
+                &SearchTelemetry::default(),
+                4,
+            ),
+            tags: vec![],
+        };
+
+        let cases = vec![
+            case("mixed-a", "baseline", "mixed", 10, Some(6), Some(6), 20),
+            case("mixed-b", "baseline", "mixed", 20, Some(4), Some(4), 15),
+            case(
+                "graph-a",
+                "baseline",
+                "graph-only",
+                30,
+                Some(8),
+                Some(8),
+                35,
+            ),
+        ];
+
+        let campaigns = build_campaign_summaries(&cases);
+        assert_eq!(campaigns.len(), 1);
+        assert_eq!(campaigns[0].scheduled_cases.len(), 3);
+        assert_eq!(campaigns[0].current_witness_lag_total, 18);
+
+        let strategies = build_strategy_summaries(&cases);
+        assert_eq!(strategies.len(), 2);
+        let mixed = strategies
+            .iter()
+            .find(|strategy| strategy.strategy == "mixed")
+            .expect("mixed strategy summary should exist");
+        assert_eq!(mixed.cases, 2);
+        assert_eq!(mixed.current_witness_lag_total, 10);
+        assert_eq!(mixed.best_known_lag_score, lag_score(2, 10));
     }
 }

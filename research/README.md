@@ -19,6 +19,16 @@ Local artifacts:
   `just research-json-save <stamp>`.
 - `research/results.tsv` is the local score table for experiment history.
 
+The harness can reuse prior saved JSON runs when comparing best-known witness
+lags and strategy summaries:
+
+```sh
+cargo run --profile dist --features research-tools --bin research_harness -- \
+  --cases research/cases.json \
+  --reuse-dir research/runs \
+  --format pretty
+```
+
 Those local artifacts should stay untracked unless the human explicitly asks
 for repository changes to that policy.
 
