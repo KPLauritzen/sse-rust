@@ -208,9 +208,6 @@ pub fn search_sse_with_telemetry_dyn(
         return search_graph_only_dyn_with_telemetry(a, b, config);
     }
 
-    let source_trace = a.trace();
-    let source_trace_square = trace_square(a);
-
     for layer_index in 0..config.max_lag {
         let next_fwd_depth = fwd_frontier
             .front()
@@ -274,8 +271,6 @@ pub fn search_sse_with_telemetry_dyn(
             config.max_intermediate_dim,
             config.max_entry,
             config.search_mode,
-            source_trace,
-            source_trace_square,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -592,10 +587,6 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer);
     }
 
-    // Precompute spectral invariants for pruning intermediates.
-    let source_trace = a.trace();
-    let source_det = a.det();
-
     for layer_index in 0..config.max_lag {
         let next_fwd_depth = fwd_frontier
             .front()
@@ -659,8 +650,6 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             config.max_intermediate_dim,
             config.max_entry,
             config.search_mode,
-            source_trace,
-            source_det,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -1024,8 +1013,6 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
     bwd_orig.insert(b_canon.clone(), b_dyn);
     bwd_frontier.push_back(b_canon);
 
-    let source_trace = a.trace();
-    let source_det = a.det();
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = 2;
     let mut fwd_candidates_per_node = 1.0f64;
@@ -1141,11 +1128,6 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 if successor.orig_matrix.max_entry() > config.max_entry {
                     continue;
                 }
-                if !is_spectrally_consistent(&successor.orig_matrix, source_trace, source_det) {
-                    layer.pruned_by_spectrum += 1;
-                    continue;
-                }
-
                 move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
                     .candidates_after_pruning += 1;
                 layer.candidates_after_pruning += 1;
@@ -1350,8 +1332,6 @@ fn search_graph_only_dyn_with_telemetry(
     bwd_orig.insert(b_canon.clone(), b.clone());
     bwd_frontier.push_back(b_canon.clone());
 
-    let source_trace = a.trace();
-    let source_trace_square = trace_square(a);
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = 2;
     let mut fwd_candidates_per_node = 1.0f64;
@@ -1458,15 +1438,6 @@ fn search_graph_only_dyn_with_telemetry(
                 if successor.orig_matrix.max_entry() > config.max_entry {
                     continue;
                 }
-                if !is_spectrally_consistent_dyn(
-                    &successor.orig_matrix,
-                    source_trace,
-                    source_trace_square,
-                ) {
-                    layer.pruned_by_spectrum += 1;
-                    continue;
-                }
-
                 move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
                     .candidates_after_pruning += 1;
                 layer.candidates_after_pruning += 1;
@@ -1675,8 +1646,6 @@ fn expand_frontier_layer(
     max_intermediate_dim: usize,
     max_entry: u32,
     search_mode: SearchMode,
-    source_trace: u64,
-    source_det: i64,
 ) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
@@ -1699,10 +1668,6 @@ fn expand_frontier_layer(
 
         for successor in graph_successors.nodes {
             let next = successor.orig_matrix;
-            if !is_spectrally_consistent(&next, source_trace, source_det) {
-                stats.pruned_by_spectrum += 1;
-                continue;
-            }
             let next_canon = successor.matrix;
             if !seen_successors.insert(next_canon.clone()) {
                 continue;
@@ -1733,13 +1698,6 @@ fn expand_frontier_layer(
                     // Size bound: don't explore matrices larger than max_intermediate_dim.
                     if next.rows > max_intermediate_dim {
                         stats.pruned_by_size += 1;
-                        return;
-                    }
-
-                    // Spectral pruning: nonzero eigenvalues are preserved by SSE,
-                    // so every intermediate must have the same nonzero spectrum.
-                    if !is_spectrally_consistent(&next, source_trace, source_det) {
-                        stats.pruned_by_spectrum += 1;
                         return;
                     }
 
@@ -1806,8 +1764,6 @@ fn expand_frontier_layer_dyn(
     max_intermediate_dim: usize,
     max_entry: u32,
     search_mode: SearchMode,
-    source_trace: u64,
-    source_trace_square: i64,
 ) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
@@ -1830,10 +1786,6 @@ fn expand_frontier_layer_dyn(
 
         for successor in graph_successors.nodes {
             let next = successor.orig_matrix;
-            if !is_spectrally_consistent_dyn(&next, source_trace, source_trace_square) {
-                stats.pruned_by_spectrum += 1;
-                continue;
-            }
             let next_canon = successor.matrix;
             if !seen_successors.insert(next_canon.clone()) {
                 continue;
@@ -1863,11 +1815,6 @@ fn expand_frontier_layer_dyn(
 
                     if next.rows > max_intermediate_dim {
                         stats.pruned_by_size += 1;
-                        return;
-                    }
-
-                    if !is_spectrally_consistent_dyn(&next, source_trace, source_trace_square) {
-                        stats.pruned_by_spectrum += 1;
                         return;
                     }
 
@@ -2116,6 +2063,7 @@ fn visited_union_size(
 /// Check whether a candidate intermediate matrix has a nonzero spectrum
 /// consistent with the source matrix. SSE preserves nonzero eigenvalues,
 /// so any intermediate in a valid chain must pass this check.
+#[cfg(test)]
 fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) -> bool {
     if !vu.is_square() {
         return true; // non-square shouldn't happen, don't filter
@@ -2148,16 +2096,6 @@ fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) 
 
 fn trace_square(m: &DynMatrix) -> i64 {
     m.mul(m).trace() as i64
-}
-
-fn is_spectrally_consistent_dyn(
-    candidate: &DynMatrix,
-    source_trace: u64,
-    source_trace_square: i64,
-) -> bool {
-    candidate.is_square()
-        && candidate.trace() == source_trace
-        && trace_square(candidate) == source_trace_square
 }
 
 /// Create a permutation similarity step: given matrices M and M' = PMP
@@ -2571,15 +2509,8 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (expansions, stats) = expand_frontier_layer(
-            &[a_canon],
-            &orig,
-            2,
-            10,
-            SearchMode::Mixed,
-            a.trace(),
-            a.det(),
-        );
+        let (expansions, stats) =
+            expand_frontier_layer(&[a_canon], &orig, 2, 10, SearchMode::Mixed);
 
         assert!(!expansions.is_empty());
         assert!(stats.factorisations_enumerated > expansions.len());
@@ -2599,18 +2530,9 @@ mod tests {
             2,
             10,
             SearchMode::Mixed,
-            a.trace(),
-            a.det(),
         );
-        let (duplicate_frontier_expansions, _) = expand_frontier_layer(
-            &[a_canon.clone(), a_canon],
-            &orig,
-            2,
-            10,
-            SearchMode::Mixed,
-            a.trace(),
-            a.det(),
-        );
+        let (duplicate_frontier_expansions, _) =
+            expand_frontier_layer(&[a_canon.clone(), a_canon], &orig, 2, 10, SearchMode::Mixed);
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
     }
