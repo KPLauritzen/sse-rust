@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "guided_permutation_3x3",
+      "a": [[1, 0, 1], [2, 1, 0], [0, 1, 2]],
+      "b": [[2, 0, 1], [1, 1, 0], [0, 2, 1]],
+      "seeded_guides": [
+        {
+          "id": "two_hop_permutation",
+          "label": "two-hop permutation guide",
+          "source_kind": "fixture",
+          "source_ref": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+          "supported_stages": ["guided_refinement"],
+          "max_endpoint_dim": 4,
+          "matrices": [
+            [[1, 0, 1], [2, 1, 0], [0, 1, 2]],
+            [[2, 1, 0], [0, 1, 2], [1, 0, 1]],
+            [[2, 0, 1], [1, 1, 0], [0, 2, 1]]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "guided_permutation_4x4",
+      "a": [[1, 0, 1, 0], [2, 1, 0, 1], [0, 1, 2, 1], [1, 0, 1, 2]],
+      "b": [[2, 1, 1, 0], [1, 2, 0, 1], [0, 1, 1, 0], [1, 0, 2, 1]],
+      "seeded_guides": [
+        {
+          "id": "two_hop_permutation",
+          "label": "two-hop permutation guide",
+          "source_kind": "fixture",
+          "source_ref": "research/fixtures/generic_guides.json#guided_permutation_4x4",
+          "supported_stages": ["guided_refinement"],
+          "max_endpoint_dim": 4,
+          "matrices": [
+            [[1, 0, 1, 0], [2, 1, 0, 1], [0, 1, 2, 1], [1, 0, 1, 2]],
+            [[2, 1, 1, 0], [0, 1, 1, 2], [1, 0, 2, 1], [1, 0, 0, 1]],
+            [[2, 1, 1, 0], [1, 2, 0, 1], [0, 1, 1, 0], [1, 0, 2, 1]]
+          ]
+        }
+      ]
+    }
+  ]
+}
