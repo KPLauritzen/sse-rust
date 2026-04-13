@@ -46,6 +46,72 @@
       "tags": ["correctness", "smoke", "non-2x2"]
     },
     {
+      "id": "permutation_sse_3x3",
+      "description": "Nontrivial 3x3 square endpoints that collapse via the permutation shortcut rather than only the identity fast path.",
+      "a": [[2, 0, 0], [0, 1, 0], [0, 0, 0]],
+      "b": [[0, 0, 0], [0, 1, 0], [0, 0, 2]],
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 3,
+        "max_entry": 2
+      },
+      "timeout_ms": 200,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 100,
+        "not_equivalent": -1000,
+        "unknown": -1000,
+        "timeout": -2000,
+        "panic": -2000
+      },
+      "tags": ["correctness", "shortcut", "non-2x2"]
+    },
+    {
+      "id": "trace_square_mismatch_3x3",
+      "description": "Dynamic negative case: a 3x3 pair with matching trace but mismatched trace(M^2) should be rejected before search.",
+      "a": [[2, 0, 0], [0, 1, 0], [0, 0, 0]],
+      "b": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 3,
+        "max_entry": 2
+      },
+      "timeout_ms": 200,
+      "allowed_outcomes": ["not_equivalent"],
+      "target_outcome": "not_equivalent",
+      "points": {
+        "equivalent": -1000,
+        "not_equivalent": 100,
+        "unknown": -1000,
+        "timeout": -2000,
+        "panic": -2000
+      },
+      "tags": ["correctness", "negative", "non-2x2"]
+    },
+    {
+      "id": "square_endpoint_step_2x2_to_3x3",
+      "description": "Minimum viable generalized harness case: a direct one-step square-endpoint witness from 2x2 to 3x3 should run through the normal worker flow.",
+      "a": [[2, 1], [1, 1]],
+      "b": [[1, 0, 1], [1, 1, 1], [1, 1, 1]],
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 3,
+        "max_entry": 1
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 150,
+        "not_equivalent": -1500,
+        "unknown": -1500,
+        "timeout": -2500,
+        "panic": -2500
+      },
+      "tags": ["correctness", "generalized-square-endpoints", "mixed-dimension"]
+    },
+    {
       "id": "elementary_pair",
       "description": "Known one-step SSE example from the search tests.",
       "a": [[2, 1], [1, 1]],
