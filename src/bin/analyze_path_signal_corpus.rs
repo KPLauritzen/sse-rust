@@ -451,6 +451,7 @@ fn analyze_case(
             max_intermediate_dim: cli.max_intermediate_dim,
             max_entry: cli.max_entry,
             search_mode: cli.search_mode,
+            beam_width: None,
         },
         stage: SearchStage::EndpointSearch,
         guide_artifacts: Vec::new(),

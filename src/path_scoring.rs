@@ -8,6 +8,16 @@ pub struct ScoreSpec {
     pub score: fn(&DynMatrix, &DynMatrix, &DynMatrix) -> f64,
 }
 
+#[derive(Clone, Copy)]
+struct ScoreWeights {
+    dim_gap: f64,
+    row_col_types: f64,
+    support_types: f64,
+    duplicates: f64,
+    quotient_gap: f64,
+    endpoint_gap: f64,
+}
+
 #[derive(Default)]
 pub struct ScoreSummary {
     pub seen: usize,
@@ -53,11 +63,35 @@ pub struct Rank {
 
 pub const DEFAULT_BEAM_SCORE_NAME: &str = "beam_default_low";
 
+const DEFAULT_BEAM_SCORE_WEIGHTS: ScoreWeights = ScoreWeights {
+    dim_gap: 0.0,
+    row_col_types: 12.0,
+    support_types: 6.0,
+    duplicates: -6.0,
+    quotient_gap: 0.5,
+    endpoint_gap: 0.25,
+};
+
+const BEAM_DIMENSION_STRICT_SCORE_WEIGHTS: ScoreWeights = ScoreWeights {
+    dim_gap: 128.0,
+    row_col_types: 6.0,
+    support_types: 2.0,
+    duplicates: -2.0,
+    quotient_gap: 0.25,
+    endpoint_gap: 0.75,
+};
+
 pub fn candidate_score_specs() -> Vec<ScoreSpec> {
     vec![
         ScoreSpec {
             name: DEFAULT_BEAM_SCORE_NAME,
             score: |m, endpoint, _| score_node(m, endpoint),
+        },
+        ScoreSpec {
+            name: "beam_dim_strict_low",
+            score: |m, endpoint, _| {
+                score_node_with_weights(m, endpoint, BEAM_DIMENSION_STRICT_SCORE_WEIGHTS)
+            },
         },
         ScoreSpec {
             name: "dimension_low",
@@ -215,15 +249,23 @@ pub fn duplicate_col_pairs(m: &DynMatrix) -> usize {
 }
 
 pub fn score_node(node: &DynMatrix, target: &DynMatrix) -> f64 {
+    score_node_with_weights(node, target, DEFAULT_BEAM_SCORE_WEIGHTS)
+}
+
+fn score_node_with_weights(node: &DynMatrix, target: &DynMatrix, weights: ScoreWeights) -> f64 {
+    let dim_gap = node.rows.abs_diff(target.rows) as f64;
     let row_col_types = (row_type_count(node) + col_type_count(node)) as f64;
     let support_types = (row_support_type_count(node) + col_support_type_count(node)) as f64;
     let duplicates = (duplicate_row_pairs(node) + duplicate_col_pairs(node)) as f64;
     let quotient_gap = same_future_past_signature_gap(node, target) as f64;
     let endpoint_gap = signature_distance(node, target) as f64;
 
-    12.0 * row_col_types + 6.0 * support_types - 6.0 * duplicates
-        + 0.5 * quotient_gap
-        + 0.25 * endpoint_gap
+    weights.dim_gap * dim_gap
+        + weights.row_col_types * row_col_types
+        + weights.support_types * support_types
+        + weights.duplicates * duplicates
+        + weights.quotient_gap * quotient_gap
+        + weights.endpoint_gap * endpoint_gap
 }
 
 pub fn signature_distance(left: &DynMatrix, right: &DynMatrix) -> u64 {
@@ -396,7 +438,8 @@ fn sorted_l1_u8(left: &[u8], right: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_score_specs, rank_target, score_node, signature_distance, DEFAULT_BEAM_SCORE_NAME,
+        candidate_score_specs, rank_target, score_node, score_node_with_weights,
+        signature_distance, BEAM_DIMENSION_STRICT_SCORE_WEIGHTS, DEFAULT_BEAM_SCORE_NAME,
     };
     use crate::matrix::DynMatrix;
 
@@ -448,5 +491,21 @@ mod tests {
         let near_miss = DynMatrix::new(4, 4, vec![0, 1, 0, 1, 1, 0, 2, 1, 0, 1, 1, 1, 1, 1, 1, 0]);
 
         assert!(score_node(&target, &target) < score_node(&near_miss, &target));
+    }
+
+    #[test]
+    fn dimension_hybrid_penalizes_dimension_gap_even_for_structured_candidates() {
+        let target = DynMatrix::new(2, 2, vec![1, 1, 1, 0]);
+        let matching_dim = DynMatrix::new(2, 2, vec![1, 0, 1, 1]);
+        let farther_dim = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 0, 1]);
+
+        assert!(
+            score_node_with_weights(&matching_dim, &target, BEAM_DIMENSION_STRICT_SCORE_WEIGHTS)
+                < score_node_with_weights(
+                    &farther_dim,
+                    &target,
+                    BEAM_DIMENSION_STRICT_SCORE_WEIGHTS,
+                )
+        );
     }
 }

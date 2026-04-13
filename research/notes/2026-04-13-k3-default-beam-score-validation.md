@@ -83,3 +83,42 @@ The current default is a practical structure-first heuristic, not a proved lag
 bound. On the known `k=3` replay, pure `dimension_low` remains stronger on
 average, so beam-search experiments should still compare against width schedules
 or hybrid ranking rules rather than assuming this score is final.
+
+## Retune Follow-Up
+
+Tried one focused hybrid comparison score without changing the beam executor:
+
+```text
+beam_dim_strict_low =
+128 * abs(dim(node) - dim(endpoint))
++ 6 * (row_type_count + col_type_count)
++ 2 * (row_support_type_count + col_support_type_count)
+- 2 * (duplicate_row_pairs + duplicate_col_pairs)
++ 0.25 * same_future_past_signature_gap(node, endpoint)
++ 0.75 * signature_distance(node, endpoint)
+```
+
+Replay result on the same blind endpoint 16-move path:
+
+- `beam_default_low`: `mean_pct=39.31%`, `top1=4/16`, `top5%=2/16`, `top10%=6/16`
+- `beam_dim_strict_low`: `mean_pct=39.48%`, `top1=4/16`, `top5%=3/16`, `top10%=6/16`
+
+Notable replay detail:
+
+- the hybrid helped some larger BFS next-frontier layers as a tiebreaker, for
+  example `segment 0->8 step 3` improved from `1194/1497` (`79.76%`) to
+  `919/1497` (`61.39%`);
+- but it did not improve the main local-successor average, so `beam_default_low`
+  remains the best executor-facing score in this pass.
+
+Observer-backed probe on
+`sqlite:2:graph_path_result_2_ordinal_1 [6..8]`:
+
+- `beam_default_low`: `rank 1/16` (`6.25%`)
+- `beam_dim_strict_low`: `rank 1/16` (`6.25%`)
+
+Conclusion:
+
+- keep `beam_default_low` as the default beam score for now;
+- retain `beam_dim_strict_low` as a small comparison candidate for future replay
+  or wider observer-backed probes.
