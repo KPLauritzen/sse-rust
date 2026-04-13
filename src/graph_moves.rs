@@ -214,6 +214,25 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
     }
 }
 
+/// Return all one-step graph moves from `current` whose target is permutation-similar
+/// to `target`.
+pub fn find_graph_move_witnesses_between(
+    current: &DynMatrix,
+    target: &DynMatrix,
+) -> Vec<GraphMoveSuccessor> {
+    assert!(current.is_square());
+    assert!(target.is_square());
+
+    let max_dim = current.rows.max(target.rows);
+    let target_canon = target.canonical_perm();
+
+    enumerate_graph_move_successors(current, max_dim)
+        .nodes
+        .into_iter()
+        .filter(|successor| successor.matrix == target_canon)
+        .collect()
+}
+
 fn append_representative_outsplit_successors(
     a: &DynMatrix,
     family: &'static str,
@@ -913,5 +932,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_find_graph_move_witnesses_between_finds_direct_successor() {
+        let a = DynMatrix::from_sq(&SqMatrix::new([[1, 3], [2, 1]]));
+        let successor = enumerate_graph_move_successors(&a, 3)
+            .nodes
+            .into_iter()
+            .next()
+            .expect("expected at least one graph successor");
+
+        let witnesses = find_graph_move_witnesses_between(&a, &successor.orig_matrix);
+        assert!(!witnesses.is_empty());
+        assert!(witnesses
+            .into_iter()
+            .any(|witness| witness.family == successor.family));
     }
 }
