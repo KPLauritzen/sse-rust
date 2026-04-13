@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::search::{execute_search_request, validate_sse_path_dyn};
 use sse_core::types::{
@@ -529,7 +530,7 @@ fn resolve_case(case: &ResearchCase, cases_path: &Path) -> Result<ResolvedCase, 
     for artifact_path in &case.guide_artifact_paths {
         let resolved_path = resolve_relative_path(cases_root, artifact_path);
         guide_artifact_paths.push(resolved_path.display().to_string());
-        guide_artifacts.extend(load_guide_artifacts(&resolved_path)?);
+        guide_artifacts.extend(load_guide_artifacts_from_path(&resolved_path)?);
     }
 
     for guide_id in &case.seeded_guide_ids {
@@ -617,35 +618,6 @@ fn split_fixture_ref(fixture_ref: &str) -> (String, Option<String>) {
         }
         _ => (fixture_ref.to_string(), None),
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum GuideArtifactFile {
-    Artifact(GuideArtifact),
-    Artifacts(Vec<GuideArtifact>),
-    Envelope { artifacts: Vec<GuideArtifact> },
-}
-
-fn load_guide_artifacts(path: impl AsRef<Path>) -> Result<Vec<GuideArtifact>, String> {
-    let path = path.as_ref();
-    let json = fs::read_to_string(path).map_err(|err| {
-        format!(
-            "failed to read guide artifacts from {}: {err}",
-            path.display()
-        )
-    })?;
-    let parsed: GuideArtifactFile = serde_json::from_str(&json).map_err(|err| {
-        format!(
-            "failed to parse guide artifacts from {} as JSON: {err}",
-            path.display()
-        )
-    })?;
-    Ok(match parsed {
-        GuideArtifactFile::Artifact(artifact) => vec![artifact],
-        GuideArtifactFile::Artifacts(artifacts) => artifacts,
-        GuideArtifactFile::Envelope { artifacts } => artifacts,
-    })
 }
 
 fn materialize_seeded_guide_artifact(
@@ -2477,15 +2449,15 @@ mod tests {
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
                 endpoint: endpoint.clone(),
-	                config: JsonSearchConfig {
-	                    max_lag: 1,
-	                    max_intermediate_dim: 2,
-	                    max_entry: 1,
-	                    search_mode: SearchMode::Mixed,
-	                    stage: SearchStage::EndpointSearch,
-	                    guided_refinement: GuidedRefinementConfig::default(),
-	                    shortcut_search: ShortcutSearchConfig::default(),
-	                },
+                config: JsonSearchConfig {
+                    max_lag: 1,
+                    max_intermediate_dim: 2,
+                    max_entry: 1,
+                    search_mode: SearchMode::Mixed,
+                    stage: SearchStage::EndpointSearch,
+                    guided_refinement: GuidedRefinementConfig::default(),
+                    shortcut_search: ShortcutSearchConfig::default(),
+                },
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
                 target_outcome: Some("equivalent".to_string()),
@@ -2523,15 +2495,15 @@ mod tests {
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
                 endpoint,
-	                config: JsonSearchConfig {
-	                    max_lag: 2,
-	                    max_intermediate_dim: 2,
-	                    max_entry: 2,
-	                    search_mode: SearchMode::GraphOnly,
-	                    stage: SearchStage::EndpointSearch,
-	                    guided_refinement: GuidedRefinementConfig::default(),
-	                    shortcut_search: ShortcutSearchConfig::default(),
-	                },
+                config: JsonSearchConfig {
+                    max_lag: 2,
+                    max_intermediate_dim: 2,
+                    max_entry: 2,
+                    search_mode: SearchMode::GraphOnly,
+                    stage: SearchStage::EndpointSearch,
+                    guided_refinement: GuidedRefinementConfig::default(),
+                    shortcut_search: ShortcutSearchConfig::default(),
+                },
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
                 target_outcome: Some("equivalent".to_string()),
@@ -2745,15 +2717,15 @@ mod tests {
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
             endpoint: endpoint.clone(),
-	            config: JsonSearchConfig {
-	                max_lag: 4,
-	                max_intermediate_dim: 2,
-	                max_entry: 4,
-	                search_mode: SearchMode::Mixed,
-	                stage: SearchStage::EndpointSearch,
-	                guided_refinement: GuidedRefinementConfig::default(),
-	                shortcut_search: ShortcutSearchConfig::default(),
-	            },
+            config: JsonSearchConfig {
+                max_lag: 4,
+                max_intermediate_dim: 2,
+                max_entry: 4,
+                search_mode: SearchMode::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
+            },
             actual_outcome: "equivalent".to_string(),
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),

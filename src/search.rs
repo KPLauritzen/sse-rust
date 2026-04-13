@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -99,6 +100,22 @@ impl FrontierOverlapSignal {
     }
 }
 
+#[derive(Clone, Debug)]
+struct RankedGuide {
+    path: DynSsePath,
+    effective_lag: usize,
+    effective_cost: Option<usize>,
+    effective_score: Option<f64>,
+    stable_key: String,
+}
+
+#[derive(Debug)]
+struct PreparedShortcutGuidePool {
+    guides: Vec<RankedGuide>,
+    accepted_guides: usize,
+    unique_guides: usize,
+}
+
 /// Search for a strong shift equivalence path between two 2x2 matrices.
 ///
 /// Uses bidirectional BFS over the graph where nodes are square matrices of
@@ -177,7 +194,7 @@ pub fn execute_search_request_and_observer(
 
 fn search_shortcut_search_with_observer(
     request: &SearchRequest,
-    _observer: Option<&mut dyn SearchObserver>,
+    mut observer: Option<&mut dyn SearchObserver>,
 ) -> Result<(SearchRunResult, SearchTelemetry), String> {
     if !request.source.is_square() || !request.target.is_square() {
         return Err("shortcut_search requires square source and target matrices".to_string());
@@ -192,10 +209,39 @@ fn search_shortcut_search_with_observer(
         return Err("shortcut_search requires max_total_segment_attempts >= 1".to_string());
     }
 
-    Err(
-        "shortcut_search Phase 1 defines the stage boundary only; the iterative guide-pool loop is not implemented yet"
-            .to_string(),
-    )
+    let prepared = prepare_shortcut_guide_pool(request)?;
+    if prepared.guides.is_empty() {
+        return Err(
+            "shortcut_search requires at least one compatible full_path guide artifact".to_string(),
+        );
+    }
+
+    let source_canonical = request.source.canonical_perm();
+    let target_canonical = request.target.canonical_perm();
+    emit_started(&mut observer, request, &source_canonical, &target_canonical);
+
+    let best = prepared
+        .guides
+        .first()
+        .expect("non-empty prepared shortcut guide pool should have a best guide");
+    let best_lag = Some(best.effective_lag);
+    let telemetry = SearchTelemetry {
+        guide_artifacts_considered: request.guide_artifacts.len(),
+        guide_artifacts_accepted: prepared.accepted_guides,
+        shortcut_search: crate::types::ShortcutSearchTelemetry {
+            guide_artifacts_loaded: request.guide_artifacts.len(),
+            guide_artifacts_accepted: prepared.accepted_guides,
+            unique_guides: prepared.unique_guides,
+            initial_working_set_guides: prepared.guides.len(),
+            best_lag_start: best_lag,
+            best_lag_end: best_lag,
+            ..crate::types::ShortcutSearchTelemetry::default()
+        },
+        ..SearchTelemetry::default()
+    };
+    let result = SearchRunResult::Equivalent(best.path.clone());
+    emit_finished(&mut observer, request, result.clone(), &telemetry);
+    Ok((result, telemetry))
 }
 
 fn emit_started(
@@ -439,43 +485,80 @@ fn prepare_full_path_guide(
         },
     )?;
 
-    let oriented = if endpoint_identity_matches(
+    let mut oriented_candidates = Vec::new();
+    if endpoint_identity_matches(
         &artifact.endpoints.source,
         &artifact.endpoints.target,
         &request.source,
         &request.target,
     ) {
-        path.clone()
-    } else if endpoint_identity_matches(
+        oriented_candidates.push(path.clone());
+    }
+    if endpoint_identity_matches(
         &artifact.endpoints.target,
         &artifact.endpoints.source,
         &request.source,
         &request.target,
     ) {
-        reverse_dyn_sse_path(path)
-    } else {
+        oriented_candidates.push(reverse_dyn_sse_path(path));
+    }
+    if oriented_candidates.is_empty() {
         return Ok(None);
-    };
+    }
 
-    let reanchored =
-        reanchor_dyn_sse_path(&oriented, &request.source, &request.target).map_err(|err| {
+    let mut best: Option<DynSsePath> = None;
+    let mut last_error = None;
+    for oriented in oriented_candidates {
+        let reanchored = match reanchor_dyn_sse_path(&oriented, &request.source, &request.target) {
+            Ok(path) => path,
+            Err(err) => {
+                last_error = Some(format!(
+                    "guide artifact {} cannot be re-anchored: {err}",
+                    artifact_label(artifact)
+                ));
+                continue;
+            }
+        };
+        if let Err(err) = validate_sse_path_dyn(&request.source, &request.target, &reanchored) {
+            last_error = Some(format!(
+                "guide artifact {} does not validate against the requested endpoints: {err}",
+                artifact_label(artifact)
+            ));
+            continue;
+        }
+
+        let should_replace = best
+            .as_ref()
+            .map(|current| {
+                reanchored.steps.len() < current.steps.len()
+                    || (reanchored.steps.len() == current.steps.len()
+                        && reanchored.matrices.len() < current.matrices.len())
+            })
+            .unwrap_or(true);
+        if should_replace {
+            best = Some(reanchored);
+        }
+    }
+
+    match best {
+        Some(best) => Ok(Some(best)),
+        None => Err(last_error.unwrap_or_else(|| {
             format!(
-                "guide artifact {} cannot be re-anchored: {err}",
+                "guide artifact {} could not be re-anchored to the requested endpoints",
                 artifact_label(artifact)
             )
-        })?;
-    validate_sse_path_dyn(&request.source, &request.target, &reanchored).map_err(|err| {
-        format!(
-            "guide artifact {} does not validate against the requested endpoints: {err}",
-            artifact_label(artifact)
-        )
-    })?;
-    Ok(Some(reanchored))
+        })),
+    }
 }
 
 fn guide_artifact_supports_stage(artifact: &GuideArtifact, stage: SearchStage) -> bool {
     artifact.compatibility.supported_stages.is_empty()
         || artifact.compatibility.supported_stages.contains(&stage)
+        || (stage == SearchStage::ShortcutSearch
+            && artifact
+                .compatibility
+                .supported_stages
+                .contains(&SearchStage::GuidedRefinement))
 }
 
 fn artifact_label(artifact: &GuideArtifact) -> &str {
@@ -516,6 +599,94 @@ fn reverse_dyn_sse_path(path: &DynSsePath) -> DynSsePath {
                 v: step.u.clone(),
             })
             .collect(),
+    }
+}
+
+fn prepare_shortcut_guide_pool(
+    request: &SearchRequest,
+) -> Result<PreparedShortcutGuidePool, String> {
+    let mut accepted_guides = Vec::new();
+    for (index, artifact) in request.guide_artifacts.iter().enumerate() {
+        let Some(path) = prepare_full_path_guide(request, artifact)? else {
+            continue;
+        };
+        accepted_guides.push(RankedGuide {
+            effective_lag: artifact.quality.lag.unwrap_or(path.steps.len()),
+            effective_cost: artifact.quality.cost,
+            effective_score: artifact.quality.score,
+            stable_key: guide_stable_key(artifact, index),
+            path,
+        });
+    }
+
+    let accepted_count = accepted_guides.len();
+    let mut deduped: HashMap<Vec<DynMatrix>, RankedGuide> = HashMap::default();
+    for guide in accepted_guides {
+        let key = canonical_guide_identity(&guide.path);
+        match deduped.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if compare_ranked_guides(&guide, entry.get()) == Ordering::Less {
+                    entry.insert(guide);
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(guide);
+            }
+        }
+    }
+
+    let unique_guides = deduped.len();
+    let mut guides = deduped.into_values().collect::<Vec<_>>();
+    guides.sort_by(compare_ranked_guides);
+    guides.truncate(request.shortcut_search.max_guides);
+
+    Ok(PreparedShortcutGuidePool {
+        guides,
+        accepted_guides: accepted_count,
+        unique_guides,
+    })
+}
+
+fn canonical_guide_identity(path: &DynSsePath) -> Vec<DynMatrix> {
+    path.matrices
+        .iter()
+        .map(DynMatrix::canonical_perm)
+        .collect::<Vec<_>>()
+}
+
+fn guide_stable_key(artifact: &GuideArtifact, index: usize) -> String {
+    format!(
+        "{}|{}|{}|{:08}",
+        artifact.artifact_id.as_deref().unwrap_or(""),
+        artifact.provenance.source_ref.as_deref().unwrap_or(""),
+        artifact.provenance.label.as_deref().unwrap_or(""),
+        index,
+    )
+}
+
+fn compare_ranked_guides(left: &RankedGuide, right: &RankedGuide) -> Ordering {
+    left.effective_lag
+        .cmp(&right.effective_lag)
+        .then_with(|| compare_optional_usize(left.effective_cost, right.effective_cost))
+        .then_with(|| compare_optional_score_desc(left.effective_score, right.effective_score))
+        .then_with(|| left.stable_key.cmp(&right.stable_key))
+}
+
+fn compare_optional_usize(left: Option<usize>, right: Option<usize>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_score_desc(left: Option<f64>, right: Option<f64>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => right.total_cmp(&left),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
     }
 }
 
@@ -3352,24 +3523,191 @@ mod tests {
     }
 
     #[test]
-    fn test_shortcut_search_stage_accepts_square_endpoint_shapes_before_stub_exit() {
-        let a = DynMatrix::new(
-            4,
-            4,
-            vec![1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 2, 0, 1, 0, 0, 1],
-        );
+    fn test_shortcut_search_stage_accepts_legacy_guided_refinement_artifact() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid, b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &base.conjugate_by_perm(&[2, 0, 1])).unwrap(),
+                permutation_step_between(&base.conjugate_by_perm(&[2, 0, 1]), &b).unwrap(),
+            ],
+        };
         let request = SearchRequest {
             source: a.clone(),
-            target: a,
-            config: default_config(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
             stage: SearchStage::ShortcutSearch,
-            guide_artifacts: Vec::new(),
+            guide_artifacts: vec![full_path_artifact("legacy-guided", guide)],
             guided_refinement: GuidedRefinementConfig::default(),
             shortcut_search: ShortcutSearchConfig::default(),
         };
 
-        let err = execute_search_request(&request).unwrap_err();
-        assert!(err.contains("Phase 1 defines the stage boundary only"));
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 2);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from shortcut search, got {other:?}"),
+        }
+        assert_eq!(telemetry.guide_artifacts_considered, 1);
+        assert_eq!(telemetry.guide_artifacts_accepted, 1);
+        assert_eq!(telemetry.shortcut_search.guide_artifacts_loaded, 1);
+        assert_eq!(telemetry.shortcut_search.guide_artifacts_accepted, 1);
+        assert_eq!(telemetry.shortcut_search.unique_guides, 1);
+        assert_eq!(telemetry.shortcut_search.initial_working_set_guides, 1);
+        assert_eq!(telemetry.shortcut_search.best_lag_start, Some(2));
+        assert_eq!(telemetry.shortcut_search.best_lag_end, Some(2));
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_deduplicates_and_ranks_guides() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let direct = DynSsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![permutation_step_between(&a, &b).unwrap()],
+        };
+        let two_hop = DynSsePath {
+            matrices: vec![a.clone(), mid.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid).unwrap(),
+                permutation_step_between(&mid, &b).unwrap(),
+            ],
+        };
+
+        let mut direct_forward = full_path_artifact("direct-forward", direct.clone());
+        direct_forward.quality.lag = None;
+        direct_forward.quality.cost = Some(5);
+        direct_forward.quality.score = Some(1.0);
+
+        let mut direct_duplicate = full_path_artifact("direct-duplicate", direct);
+        direct_duplicate.quality.lag = Some(1);
+        direct_duplicate.quality.cost = Some(9);
+        direct_duplicate.quality.score = Some(0.5);
+
+        let mut indirect = full_path_artifact("two-hop", two_hop);
+        indirect.quality.cost = Some(1);
+        indirect.quality.score = Some(10.0);
+
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::ShortcutSearch,
+            guide_artifacts: vec![indirect, direct_duplicate, direct_forward],
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig {
+                max_guides: 1,
+                ..ShortcutSearchConfig::default()
+            },
+        };
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from shortcut search, got {other:?}"),
+        }
+        assert_eq!(telemetry.guide_artifacts_considered, 3);
+        assert_eq!(telemetry.guide_artifacts_accepted, 3);
+        assert_eq!(telemetry.shortcut_search.unique_guides, 2);
+        assert_eq!(telemetry.shortcut_search.initial_working_set_guides, 1);
+        assert_eq!(telemetry.shortcut_search.best_lag_start, Some(1));
+        assert_eq!(telemetry.shortcut_search.best_lag_end, Some(1));
+    }
+
+    #[test]
+    fn test_prepare_full_path_guide_reorients_reversed_artifact_for_shortcut_search() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![permutation_step_between(&a, &b).unwrap()],
+        };
+        let artifact = full_path_artifact("reverse-guide", reverse_dyn_sse_path(&guide));
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::ShortcutSearch,
+            guide_artifacts: vec![],
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        };
+
+        let prepared = prepare_full_path_guide(&request, &artifact)
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.matrices, guide.matrices);
+        assert_eq!(prepared.steps.len(), 1);
+        validate_sse_path_dyn(&a, &b, &prepared).unwrap();
+    }
+
+    #[test]
+    fn test_compare_ranked_guides_prefers_cost_then_score_then_stable_key() {
+        let path = DynSsePath {
+            matrices: vec![DynMatrix::new(2, 2, vec![1, 0, 0, 1])],
+            steps: vec![],
+        };
+        let mut best = RankedGuide {
+            path: path.clone(),
+            effective_lag: 1,
+            effective_cost: Some(2),
+            effective_score: Some(4.0),
+            stable_key: "a".to_string(),
+        };
+        let worse_cost = RankedGuide {
+            path: path.clone(),
+            effective_lag: 1,
+            effective_cost: Some(3),
+            effective_score: Some(10.0),
+            stable_key: "b".to_string(),
+        };
+        let worse_score = RankedGuide {
+            path: path.clone(),
+            effective_lag: 1,
+            effective_cost: Some(2),
+            effective_score: Some(1.0),
+            stable_key: "c".to_string(),
+        };
+        let worse_stable = RankedGuide {
+            path,
+            effective_lag: 1,
+            effective_cost: Some(2),
+            effective_score: Some(4.0),
+            stable_key: "z".to_string(),
+        };
+
+        assert_eq!(compare_ranked_guides(&best, &worse_cost), Ordering::Less);
+        assert_eq!(compare_ranked_guides(&best, &worse_score), Ordering::Less);
+        assert_eq!(compare_ranked_guides(&best, &worse_stable), Ordering::Less);
+
+        best.effective_cost = None;
+        assert_eq!(compare_ranked_guides(&worse_cost, &best), Ordering::Less);
     }
 
     #[test]
@@ -3385,7 +3723,10 @@ mod tests {
         };
 
         let err = execute_search_request(&request).unwrap_err();
-        assert_eq!(err, "shortcut_search requires square source and target matrices");
+        assert_eq!(
+            err,
+            "shortcut_search requires square source and target matrices"
+        );
     }
 
     #[test]

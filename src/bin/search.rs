@@ -1,6 +1,7 @@
+use std::fs;
 use std::process::ExitCode;
-use std::{fs, path::Path};
 
+use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::search::{
     build_full_path_guide_artifact, execute_search_request, execute_search_request_and_observer,
@@ -8,9 +9,8 @@ use sse_core::search::{
 #[cfg(not(target_arch = "wasm32"))]
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
-    GuideArtifact, GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig,
-    SearchConfig, SearchMode, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
-    ShortcutSearchConfig,
+    GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig, SearchConfig,
+    SearchMode, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
 };
 
 #[derive(Debug)]
@@ -20,6 +20,7 @@ struct Cli {
     config: SearchConfig,
     stage: SearchStage,
     guide_artifact_paths: Vec<String>,
+    guide_artifact_dirs: Vec<String>,
     guided_refinement: GuidedRefinementConfig,
     shortcut_search: ShortcutSearchConfig,
     json: bool,
@@ -49,10 +50,16 @@ where
     let cli = parse_cli(args)?;
     let mut guide_artifacts = Vec::new();
     for path in &cli.guide_artifact_paths {
-        guide_artifacts.extend(load_guide_artifacts(path)?);
+        guide_artifacts.extend(load_guide_artifacts_from_path(path)?);
+    }
+    for dir in &cli.guide_artifact_dirs {
+        guide_artifacts.extend(load_guide_artifacts_from_path(dir)?);
     }
     if cli.stage == SearchStage::GuidedRefinement && guide_artifacts.is_empty() {
-        return Err("guided_refinement requires at least one --guide-artifacts file".to_string());
+        return Err(
+            "guided_refinement requires at least one --guide-artifacts file or --guide-artifact-dir"
+                .to_string(),
+        );
     }
     let request = SearchRequest {
         source: cli.a.clone(),
@@ -154,6 +161,7 @@ where
     let mut config = SearchConfig::default();
     let mut stage = SearchStage::EndpointSearch;
     let mut guide_artifact_paths = Vec::new();
+    let mut guide_artifact_dirs = Vec::new();
     let mut guided_refinement = GuidedRefinementConfig::default();
     let mut shortcut_search = ShortcutSearchConfig::default();
     let mut json = false;
@@ -177,8 +185,9 @@ where
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --search-mode MODE       mixed | graph-only (default: mixed)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
-                                              (shortcut-search currently exposes only the Phase 1 boundary; default: endpoint-search)\n\
+                                              (shortcut-search currently loads and ranks reusable guides, but does not yet run the Phase 3 iterative pool loop; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
+                       --guide-artifact-dir DIR read all JSON guide artifact(s) from DIR (repeatable)\n\
                        --guided-max-shortcut-lag N max lag for one guided shortcut search (default: 3)\n\
                        --guided-min-gap N       minimum guide gap to consider for refinement (default: 2)\n\
                        --guided-max-gap N       maximum guide gap to consider for refinement\n\
@@ -226,6 +235,10 @@ where
             }
             "--guide-artifacts" => {
                 guide_artifact_paths.push(args.next().ok_or("--guide-artifacts requires a path")?);
+            }
+            "--guide-artifact-dir" => {
+                guide_artifact_dirs
+                    .push(args.next().ok_or("--guide-artifact-dir requires a path")?);
             }
             "--guided-max-shortcut-lag" => {
                 guided_refinement.max_shortcut_lag =
@@ -295,6 +308,7 @@ where
         config,
         stage,
         guide_artifact_paths,
+        guide_artifact_dirs,
         guided_refinement,
         shortcut_search,
         json,
@@ -344,7 +358,16 @@ fn maybe_write_guide_artifact(
         source_ref: Some(format!("search:{}", search_stage_label(stage))),
     };
     artifact.compatibility = GuideArtifactCompatibility {
-        supported_stages: vec![SearchStage::GuidedRefinement],
+        supported_stages: if request
+            .shortcut_search
+            .artifacts
+            .supported_stages
+            .is_empty()
+        {
+            vec![SearchStage::GuidedRefinement, SearchStage::ShortcutSearch]
+        } else {
+            request.shortcut_search.artifacts.supported_stages.clone()
+        },
         max_endpoint_dim: Some(request.source.rows.max(request.target.rows)),
     };
 
@@ -543,8 +566,7 @@ fn print_telemetry(telemetry: &SearchTelemetry) {
     );
     println!(
         "  shortcut best lag: {:?} -> {:?}",
-        telemetry.shortcut_search.best_lag_start,
-        telemetry.shortcut_search.best_lag_end
+        telemetry.shortcut_search.best_lag_start, telemetry.shortcut_search.best_lag_end
     );
     println!(
         "  shortcut stop reason: {:?}",
@@ -648,35 +670,6 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
         .collect()
 }
 
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum GuideArtifactFile {
-    Artifact(GuideArtifact),
-    Artifacts(Vec<GuideArtifact>),
-    Envelope { artifacts: Vec<GuideArtifact> },
-}
-
-fn load_guide_artifacts(path: impl AsRef<Path>) -> Result<Vec<GuideArtifact>, String> {
-    let path = path.as_ref();
-    let json = fs::read_to_string(path).map_err(|err| {
-        format!(
-            "failed to read guide artifacts from {}: {err}",
-            path.display()
-        )
-    })?;
-    let parsed: GuideArtifactFile = serde_json::from_str(&json).map_err(|err| {
-        format!(
-            "failed to parse guide artifacts from {} as JSON: {err}",
-            path.display()
-        )
-    })?;
-    Ok(match parsed {
-        GuideArtifactFile::Artifact(artifact) => vec![artifact],
-        GuideArtifactFile::Artifacts(artifacts) => artifacts,
-        GuideArtifactFile::Envelope { artifacts } => artifacts,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{parse_cli, parse_matrix, run_with_args};
@@ -714,6 +707,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.write_guide_artifact.as_deref(), Some("guide.json"));
+    }
+
+    #[test]
+    fn parse_cli_accepts_guide_artifact_dir_flag() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--guide-artifact-dir".to_string(),
+                "guides".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.guide_artifact_dirs, vec!["guides".to_string()]);
     }
 
     #[test]
@@ -784,7 +793,7 @@ mod tests {
         );
         assert_eq!(
             artifact.compatibility.supported_stages,
-            vec![SearchStage::GuidedRefinement]
+            vec![SearchStage::GuidedRefinement, SearchStage::ShortcutSearch]
         );
         assert_eq!(artifact.quality.lag, Some(0));
         assert!(matches!(
@@ -812,6 +821,53 @@ mod tests {
 
         assert!(err.contains("requires a successful search result with a path witness"));
         assert!(!output_path.exists());
+    }
+
+    #[test]
+    fn run_with_args_shortcut_search_accepts_guide_artifact_directory() {
+        let dir = temp_output_path("guide-artifact-dir");
+        fs::create_dir_all(&dir).unwrap();
+        let guide_path = dir.join("guide.json");
+        fs::write(
+            &guide_path,
+            r#"{
+  "artifact_id": "identity",
+  "endpoints": {
+    "source": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+    "target": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+  },
+  "kind": "full_path",
+  "path": {
+    "matrices": [{"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}],
+    "steps": []
+  },
+  "compatibility": {
+    "supported_stages": ["guided_refinement"]
+  },
+  "quality": {
+    "cost": 0
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let exit_code = run_with_args(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--stage".to_string(),
+                "shortcut-search".to_string(),
+                "--guide-artifact-dir".to_string(),
+                dir.display().to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn temp_output_path(label: &str) -> std::path::PathBuf {

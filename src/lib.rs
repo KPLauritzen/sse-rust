@@ -3,6 +3,7 @@ pub mod balanced;
 pub mod conjugacy;
 pub mod factorisation;
 pub mod graph_moves;
+pub mod guide_artifacts;
 pub mod invariants;
 pub mod matrix;
 pub mod quadratic;
