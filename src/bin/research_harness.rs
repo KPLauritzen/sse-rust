@@ -76,6 +76,7 @@ struct WorkerCaseResult {
     elapsed_ms: u128,
     steps: Option<usize>,
     reason: Option<String>,
+    result_model: ResultModel,
     telemetry: SearchTelemetry,
 }
 
@@ -84,6 +85,7 @@ struct HarnessSummary {
     schema_version: u32,
     cases_path: String,
     fitness: FitnessSummary,
+    comparisons: Vec<ComparisonSummary>,
     cases: Vec<CaseSummary>,
 }
 
@@ -94,6 +96,8 @@ struct FitnessSummary {
     target_hits: usize,
     total_points: i64,
     total_elapsed_ms: u128,
+    generalized_cases: usize,
+    comparison_groups: usize,
     telemetry_focus_cases: usize,
     telemetry_focus_score: u64,
     telemetry_focus_reach_score: u64,
@@ -104,6 +108,7 @@ struct FitnessSummary {
 struct CaseSummary {
     id: String,
     description: String,
+    endpoint: EndpointSummary,
     config: JsonSearchConfig,
     actual_outcome: String,
     allowed_outcomes: Vec<String>,
@@ -115,9 +120,71 @@ struct CaseSummary {
     timeout_ms: u64,
     steps: Option<usize>,
     reason: Option<String>,
+    result_model: ResultModel,
     telemetry: SearchTelemetry,
     telemetry_summary: DerivedTelemetrySummary,
     tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct EndpointSummary {
+    source_dim: usize,
+    target_dim: usize,
+    a: Vec<Vec<u32>>,
+    b: Vec<Vec<u32>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum HarnessSolverPath {
+    TwoByTwo,
+    SquareEndpoint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ResultResolutionKind {
+    Identity,
+    PermutationShortcut,
+    CanonicalShortcut,
+    FrontierPath,
+    ConcreteShiftWitness,
+    InvariantFilterNotEquivalent,
+    SearchNotEquivalent,
+    SearchExhausted,
+    Timeout,
+    Panic,
+    InvalidPath,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ResultModel {
+    solver_path: HarnessSolverPath,
+    source_dim: usize,
+    target_dim: usize,
+    resolution_kind: ResultResolutionKind,
+    witness_lag: Option<usize>,
+    path_matrix_count: Option<usize>,
+    frontier_layers: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ComparisonSummary {
+    endpoint: EndpointSummary,
+    variants: Vec<ComparisonVariantSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct ComparisonVariantSummary {
+    case_id: String,
+    description: String,
+    config: JsonSearchConfig,
+    actual_outcome: String,
+    result_model: ResultModel,
+    passed: bool,
+    hit_target: bool,
+    points: i64,
+    elapsed_ms: u128,
 }
 
 #[derive(Debug, Serialize)]
@@ -251,7 +318,7 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
     };
 
     let started = Instant::now();
-    if a.rows == 2 {
+    if a.rows == 2 && b.rows == 2 {
         let a_sq = a
             .to_sq::<2>()
             .expect("matrix A should be 2x2 when using the 2x2 solver path");
@@ -267,6 +334,14 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                     elapsed_ms: started.elapsed().as_millis(),
                     steps: Some(path.steps.len()),
                     reason: None,
+                    result_model: equivalent_result_model(
+                        HarnessSolverPath::TwoByTwo,
+                        a.rows,
+                        b.rows,
+                        &telemetry,
+                        path.steps.len(),
+                        path.matrices.len(),
+                    ),
                     telemetry,
                 },
                 Err(reason) => WorkerCaseResult {
@@ -275,15 +350,33 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                     elapsed_ms: started.elapsed().as_millis(),
                     steps: Some(path.steps.len()),
                     reason: Some(format!("invalid equivalent path: {reason}")),
+                    result_model: result_model(
+                        HarnessSolverPath::TwoByTwo,
+                        a.rows,
+                        b.rows,
+                        ResultResolutionKind::InvalidPath,
+                        Some(path.steps.len()),
+                        Some(path.matrices.len()),
+                        &telemetry,
+                    ),
                     telemetry,
                 },
             },
-            SseResult::EquivalentByConcreteShift(_witness) => WorkerCaseResult {
+            SseResult::EquivalentByConcreteShift(witness) => WorkerCaseResult {
                 id: case.id.clone(),
                 actual_outcome: "equivalent".to_string(),
                 elapsed_ms: started.elapsed().as_millis(),
                 steps: None,
                 reason: Some("aligned concrete-shift witness".to_string()),
+                result_model: result_model(
+                    HarnessSolverPath::TwoByTwo,
+                    a.rows,
+                    b.rows,
+                    ResultResolutionKind::ConcreteShiftWitness,
+                    Some(witness.shift.lag as usize),
+                    None,
+                    &telemetry,
+                ),
                 telemetry,
             },
             SseResult::NotEquivalent(reason) => WorkerCaseResult {
@@ -292,6 +385,12 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                 elapsed_ms: started.elapsed().as_millis(),
                 steps: None,
                 reason: Some(reason),
+                result_model: not_equivalent_result_model(
+                    HarnessSolverPath::TwoByTwo,
+                    a.rows,
+                    b.rows,
+                    &telemetry,
+                ),
                 telemetry,
             },
             SseResult::Unknown => WorkerCaseResult {
@@ -300,6 +399,15 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                 elapsed_ms: started.elapsed().as_millis(),
                 steps: None,
                 reason: None,
+                result_model: result_model(
+                    HarnessSolverPath::TwoByTwo,
+                    a.rows,
+                    b.rows,
+                    ResultResolutionKind::SearchExhausted,
+                    None,
+                    None,
+                    &telemetry,
+                ),
                 telemetry,
             },
         }
@@ -313,6 +421,14 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                     elapsed_ms: started.elapsed().as_millis(),
                     steps: Some(path.steps.len()),
                     reason: None,
+                    result_model: equivalent_result_model(
+                        HarnessSolverPath::SquareEndpoint,
+                        a.rows,
+                        b.rows,
+                        &telemetry,
+                        path.steps.len(),
+                        path.matrices.len(),
+                    ),
                     telemetry,
                 },
                 Err(reason) => WorkerCaseResult {
@@ -321,6 +437,15 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                     elapsed_ms: started.elapsed().as_millis(),
                     steps: Some(path.steps.len()),
                     reason: Some(format!("invalid equivalent path: {reason}")),
+                    result_model: result_model(
+                        HarnessSolverPath::SquareEndpoint,
+                        a.rows,
+                        b.rows,
+                        ResultResolutionKind::InvalidPath,
+                        Some(path.steps.len()),
+                        Some(path.matrices.len()),
+                        &telemetry,
+                    ),
                     telemetry,
                 },
             },
@@ -330,6 +455,12 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                 elapsed_ms: started.elapsed().as_millis(),
                 steps: None,
                 reason: Some(reason),
+                result_model: not_equivalent_result_model(
+                    HarnessSolverPath::SquareEndpoint,
+                    a.rows,
+                    b.rows,
+                    &telemetry,
+                ),
                 telemetry,
             },
             DynSseResult::Unknown => WorkerCaseResult {
@@ -338,6 +469,15 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
                 elapsed_ms: started.elapsed().as_millis(),
                 steps: None,
                 reason: None,
+                result_model: result_model(
+                    HarnessSolverPath::SquareEndpoint,
+                    a.rows,
+                    b.rows,
+                    ResultResolutionKind::SearchExhausted,
+                    None,
+                    None,
+                    &telemetry,
+                ),
                 telemetry,
             },
         }
@@ -423,6 +563,84 @@ fn validate_sse_path_dyn(a: &DynMatrix, b: &DynMatrix, path: &DynSsePath) -> Res
     Ok(())
 }
 
+fn result_model(
+    solver_path: HarnessSolverPath,
+    source_dim: usize,
+    target_dim: usize,
+    resolution_kind: ResultResolutionKind,
+    witness_lag: Option<usize>,
+    path_matrix_count: Option<usize>,
+    telemetry: &SearchTelemetry,
+) -> ResultModel {
+    ResultModel {
+        solver_path,
+        source_dim,
+        target_dim,
+        resolution_kind,
+        witness_lag,
+        path_matrix_count,
+        frontier_layers: telemetry.layers.len(),
+    }
+}
+
+fn solver_path_for_dims(source_dim: usize, target_dim: usize) -> HarnessSolverPath {
+    if source_dim == 2 && target_dim == 2 {
+        HarnessSolverPath::TwoByTwo
+    } else {
+        HarnessSolverPath::SquareEndpoint
+    }
+}
+
+fn equivalent_result_model(
+    solver_path: HarnessSolverPath,
+    source_dim: usize,
+    target_dim: usize,
+    telemetry: &SearchTelemetry,
+    witness_lag: usize,
+    path_matrix_count: usize,
+) -> ResultModel {
+    let resolution_kind = if witness_lag == 0 {
+        ResultResolutionKind::Identity
+    } else if telemetry.permutation_shortcut {
+        ResultResolutionKind::PermutationShortcut
+    } else if telemetry.canonical_shortcut {
+        ResultResolutionKind::CanonicalShortcut
+    } else {
+        ResultResolutionKind::FrontierPath
+    };
+    result_model(
+        solver_path,
+        source_dim,
+        target_dim,
+        resolution_kind,
+        Some(witness_lag),
+        Some(path_matrix_count),
+        telemetry,
+    )
+}
+
+fn not_equivalent_result_model(
+    solver_path: HarnessSolverPath,
+    source_dim: usize,
+    target_dim: usize,
+    telemetry: &SearchTelemetry,
+) -> ResultModel {
+    let resolution_kind = if telemetry.invariant_filtered {
+        ResultResolutionKind::InvariantFilterNotEquivalent
+    } else {
+        ResultResolutionKind::SearchNotEquivalent
+    };
+    result_model(
+        solver_path,
+        source_dim,
+        target_dim,
+        resolution_kind,
+        None,
+        None,
+        telemetry,
+    )
+}
+
 fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary, String> {
     let current_exe =
         env::current_exe().map_err(|err| format!("failed to resolve current executable: {err}"))?;
@@ -432,6 +650,7 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
     let mut target_hits = 0usize;
     let mut total_points = 0i64;
     let mut total_elapsed_ms = 0u128;
+    let mut generalized_cases = 0usize;
     let mut telemetry_focus_cases = 0usize;
     let mut telemetry_focus_score = 0u64;
     let mut telemetry_focus_directed_score = 0i64;
@@ -457,6 +676,15 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
 
         total_points += points;
         total_elapsed_ms += executed.elapsed_ms;
+        let endpoint = EndpointSummary {
+            source_dim: case.a.len(),
+            target_dim: case.b.len(),
+            a: case.a.clone(),
+            b: case.b.clone(),
+        };
+        if endpoint.source_dim != 2 || endpoint.target_dim != 2 {
+            generalized_cases += 1;
+        }
         let telemetry_summary = derive_telemetry_summary(
             &executed.actual_outcome,
             &executed.telemetry,
@@ -471,6 +699,7 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
         cases.push(CaseSummary {
             id: case.id.clone(),
             description: case.description.clone(),
+            endpoint,
             config: case.config.clone(),
             actual_outcome: executed.actual_outcome,
             allowed_outcomes: case.allowed_outcomes.clone(),
@@ -482,11 +711,14 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
             timeout_ms: case.timeout_ms,
             steps: executed.steps,
             reason: executed.reason,
+            result_model: executed.result_model,
             telemetry: executed.telemetry,
             telemetry_summary,
             tags: case.tags.clone(),
         });
     }
+
+    let comparisons = build_comparison_summaries(&cases);
 
     Ok(HarnessSummary {
         schema_version: corpus.schema_version,
@@ -497,13 +729,59 @@ fn run_harness(cases_path: &Path, corpus: &CaseCorpus) -> Result<HarnessSummary,
             target_hits,
             total_points,
             total_elapsed_ms,
+            generalized_cases,
+            comparison_groups: comparisons.len(),
             telemetry_focus_cases,
             telemetry_focus_score,
             telemetry_focus_reach_score: telemetry_focus_score,
             telemetry_focus_directed_score,
         },
+        comparisons,
         cases,
     })
+}
+
+fn build_comparison_summaries(cases: &[CaseSummary]) -> Vec<ComparisonSummary> {
+    let mut groups = Vec::<ComparisonSummary>::new();
+    let mut group_indices = std::collections::BTreeMap::<String, usize>::new();
+
+    for case in cases {
+        let key = serde_json::to_string(&(
+            case.endpoint.source_dim,
+            case.endpoint.target_dim,
+            &case.endpoint.a,
+            &case.endpoint.b,
+        ))
+        .expect("endpoint comparison key should serialise");
+
+        let variant = ComparisonVariantSummary {
+            case_id: case.id.clone(),
+            description: case.description.clone(),
+            config: case.config.clone(),
+            actual_outcome: case.actual_outcome.clone(),
+            result_model: case.result_model.clone(),
+            passed: case.passed,
+            hit_target: case.hit_target,
+            points: case.points,
+            elapsed_ms: case.elapsed_ms,
+        };
+
+        match group_indices.get(&key).copied() {
+            Some(index) => groups[index].variants.push(variant),
+            None => {
+                group_indices.insert(key, groups.len());
+                groups.push(ComparisonSummary {
+                    endpoint: case.endpoint.clone(),
+                    variants: vec![variant],
+                });
+            }
+        }
+    }
+
+    groups
+        .into_iter()
+        .filter(|group| group.variants.len() > 1)
+        .collect()
 }
 
 fn derive_telemetry_summary(
@@ -756,6 +1034,15 @@ fn run_case_in_subprocess(
                 elapsed_ms: started.elapsed().as_millis(),
                 steps: None,
                 reason: reason.or_else(|| Some(format!("worker exceeded {} ms", case.timeout_ms))),
+                result_model: result_model(
+                    solver_path_for_dims(case.a.len(), case.b.len()),
+                    case.a.len(),
+                    case.b.len(),
+                    ResultResolutionKind::Timeout,
+                    None,
+                    None,
+                    &SearchTelemetry::default(),
+                ),
                 telemetry: SearchTelemetry::default(),
             });
         }
@@ -777,6 +1064,15 @@ fn run_case_in_subprocess(
                         steps: None,
                         reason: stderr_snippet(&output.stderr)
                             .or_else(|| Some(format!("worker exited with status {status}"))),
+                        result_model: result_model(
+                            solver_path_for_dims(case.a.len(), case.b.len()),
+                            case.a.len(),
+                            case.b.len(),
+                            ResultResolutionKind::Panic,
+                            None,
+                            None,
+                            &SearchTelemetry::default(),
+                        ),
                         telemetry: SearchTelemetry::default(),
                     });
                 }
@@ -826,6 +1122,14 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
     out.push_str(&format!("target_hits: {}\n", summary.fitness.target_hits));
     out.push_str(&format!("total_points: {}\n", summary.fitness.total_points));
     out.push_str(&format!(
+        "generalized_cases: {}\n",
+        summary.fitness.generalized_cases
+    ));
+    out.push_str(&format!(
+        "comparison_groups: {}\n",
+        summary.fitness.comparison_groups
+    ));
+    out.push_str(&format!(
         "telemetry_focus_score: {} across {} case(s)\n",
         summary.fitness.telemetry_focus_score, summary.fitness.telemetry_focus_cases
     ));
@@ -838,6 +1142,34 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
         summary.fitness.total_elapsed_ms
     ));
 
+    if !summary.comparisons.is_empty() {
+        out.push_str("Comparisons\n");
+        for comparison in &summary.comparisons {
+            out.push_str(&format!(
+                "- endpoints={}x{} variants={}\n",
+                comparison.endpoint.source_dim,
+                comparison.endpoint.target_dim,
+                comparison.variants.len()
+            ));
+            for variant in &comparison.variants {
+                out.push_str(&format!(
+                    "  {}: mode={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} points={} elapsed={}ms\n",
+                    variant.case_id,
+                    variant.config.search_mode,
+                    variant.config.max_lag,
+                    variant.config.max_intermediate_dim,
+                    variant.config.max_entry,
+                    variant.actual_outcome,
+                    variant.result_model.resolution_kind,
+                    variant.result_model.witness_lag,
+                    variant.points,
+                    variant.elapsed_ms,
+                ));
+            }
+        }
+        out.push('\n');
+    }
+
     for case in &summary.cases {
         out.push_str(&format!(
             "- {}: outcome={} passed={} target={} points={} elapsed={}ms\n",
@@ -849,12 +1181,22 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             case.elapsed_ms
         ));
         out.push_str(&format!(
-            "  config: mode={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
+            "  endpoints: {}x{} config: mode={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
+            case.endpoint.source_dim,
+            case.endpoint.target_dim,
             case.config.search_mode,
             case.config.max_lag,
             case.config.max_intermediate_dim,
             case.config.max_entry,
             case.timeout_ms,
+        ));
+        out.push_str(&format!(
+            "  result: solver={:?} resolution={:?} witness_lag={:?} path_matrices={:?} frontier_layers={}\n",
+            case.result_model.solver_path,
+            case.result_model.resolution_kind,
+            case.result_model.witness_lag,
+            case.result_model.path_matrix_count,
+            case.result_model.frontier_layers,
         ));
         if let Some(reason) = &case.reason {
             out.push_str(&format!("  reason: {}\n", reason));
@@ -941,5 +1283,138 @@ mod tests {
         let result = run_case(&case);
         assert_eq!(result.actual_outcome, "equivalent");
         assert_eq!(result.steps, Some(0));
+        assert_eq!(
+            result.result_model.solver_path,
+            HarnessSolverPath::SquareEndpoint
+        );
+        assert_eq!(
+            result.result_model.resolution_kind,
+            ResultResolutionKind::Identity
+        );
+    }
+
+    #[test]
+    fn run_case_handles_mixed_square_endpoint_dimensions() {
+        let case = ResearchCase {
+            id: "dyn-2x2-to-3x3".to_string(),
+            description: "one-step 2x2 to 3x3 case".to_string(),
+            a: vec![vec![2, 1], vec![1, 1]],
+            b: vec![vec![1, 0, 1], vec![1, 1, 1], vec![1, 1, 1]],
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 3,
+                max_entry: 1,
+                search_mode: SearchMode::Mixed,
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+        };
+
+        let result = run_case(&case);
+        assert_eq!(result.actual_outcome, "equivalent");
+        assert_eq!(result.steps, Some(1));
+        assert_eq!(
+            result.result_model.solver_path,
+            HarnessSolverPath::SquareEndpoint
+        );
+        assert_eq!(
+            result.result_model.resolution_kind,
+            ResultResolutionKind::FrontierPath
+        );
+        assert_eq!(result.result_model.source_dim, 2);
+        assert_eq!(result.result_model.target_dim, 3);
+        assert_eq!(result.result_model.witness_lag, Some(1));
+    }
+
+    #[test]
+    fn comparison_groups_collect_same_endpoint_variants() {
+        let endpoint = EndpointSummary {
+            source_dim: 2,
+            target_dim: 2,
+            a: vec![vec![1, 0], vec![0, 1]],
+            b: vec![vec![1, 0], vec![0, 1]],
+        };
+        let result_model = ResultModel {
+            solver_path: HarnessSolverPath::TwoByTwo,
+            source_dim: 2,
+            target_dim: 2,
+            resolution_kind: ResultResolutionKind::Identity,
+            witness_lag: Some(0),
+            path_matrix_count: Some(1),
+            frontier_layers: 0,
+        };
+        let cases = vec![
+            CaseSummary {
+                id: "case-a".to_string(),
+                description: "A".to_string(),
+                endpoint: endpoint.clone(),
+                config: JsonSearchConfig {
+                    max_lag: 1,
+                    max_intermediate_dim: 2,
+                    max_entry: 1,
+                    search_mode: SearchMode::Mixed,
+                },
+                actual_outcome: "equivalent".to_string(),
+                allowed_outcomes: vec!["equivalent".to_string()],
+                target_outcome: Some("equivalent".to_string()),
+                passed: true,
+                hit_target: true,
+                points: 1,
+                elapsed_ms: 1,
+                timeout_ms: 10,
+                steps: Some(0),
+                reason: None,
+                result_model: result_model.clone(),
+                telemetry: SearchTelemetry::default(),
+                telemetry_summary: derive_telemetry_summary(
+                    "equivalent",
+                    &SearchTelemetry::default(),
+                    1,
+                ),
+                tags: vec![],
+            },
+            CaseSummary {
+                id: "case-b".to_string(),
+                description: "B".to_string(),
+                endpoint,
+                config: JsonSearchConfig {
+                    max_lag: 2,
+                    max_intermediate_dim: 2,
+                    max_entry: 2,
+                    search_mode: SearchMode::GraphOnly,
+                },
+                actual_outcome: "equivalent".to_string(),
+                allowed_outcomes: vec!["equivalent".to_string()],
+                target_outcome: Some("equivalent".to_string()),
+                passed: true,
+                hit_target: true,
+                points: 1,
+                elapsed_ms: 1,
+                timeout_ms: 10,
+                steps: Some(0),
+                reason: None,
+                result_model,
+                telemetry: SearchTelemetry::default(),
+                telemetry_summary: derive_telemetry_summary(
+                    "equivalent",
+                    &SearchTelemetry::default(),
+                    1,
+                ),
+                tags: vec![],
+            },
+        ];
+
+        let comparisons = build_comparison_summaries(&cases);
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(comparisons[0].variants.len(), 2);
     }
 }
