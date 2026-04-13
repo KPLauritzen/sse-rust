@@ -21,7 +21,8 @@ use crate::types::{
     GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
     GuideArtifactValidation, GuidedRefinementConfig, SearchConfig, SearchDirection,
     SearchLayerTelemetry, SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig, SsePath, SseResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, ShortcutSearchRoundTelemetry,
+    ShortcutSearchStopReason, SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -114,6 +115,78 @@ struct PreparedShortcutGuidePool {
     guides: Vec<RankedGuide>,
     accepted_guides: usize,
     unique_guides: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ShortcutGuidePoolEntry {
+    guide: RankedGuide,
+    processed: bool,
+}
+
+#[derive(Default)]
+struct ShortcutGuidePool {
+    guides: HashMap<Vec<DynMatrix>, ShortcutGuidePoolEntry>,
+}
+
+impl ShortcutGuidePool {
+    fn new(guides: Vec<RankedGuide>) -> Self {
+        let guides = guides
+            .into_iter()
+            .map(|guide| {
+                (
+                    canonical_guide_identity(&guide.path),
+                    ShortcutGuidePoolEntry {
+                        guide,
+                        processed: false,
+                    },
+                )
+            })
+            .collect();
+        Self { guides }
+    }
+
+    fn take_working_set(&mut self, max_guides: usize) -> Vec<RankedGuide> {
+        let mut pending = self
+            .guides
+            .iter()
+            .filter(|(_, entry)| !entry.processed)
+            .map(|(identity, entry)| (identity.clone(), entry.guide.clone()))
+            .collect::<Vec<_>>();
+        pending.sort_by(|(_, left), (_, right)| compare_ranked_guides(left, right));
+        pending.truncate(max_guides);
+
+        for (identity, _) in &pending {
+            if let Some(entry) = self.guides.get_mut(identity) {
+                entry.processed = true;
+            }
+        }
+
+        pending.into_iter().map(|(_, guide)| guide).collect()
+    }
+
+    fn promote(&mut self, guide: RankedGuide) -> bool {
+        let identity = canonical_guide_identity(&guide.path);
+        match self.guides.entry(identity) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if compare_ranked_guides(&guide, &entry.get().guide) == Ordering::Less {
+                    let processed = entry.get().processed;
+                    entry.insert(ShortcutGuidePoolEntry { guide, processed });
+                }
+                false
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(ShortcutGuidePoolEntry {
+                    guide,
+                    processed: false,
+                });
+                true
+            }
+        }
+    }
+
+    fn has_unprocessed(&self) -> bool {
+        self.guides.values().any(|entry| !entry.processed)
+    }
 }
 
 /// Search for a strong shift equivalence path between two 2x2 matrices.
@@ -220,26 +293,111 @@ fn search_shortcut_search_with_observer(
     let target_canonical = request.target.canonical_perm();
     emit_started(&mut observer, request, &source_canonical, &target_canonical);
 
-    let best = prepared
+    let initial_working_set_guides = prepared
         .guides
-        .first()
-        .expect("non-empty prepared shortcut guide pool should have a best guide");
-    let best_lag = Some(best.effective_lag);
-    let telemetry = SearchTelemetry {
+        .len()
+        .min(request.shortcut_search.max_guides);
+    let mut best = prepared
+        .guides
+        .iter()
+        .take(initial_working_set_guides)
+        .map(|guide| guide.path.clone())
+        .min_by(|left, right| compare_path_quality(left, right))
+        .expect("non-empty prepared shortcut guide pool should have an initial working set");
+    let best_lag = Some(best.steps.len());
+    let mut telemetry = SearchTelemetry {
         guide_artifacts_considered: request.guide_artifacts.len(),
         guide_artifacts_accepted: prepared.accepted_guides,
         shortcut_search: crate::types::ShortcutSearchTelemetry {
             guide_artifacts_loaded: request.guide_artifacts.len(),
             guide_artifacts_accepted: prepared.accepted_guides,
             unique_guides: prepared.unique_guides,
-            initial_working_set_guides: prepared.guides.len(),
+            initial_working_set_guides,
             best_lag_start: best_lag,
             best_lag_end: best_lag,
             ..crate::types::ShortcutSearchTelemetry::default()
         },
         ..SearchTelemetry::default()
     };
-    let result = SearchRunResult::Equivalent(best.path.clone());
+    let mut guide_pool = ShortcutGuidePool::new(prepared.guides);
+    let mut remaining_segment_attempts = request.shortcut_search.max_total_segment_attempts;
+    let mut promoted_serial = 0usize;
+    let mut stop_reason = ShortcutSearchStopReason::MaxRoundsReached;
+
+    for round_index in 0..request.shortcut_search.rounds {
+        if remaining_segment_attempts == 0 {
+            stop_reason = ShortcutSearchStopReason::MaxSegmentAttemptsReached;
+            break;
+        }
+
+        let working_set = guide_pool.take_working_set(request.shortcut_search.max_guides);
+        if working_set.is_empty() {
+            stop_reason = ShortcutSearchStopReason::GuidePoolExhausted;
+            break;
+        }
+
+        let mut round = ShortcutSearchRoundTelemetry {
+            round_index,
+            working_set_guides: working_set.len(),
+            starting_best_lag: Some(best.steps.len()),
+            ending_best_lag: Some(best.steps.len()),
+            ..ShortcutSearchRoundTelemetry::default()
+        };
+
+        for guide in working_set {
+            let attempts_before = telemetry.guided_segments_considered;
+            let improvements_before = telemetry.guided_segments_improved;
+            let refined = refine_guide_path_with_budget(
+                request,
+                &guide.path,
+                &mut telemetry,
+                &mut remaining_segment_attempts,
+            );
+            round.segment_attempts += telemetry.guided_segments_considered - attempts_before;
+            round.segment_improvements += telemetry.guided_segments_improved - improvements_before;
+
+            if compare_path_quality(&refined, &guide.path) == Ordering::Less {
+                let promoted = promoted_ranked_guide(&refined, promoted_serial);
+                promoted_serial += 1;
+                if guide_pool.promote(promoted) {
+                    round.promoted_guides += 1;
+                }
+            }
+
+            if compare_path_quality(&refined, &best) == Ordering::Less {
+                best = refined;
+            }
+
+            if remaining_segment_attempts == 0 {
+                break;
+            }
+        }
+
+        round.ending_best_lag = Some(best.steps.len());
+        let round_promoted_guides = round.promoted_guides;
+        telemetry.shortcut_search.rounds.push(round);
+        telemetry.shortcut_search.rounds_completed += 1;
+        telemetry.shortcut_search.segment_attempts = telemetry.guided_segments_considered;
+        telemetry.shortcut_search.segment_improvements = telemetry.guided_segments_improved;
+        telemetry.shortcut_search.promoted_guides += round_promoted_guides;
+        telemetry.shortcut_search.best_lag_end = Some(best.steps.len());
+
+        if remaining_segment_attempts == 0 {
+            stop_reason = ShortcutSearchStopReason::MaxSegmentAttemptsReached;
+            break;
+        }
+        if !guide_pool.has_unprocessed() {
+            stop_reason = ShortcutSearchStopReason::GuidePoolExhausted;
+            break;
+        }
+        if round_promoted_guides == 0 {
+            stop_reason = ShortcutSearchStopReason::NoImprovementRound;
+            break;
+        }
+    }
+
+    telemetry.shortcut_search.stop_reason = Some(stop_reason);
+    let result = SearchRunResult::Equivalent(best);
     emit_finished(&mut observer, request, result.clone(), &telemetry);
     Ok((result, telemetry))
 }
@@ -638,7 +796,6 @@ fn prepare_shortcut_guide_pool(
     let unique_guides = deduped.len();
     let mut guides = deduped.into_values().collect::<Vec<_>>();
     guides.sort_by(compare_ranked_guides);
-    guides.truncate(request.shortcut_search.max_guides);
 
     Ok(PreparedShortcutGuidePool {
         guides,
@@ -670,6 +827,23 @@ fn compare_ranked_guides(left: &RankedGuide, right: &RankedGuide) -> Ordering {
         .then_with(|| compare_optional_usize(left.effective_cost, right.effective_cost))
         .then_with(|| compare_optional_score_desc(left.effective_score, right.effective_score))
         .then_with(|| left.stable_key.cmp(&right.stable_key))
+}
+
+fn compare_path_quality(left: &DynSsePath, right: &DynSsePath) -> Ordering {
+    left.steps
+        .len()
+        .cmp(&right.steps.len())
+        .then_with(|| left.matrices.len().cmp(&right.matrices.len()))
+}
+
+fn promoted_ranked_guide(path: &DynSsePath, serial: usize) -> RankedGuide {
+    RankedGuide {
+        path: path.clone(),
+        effective_lag: path.steps.len(),
+        effective_cost: Some(path.steps.len()),
+        effective_score: None,
+        stable_key: format!("promoted|{:08}", serial),
+    }
 }
 
 fn compare_optional_usize(left: Option<usize>, right: Option<usize>) -> Ordering {
@@ -734,14 +908,28 @@ fn refine_guide_path(
     initial: &DynSsePath,
     telemetry: &mut SearchTelemetry,
 ) -> DynSsePath {
+    let mut remaining_segment_attempts = usize::MAX;
+    refine_guide_path_with_budget(request, initial, telemetry, &mut remaining_segment_attempts)
+}
+
+fn refine_guide_path_with_budget(
+    request: &SearchRequest,
+    initial: &DynSsePath,
+    telemetry: &mut SearchTelemetry,
+    remaining_segment_attempts: &mut usize,
+) -> DynSsePath {
     let mut current = initial.clone();
     for _ in 0..request.guided_refinement.rounds {
+        if *remaining_segment_attempts == 0 {
+            break;
+        }
         telemetry.guided_refinement_rounds += 1;
         let next = refine_guide_path_once(
             &current,
             &request.config,
             &request.guided_refinement,
             telemetry,
+            remaining_segment_attempts,
         );
         if next.steps.len() >= current.steps.len() {
             break;
@@ -756,6 +944,7 @@ fn refine_guide_path_once(
     base_config: &SearchConfig,
     guided_config: &GuidedRefinementConfig,
     telemetry: &mut SearchTelemetry,
+    remaining_segment_attempts: &mut usize,
 ) -> DynSsePath {
     if guide.steps.is_empty() {
         return guide.clone();
@@ -775,19 +964,23 @@ fn refine_guide_path_once(
     }
 
     let max_gap = guided_config.max_gap.unwrap_or(guide.steps.len());
-    for start in 0..guide.steps.len() {
+    'gap_search: for start in 0..guide.steps.len() {
         let min_end = start + guided_config.min_gap;
         if min_end >= guide.matrices.len() {
             continue;
         }
         let max_end = (start + max_gap).min(guide.steps.len());
         for end in min_end..=max_end {
+            if *remaining_segment_attempts == 0 {
+                break 'gap_search;
+            }
             let gap = end - start;
             let lag_cap = guided_config.max_shortcut_lag.min(gap - 1);
             if lag_cap == 0 {
                 continue;
             }
 
+            *remaining_segment_attempts -= 1;
             telemetry.guided_segments_considered += 1;
             let mut config = base_config.clone();
             config.max_lag = lag_cap;
@@ -3314,6 +3507,41 @@ mod tests {
         artifact
     }
 
+    fn permutation_guide(base: &DynMatrix, perms: &[[usize; 3]]) -> DynSsePath {
+        let matrices = perms
+            .iter()
+            .map(|perm| base.conjugate_by_perm(perm))
+            .collect::<Vec<_>>();
+        let steps = matrices
+            .windows(2)
+            .map(|pair| permutation_step_between(&pair[0], &pair[1]).unwrap())
+            .collect::<Vec<_>>();
+        DynSsePath { matrices, steps }
+    }
+
+    fn shortcut_request(
+        source: DynMatrix,
+        target: DynMatrix,
+        guide_artifacts: Vec<GuideArtifact>,
+        guided_refinement: GuidedRefinementConfig,
+        shortcut_search: ShortcutSearchConfig,
+    ) -> SearchRequest {
+        SearchRequest {
+            source,
+            target,
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                search_mode: SearchMode::GraphOnly,
+            },
+            stage: SearchStage::ShortcutSearch,
+            guide_artifacts,
+            guided_refinement,
+            shortcut_search,
+        }
+    }
+
     #[test]
     fn test_build_full_path_guide_artifact_populates_metadata() {
         let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
@@ -3553,7 +3781,7 @@ mod tests {
         let (result, telemetry) = execute_search_request(&request).unwrap();
         match result {
             SearchRunResult::Equivalent(path) => {
-                assert_eq!(path.steps.len(), 2);
+                assert_eq!(path.steps.len(), 1);
                 validate_sse_path_dyn(&a, &b, &path).unwrap();
             }
             other => panic!("expected Equivalent from shortcut search, got {other:?}"),
@@ -3565,7 +3793,13 @@ mod tests {
         assert_eq!(telemetry.shortcut_search.unique_guides, 1);
         assert_eq!(telemetry.shortcut_search.initial_working_set_guides, 1);
         assert_eq!(telemetry.shortcut_search.best_lag_start, Some(2));
-        assert_eq!(telemetry.shortcut_search.best_lag_end, Some(2));
+        assert_eq!(telemetry.shortcut_search.best_lag_end, Some(1));
+        assert_eq!(telemetry.shortcut_search.promoted_guides, 1);
+        assert_eq!(telemetry.shortcut_search.rounds_completed, 2);
+        assert_eq!(
+            telemetry.shortcut_search.stop_reason,
+            Some(ShortcutSearchStopReason::GuidePoolExhausted)
+        );
     }
 
     #[test]
@@ -3632,6 +3866,245 @@ mod tests {
         assert_eq!(telemetry.shortcut_search.initial_working_set_guides, 1);
         assert_eq!(telemetry.shortcut_search.best_lag_start, Some(1));
         assert_eq!(telemetry.shortcut_search.best_lag_end, Some(1));
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_iteratively_refines_promoted_guides() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let guide = permutation_guide(&base, &[[0, 1, 2], [1, 0, 2], [2, 0, 1], [2, 1, 0]]);
+        let source = guide.matrices.first().unwrap().clone();
+        let target = guide.matrices.last().unwrap().clone();
+        let request = shortcut_request(
+            source.clone(),
+            target.clone(),
+            vec![full_path_artifact("iterative-seed", guide)],
+            GuidedRefinementConfig {
+                max_shortcut_lag: 2,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            ShortcutSearchConfig {
+                max_guides: 1,
+                rounds: 4,
+                max_total_segment_attempts: 16,
+                ..ShortcutSearchConfig::default()
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        let SearchRunResult::Equivalent(path) = result else {
+            panic!("expected Equivalent from shortcut search");
+        };
+        assert_eq!(path.steps.len(), 1);
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(telemetry.shortcut_search.best_lag_start, Some(3));
+        assert_eq!(telemetry.shortcut_search.best_lag_end, Some(1));
+        assert_eq!(telemetry.shortcut_search.promoted_guides, 2);
+        assert_eq!(telemetry.shortcut_search.rounds_completed, 3);
+        assert_eq!(
+            telemetry.shortcut_search.stop_reason,
+            Some(ShortcutSearchStopReason::GuidePoolExhausted)
+        );
+        assert_eq!(telemetry.shortcut_search.rounds.len(), 3);
+        assert_eq!(
+            telemetry.shortcut_search.rounds[0].starting_best_lag,
+            Some(3)
+        );
+        assert_eq!(telemetry.shortcut_search.rounds[0].ending_best_lag, Some(2));
+        assert_eq!(
+            telemetry.shortcut_search.rounds[1].starting_best_lag,
+            Some(2)
+        );
+        assert_eq!(telemetry.shortcut_search.rounds[1].ending_best_lag, Some(1));
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_deduplicates_promoted_guides() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let first = permutation_guide(&base, &[[0, 1, 2], [1, 0, 2], [2, 0, 1], [2, 1, 0]]);
+        let second = permutation_guide(&base, &[[0, 1, 2], [0, 2, 1], [1, 2, 0], [2, 1, 0]]);
+        let source = first.matrices.first().unwrap().clone();
+        let target = first.matrices.last().unwrap().clone();
+        let request = shortcut_request(
+            source.clone(),
+            target.clone(),
+            vec![
+                full_path_artifact("promotion-a", first),
+                full_path_artifact("promotion-b", second),
+            ],
+            GuidedRefinementConfig {
+                max_shortcut_lag: 2,
+                min_gap: 2,
+                max_gap: Some(3),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            ShortcutSearchConfig {
+                max_guides: 2,
+                rounds: 4,
+                max_total_segment_attempts: 16,
+                ..ShortcutSearchConfig::default()
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        let SearchRunResult::Equivalent(path) = result else {
+            panic!("expected Equivalent from shortcut search");
+        };
+        assert_eq!(path.steps.len(), 1);
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(telemetry.shortcut_search.promoted_guides, 1);
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_reports_no_improvement_round_with_leftover_pool() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let direct = permutation_guide(&base, &[[0, 1, 2], [2, 1, 0]]);
+        let indirect = permutation_guide(&base, &[[0, 1, 2], [1, 0, 2], [2, 1, 0]]);
+        let source = direct.matrices.first().unwrap().clone();
+        let target = direct.matrices.last().unwrap().clone();
+        let request = shortcut_request(
+            source.clone(),
+            target.clone(),
+            vec![
+                full_path_artifact("indirect-leftover", indirect),
+                full_path_artifact("direct-best", direct),
+            ],
+            GuidedRefinementConfig::default(),
+            ShortcutSearchConfig {
+                max_guides: 1,
+                rounds: 4,
+                max_total_segment_attempts: 16,
+                ..ShortcutSearchConfig::default()
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        let SearchRunResult::Equivalent(path) = result else {
+            panic!("expected Equivalent from shortcut search");
+        };
+        assert_eq!(path.steps.len(), 1);
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(telemetry.shortcut_search.initial_working_set_guides, 1);
+        assert_eq!(telemetry.shortcut_search.rounds_completed, 1);
+        assert_eq!(
+            telemetry.shortcut_search.stop_reason,
+            Some(ShortcutSearchStopReason::NoImprovementRound)
+        );
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_reports_guide_pool_exhaustion() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let direct = permutation_guide(&base, &[[0, 1, 2], [2, 1, 0]]);
+        let source = direct.matrices.first().unwrap().clone();
+        let target = direct.matrices.last().unwrap().clone();
+        let request = shortcut_request(
+            source.clone(),
+            target.clone(),
+            vec![full_path_artifact("direct-only", direct)],
+            GuidedRefinementConfig::default(),
+            ShortcutSearchConfig {
+                max_guides: 1,
+                rounds: 4,
+                max_total_segment_attempts: 16,
+                ..ShortcutSearchConfig::default()
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        let SearchRunResult::Equivalent(path) = result else {
+            panic!("expected Equivalent from shortcut search");
+        };
+        assert_eq!(path.steps.len(), 1);
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(telemetry.shortcut_search.rounds_completed, 1);
+        assert_eq!(telemetry.shortcut_search.segment_attempts, 0);
+        assert_eq!(
+            telemetry.shortcut_search.stop_reason,
+            Some(ShortcutSearchStopReason::GuidePoolExhausted)
+        );
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_reports_max_rounds_reached() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let guide = permutation_guide(&base, &[[0, 1, 2], [1, 0, 2], [2, 0, 1], [2, 1, 0]]);
+        let source = guide.matrices.first().unwrap().clone();
+        let target = guide.matrices.last().unwrap().clone();
+        let request = shortcut_request(
+            source.clone(),
+            target.clone(),
+            vec![full_path_artifact("max-rounds", guide)],
+            GuidedRefinementConfig {
+                max_shortcut_lag: 2,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            ShortcutSearchConfig {
+                max_guides: 1,
+                rounds: 1,
+                max_total_segment_attempts: 16,
+                ..ShortcutSearchConfig::default()
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        let SearchRunResult::Equivalent(path) = result else {
+            panic!("expected Equivalent from shortcut search");
+        };
+        assert_eq!(path.steps.len(), 2);
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(telemetry.shortcut_search.rounds_completed, 1);
+        assert_eq!(telemetry.shortcut_search.best_lag_end, Some(2));
+        assert_eq!(
+            telemetry.shortcut_search.stop_reason,
+            Some(ShortcutSearchStopReason::MaxRoundsReached)
+        );
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_respects_total_segment_attempt_budget() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let guide = permutation_guide(&base, &[[0, 1, 2], [1, 0, 2], [2, 0, 1], [2, 1, 0]]);
+        let source = guide.matrices.first().unwrap().clone();
+        let target = guide.matrices.last().unwrap().clone();
+        let request = shortcut_request(
+            source.clone(),
+            target.clone(),
+            vec![full_path_artifact("budgeted", guide)],
+            GuidedRefinementConfig {
+                max_shortcut_lag: 2,
+                min_gap: 2,
+                max_gap: Some(3),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            ShortcutSearchConfig {
+                max_guides: 1,
+                rounds: 4,
+                max_total_segment_attempts: 1,
+                ..ShortcutSearchConfig::default()
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        let SearchRunResult::Equivalent(path) = result else {
+            panic!("expected Equivalent from shortcut search");
+        };
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(telemetry.shortcut_search.segment_attempts, 1);
+        assert_eq!(telemetry.shortcut_search.rounds_completed, 1);
+        assert_eq!(telemetry.shortcut_search.rounds[0].segment_attempts, 1);
+        assert_eq!(
+            telemetry.shortcut_search.stop_reason,
+            Some(ShortcutSearchStopReason::MaxSegmentAttemptsReached)
+        );
     }
 
     #[test]

@@ -185,7 +185,7 @@ where
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --search-mode MODE       mixed | graph-only (default: mixed)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
-                                              (shortcut-search currently loads and ranks reusable guides, but does not yet run the Phase 3 iterative pool loop; default: endpoint-search)\n\
+                                              (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
                        --guide-artifact-dir DIR read all JSON guide artifact(s) from DIR (repeatable)\n\
                        --guided-max-shortcut-lag N max lag for one guided shortcut search (default: 3)\n\
