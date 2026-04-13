@@ -202,3 +202,6 @@
 
 - `2026-04-13-same-future-past-graph-reps` Added same-future/past quotient signatures and used them for layer-local graph representative selection.
   Kept. Mixed probes were unchanged, but `brix_ruiz_k3_graph_only` collapsed `431401` graph successors under the new quotient and the saved harness run dropped from `12827 ms` to `12563 ms` overall.
+
+- `2026-04-13-0403-drop-spectrum-prune` Removed redundant mid-search spectrum checks from the main expansion loops after `pprof` showed the hot path was spending time in candidate screening that never actually pruned.
+  Kept. The saved harness artifact stayed identical on score and outcomes while dropping total runtime from `14658 ms` to `10601 ms`; `brix_ruiz_k3_graph_only` fell to `9030 ms` and mixed `brix_ruiz_k3` to `458 ms`.
