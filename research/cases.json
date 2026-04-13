@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "cases": [
     {
       "id": "self_sse",
@@ -21,7 +21,12 @@
         "timeout": -2000,
         "panic": -2000
       },
-      "tags": ["correctness", "smoke"]
+      "tags": ["correctness", "smoke"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 10
+      }
     },
     {
       "id": "self_sse_3x3",
@@ -43,7 +48,12 @@
         "timeout": -2000,
         "panic": -2000
       },
-      "tags": ["correctness", "smoke", "non-2x2"]
+      "tags": ["correctness", "smoke", "non-2x2"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 20
+      }
     },
     {
       "id": "permutation_sse_3x3",
@@ -65,7 +75,12 @@
         "timeout": -2000,
         "panic": -2000
       },
-      "tags": ["correctness", "shortcut", "non-2x2"]
+      "tags": ["correctness", "shortcut", "non-2x2"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 30
+      }
     },
     {
       "id": "trace_square_mismatch_3x3",
@@ -87,7 +102,12 @@
         "timeout": -2000,
         "panic": -2000
       },
-      "tags": ["correctness", "negative", "non-2x2"]
+      "tags": ["correctness", "negative", "non-2x2"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 40
+      }
     },
     {
       "id": "square_endpoint_step_2x2_to_3x3",
@@ -109,7 +129,12 @@
         "timeout": -2500,
         "panic": -2500
       },
-      "tags": ["correctness", "generalized-square-endpoints", "mixed-dimension"]
+      "tags": ["correctness", "generalized-square-endpoints", "mixed-dimension"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 50
+      }
     },
     {
       "id": "elementary_pair",
@@ -131,7 +156,12 @@
         "timeout": -2000,
         "panic": -2000
       },
-      "tags": ["correctness", "easy-positive"]
+      "tags": ["correctness", "easy-positive"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 60
+      }
     },
     {
       "id": "bfs_positive_pair",
@@ -153,7 +183,12 @@
         "timeout": -3000,
         "panic": -3000
       },
-      "tags": ["correctness", "bfs-positive"]
+      "tags": ["correctness", "bfs-positive"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 70
+      }
     },
     {
       "id": "rectangular_positive_pair",
@@ -175,7 +210,12 @@
         "timeout": -3500,
         "panic": -3500
       },
-      "tags": ["correctness", "rectangular-positive"]
+      "tags": ["correctness", "rectangular-positive"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 80
+      }
     },
     {
       "id": "eilers_kiming_negative",
@@ -197,7 +237,12 @@
         "timeout": -2500,
         "panic": -2500
       },
-      "tags": ["correctness", "negative"]
+      "tags": ["correctness", "negative"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 90
+      }
     },
     {
       "id": "brix_ruiz_k3",
@@ -219,7 +264,12 @@
         "timeout": -3000,
         "panic": -3000
       },
-      "tags": ["hard-positive", "target", "telemetry-focus"]
+      "tags": ["hard-positive", "target", "telemetry-focus"],
+      "campaign": {
+        "id": "brix_ruiz_k3",
+        "strategy": "mixed_baseline",
+        "schedule_order": 10
+      }
     },
     {
       "id": "brix_ruiz_k3_graph_only",
@@ -242,7 +292,12 @@
         "timeout": -4000,
         "panic": -4000
       },
-      "tags": ["hard-positive", "target", "graph-only"]
+      "tags": ["hard-positive", "target", "graph-only"],
+      "campaign": {
+        "id": "brix_ruiz_k3",
+        "strategy": "graph_only_probe",
+        "schedule_order": 30
+      }
     },
     {
       "id": "brix_ruiz_k3_wide_probe",
@@ -264,7 +319,12 @@
         "timeout": -3000,
         "panic": -3000
       },
-      "tags": ["hard-positive", "telemetry-focus", "wide-probe"]
+      "tags": ["hard-positive", "telemetry-focus", "wide-probe"],
+      "campaign": {
+        "id": "brix_ruiz_k3",
+        "strategy": "mixed_wide_probe",
+        "schedule_order": 20
+      }
     },
     {
       "id": "brix_ruiz_k4_probe",
@@ -286,7 +346,12 @@
         "timeout": -3000,
         "panic": -3000
       },
-      "tags": ["hard-positive", "telemetry-focus", "family-probe"]
+      "tags": ["hard-positive", "telemetry-focus", "family-probe"],
+      "campaign": {
+        "id": "brix_ruiz_k4",
+        "strategy": "mixed_wide_probe",
+        "schedule_order": 10
+      }
     }
   ]
 }
