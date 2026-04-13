@@ -1,4 +1,4 @@
-# RFC: Make `shortcut_search` An Artifact-Driven Iterative Solver Stage
+# RFC 002: Make `shortcut_search` An Artifact-Driven Iterative Solver Stage
 
 ## Status
 
@@ -25,7 +25,7 @@ reintroduce benchmark-family-specific sidecar logic into the solver.
 
 ## Context
 
-[`rfc-main-search-shortcut-integration.md`](rfc-main-search-shortcut-integration.md)
+[`rfc-001-main-search-shortcut-integration.md`](rfc-001-main-search-shortcut-integration.md)
 explicitly left one gap after the six-phase rollout: `shortcut_search` was
 named as a generic stage, but only `guided_refinement` was actually delivered.
 
@@ -381,7 +381,7 @@ reimplement its inner loop.
 ## Recommendation
 
 Adopt this RFC as the next follow-up to
-[`rfc-main-search-shortcut-integration.md`](rfc-main-search-shortcut-integration.md).
+[`rfc-001-main-search-shortcut-integration.md`](rfc-001-main-search-shortcut-integration.md).
 
 The project now has enough evidence to make `shortcut_search` concrete:
 
