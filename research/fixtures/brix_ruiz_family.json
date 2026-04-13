@@ -10,7 +10,7 @@
           "id": "endpoint_16_path",
           "label": "endpoint 16-path",
           "source_kind": "benchmark_fixture",
-          "source_ref": "src/bin/find_brix_ruiz_path_shortcuts.rs:endpoint_16_path",
+          "source_ref": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3.endpoint_16_path",
           "supported_stages": ["guided_refinement"],
           "max_endpoint_dim": 5,
           "matrices": [

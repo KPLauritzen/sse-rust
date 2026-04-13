@@ -1,3 +1,6 @@
+// Retired from Cargo targets in RFC Phase 6.
+// Kept in-tree as a historical reference for older research notes.
+
 use std::time::Instant;
 
 use sse_core::matrix::SqMatrix;

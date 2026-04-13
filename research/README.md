@@ -32,6 +32,22 @@ cargo run --profile dist --features research-tools --bin research_harness -- \
 Those local artifacts should stay untracked unless the human explicitly asks
 for repository changes to that policy.
 
+## Supported Entry Points
+
+For active work, use:
+
+- `cargo run --bin search -- ...` for direct solver runs and the generic
+  staged solver surface,
+- `cargo run --features research-tools --bin research_harness -- ...` for
+  fixture-backed benchmark and campaign runs.
+
+The remaining `research-tools` binaries are intentionally narrower. Keep them
+for targeted diagnostics or paper reproduction, not as alternate front doors
+for the same Brix-Ruiz search flows. In Phase 6, the older
+`brix_ruiz_k3`, `find_brix_ruiz_graph_path`, and
+`find_brix_ruiz_path_shortcuts` sidecars were retired from Cargo targets after
+their overlap was absorbed by `search` plus `research_harness`.
+
 ## Note-Taking Convention
 
 When work produces new evidence:
