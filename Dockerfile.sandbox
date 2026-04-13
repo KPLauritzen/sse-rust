@@ -102,6 +102,17 @@ ARG CACHE_BUST=1
 # Install workmux (needed for sandbox RPC)
 RUN curl -fsSL https://raw.githubusercontent.com/raine/workmux/main/scripts/install.sh | bash
 
+# Install beads issue tracker (bd) — runs inside the container so it can
+# write to the .beads embedded dolt database directly.
+# bd links against ICU 74 but trixie ships ICU 76; symlinks bridge the gap.
+RUN apt-get update && apt-get install -y --no-install-recommends libicu76 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/x86_64-linux-gnu/libicui18n.so.76 /usr/lib/x86_64-linux-gnu/libicui18n.so.74 \
+    && ln -s /usr/lib/x86_64-linux-gnu/libicuuc.so.76   /usr/lib/x86_64-linux-gnu/libicuuc.so.74 \
+    && ln -s /usr/lib/x86_64-linux-gnu/libicudata.so.76  /usr/lib/x86_64-linux-gnu/libicudata.so.74 \
+    && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash \
+    && bd --version
+
 # --- codex agent ---
 ARG CACHE_BUST=1
 
