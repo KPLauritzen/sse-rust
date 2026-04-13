@@ -19,6 +19,10 @@ This repo now uses three documentation layers with different jobs:
   act as a checklist.
 - [`brix-ruiz-sidecar-log.md`](brix-ruiz-sidecar-log.md) is the family-specific
   experimental record for Brix-Ruiz sidecar work.
+- [`rfc-main-search-shortcut-integration.md`](rfc-main-search-shortcut-integration.md)
+  proposes promoting refinement and shortcutting into the main solver/CLI so
+  the hard `k = 3` and `k >= 4` search cases become first-class product
+  behavior rather than sidecar-only workflows.
 
 ## Rules Of Thumb
 
