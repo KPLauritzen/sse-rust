@@ -117,7 +117,7 @@ too awkward for the harness to compare honestly.
 The generic solver can now consume and emit guide artifacts, but it does not
 yet have a first-class story for:
 
-- loading a guide pool from a directory or manifest,
+- loading a guide pool from explicit files or a directory,
 - deduplicating competing witnesses,
 - writing improved artifacts back into that pool,
 - or preferring promising guides under bounded runtime.
@@ -178,7 +178,7 @@ because it is one bounded solver invocation for one endpoint pair.
 The first generic version should work with guide artifacts on disk:
 
 - one or more explicit files,
-- and optionally one or more directories or manifests.
+- and optionally one or more directories.
 
 That is enough to make reuse real without prematurely locking the design to a
 database schema.
@@ -244,6 +244,10 @@ The first version should support:
 - repeated `--guide-artifacts PATH`,
 - a `--guide-artifact-dir DIR` style input for loading many artifacts,
 - and one or more output paths or directories for improved artifacts.
+
+The first version does not need a separate manifest format.
+If richer guide-pool manifests become useful later, they should be introduced
+as a follow-up once the file-and-directory workflow is established.
 
 Compatibility should be explicit for the first version.
 `shortcut_search` should accept:

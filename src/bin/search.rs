@@ -172,7 +172,8 @@ where
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --search-mode MODE       mixed | graph-only (default: mixed)\n\
-                       --stage STAGE            endpoint-search | guided-refinement (default: endpoint-search)\n\
+                       --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
+                                              (shortcut-search is currently unintegrated; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
                        --guided-max-shortcut-lag N max lag for one guided shortcut search (default: 3)\n\
                        --guided-min-gap N       minimum guide gap to consider for refinement (default: 2)\n\
