@@ -18,6 +18,22 @@ impl Default for SearchMode {
     }
 }
 
+/// High-level solver stage terminology. This is intentionally separate from
+/// [`SearchMode`], which only selects the low-level search substrate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchStage {
+    EndpointSearch,
+    GuidedRefinement,
+    ShortcutSearch,
+}
+
+impl Default for SearchStage {
+    fn default() -> Self {
+        Self::EndpointSearch
+    }
+}
+
 /// Configuration for the SSE search.
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -41,6 +57,15 @@ impl Default for SearchConfig {
             search_mode: SearchMode::Mixed,
         }
     }
+}
+
+/// Generic request boundary for square-endpoint search orchestration.
+#[derive(Clone, Debug)]
+pub struct SearchRequest {
+    pub source: DynMatrix,
+    pub target: DynMatrix,
+    pub config: SearchConfig,
+    pub stage: SearchStage,
 }
 
 /// One elementary SSE step: A = UV, B = VU.
@@ -70,6 +95,19 @@ pub struct DynSsePath {
     pub steps: Vec<EsseStep>,
 }
 
+impl From<SsePath<2>> for DynSsePath {
+    fn from(path: SsePath<2>) -> Self {
+        Self {
+            matrices: path
+                .matrices
+                .into_iter()
+                .map(|matrix| DynMatrix::from_sq(&matrix))
+                .collect(),
+            steps: path.steps,
+        }
+    }
+}
+
 /// Result of an SSE search.
 #[derive(Clone, Debug)]
 pub enum SseResult<const N: usize> {
@@ -92,6 +130,38 @@ pub enum DynSseResult {
     NotEquivalent(String),
     /// Search exhausted without finding a path or proving non-equivalence.
     Unknown,
+}
+
+/// Generic result boundary shared by request/result/event/persistence layers.
+#[derive(Clone, Debug)]
+pub enum SearchRunResult {
+    Equivalent(DynSsePath),
+    EquivalentByConcreteShift(ConcreteShiftWitness2x2),
+    NotEquivalent(String),
+    Unknown,
+}
+
+impl From<SseResult<2>> for SearchRunResult {
+    fn from(result: SseResult<2>) -> Self {
+        match result {
+            SseResult::Equivalent(path) => Self::Equivalent(path.into()),
+            SseResult::EquivalentByConcreteShift(witness) => {
+                Self::EquivalentByConcreteShift(witness)
+            }
+            SseResult::NotEquivalent(reason) => Self::NotEquivalent(reason),
+            SseResult::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl From<DynSseResult> for SearchRunResult {
+    fn from(result: DynSseResult) -> Self {
+        match result {
+            DynSseResult::Equivalent(path) => Self::Equivalent(path),
+            DynSseResult::NotEquivalent(reason) => Self::NotEquivalent(reason),
+            DynSseResult::Unknown => Self::Unknown,
+        }
+    }
 }
 
 /// Direction of a BFS layer expansion in bidirectional search.

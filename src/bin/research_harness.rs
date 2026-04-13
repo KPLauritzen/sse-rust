@@ -8,8 +8,10 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sse_core::matrix::DynMatrix;
 use sse_core::matrix::SqMatrix;
-use sse_core::search::search_sse_2x2_with_telemetry;
-use sse_core::types::{SearchConfig, SearchMode, SearchTelemetry, SsePath, SseResult};
+use sse_core::search::{search_sse_2x2_with_telemetry, search_sse_with_telemetry_dyn};
+use sse_core::types::{
+    DynSsePath, DynSseResult, SearchConfig, SearchMode, SearchTelemetry, SsePath, SseResult,
+};
 
 #[derive(Debug)]
 struct Cli {
@@ -34,8 +36,8 @@ struct CaseCorpus {
 struct ResearchCase {
     id: String,
     description: String,
-    a: [[u32; 2]; 2],
-    b: [[u32; 2]; 2],
+    a: Vec<Vec<u32>>,
+    b: Vec<Vec<u32>>,
     config: JsonSearchConfig,
     timeout_ms: u64,
     allowed_outcomes: Vec<String>,
@@ -239,8 +241,8 @@ fn load_corpus(path: &Path) -> Result<CaseCorpus, String> {
 }
 
 fn run_case(case: &ResearchCase) -> WorkerCaseResult {
-    let a = SqMatrix::new(case.a);
-    let b = SqMatrix::new(case.b);
+    let a = case_matrix(&case.a).expect("invalid matrix A in corpus");
+    let b = case_matrix(&case.b).expect("invalid matrix B in corpus");
     let config = SearchConfig {
         max_lag: case.config.max_lag,
         max_intermediate_dim: case.config.max_intermediate_dim,
@@ -249,60 +251,131 @@ fn run_case(case: &ResearchCase) -> WorkerCaseResult {
     };
 
     let started = Instant::now();
-    let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
-    let elapsed_ms = started.elapsed().as_millis();
-
-    match result {
-        SseResult::Equivalent(path) => match validate_sse_path(&a, &b, &path) {
-            Ok(()) => WorkerCaseResult {
+    if a.rows == 2 {
+        let a_sq = a
+            .to_sq::<2>()
+            .expect("matrix A should be 2x2 when using the 2x2 solver path");
+        let b_sq = b
+            .to_sq::<2>()
+            .expect("matrix B should be 2x2 when using the 2x2 solver path");
+        let (result, telemetry) = search_sse_2x2_with_telemetry(&a_sq, &b_sq, &config);
+        match result {
+            SseResult::Equivalent(path) => match validate_sse_path_2x2(&a_sq, &b_sq, &path) {
+                Ok(()) => WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "equivalent".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: Some(path.steps.len()),
+                    reason: None,
+                    telemetry,
+                },
+                Err(reason) => WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "panic".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: Some(path.steps.len()),
+                    reason: Some(format!("invalid equivalent path: {reason}")),
+                    telemetry,
+                },
+            },
+            SseResult::EquivalentByConcreteShift(_witness) => WorkerCaseResult {
                 id: case.id.clone(),
                 actual_outcome: "equivalent".to_string(),
-                elapsed_ms,
-                steps: Some(path.steps.len()),
+                elapsed_ms: started.elapsed().as_millis(),
+                steps: None,
+                reason: Some("aligned concrete-shift witness".to_string()),
+                telemetry,
+            },
+            SseResult::NotEquivalent(reason) => WorkerCaseResult {
+                id: case.id.clone(),
+                actual_outcome: "not_equivalent".to_string(),
+                elapsed_ms: started.elapsed().as_millis(),
+                steps: None,
+                reason: Some(reason),
+                telemetry,
+            },
+            SseResult::Unknown => WorkerCaseResult {
+                id: case.id.clone(),
+                actual_outcome: "unknown".to_string(),
+                elapsed_ms: started.elapsed().as_millis(),
+                steps: None,
                 reason: None,
                 telemetry,
             },
-            Err(reason) => WorkerCaseResult {
+        }
+    } else {
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&a, &b, &config);
+        match result {
+            DynSseResult::Equivalent(path) => match validate_sse_path_dyn(&a, &b, &path) {
+                Ok(()) => WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "equivalent".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: Some(path.steps.len()),
+                    reason: None,
+                    telemetry,
+                },
+                Err(reason) => WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "panic".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: Some(path.steps.len()),
+                    reason: Some(format!("invalid equivalent path: {reason}")),
+                    telemetry,
+                },
+            },
+            DynSseResult::NotEquivalent(reason) => WorkerCaseResult {
                 id: case.id.clone(),
-                actual_outcome: "panic".to_string(),
-                elapsed_ms,
-                steps: Some(path.steps.len()),
-                reason: Some(format!("invalid equivalent path: {reason}")),
+                actual_outcome: "not_equivalent".to_string(),
+                elapsed_ms: started.elapsed().as_millis(),
+                steps: None,
+                reason: Some(reason),
                 telemetry,
             },
-        },
-        SseResult::EquivalentByConcreteShift(_witness) => WorkerCaseResult {
-            id: case.id.clone(),
-            actual_outcome: "equivalent".to_string(),
-            elapsed_ms,
-            steps: None,
-            reason: Some("aligned concrete-shift witness".to_string()),
-            telemetry,
-        },
-        SseResult::NotEquivalent(reason) => WorkerCaseResult {
-            id: case.id.clone(),
-            actual_outcome: "not_equivalent".to_string(),
-            elapsed_ms,
-            steps: None,
-            reason: Some(reason),
-            telemetry,
-        },
-        SseResult::Unknown => WorkerCaseResult {
-            id: case.id.clone(),
-            actual_outcome: "unknown".to_string(),
-            elapsed_ms,
-            steps: None,
-            reason: None,
-            telemetry,
-        },
+            DynSseResult::Unknown => WorkerCaseResult {
+                id: case.id.clone(),
+                actual_outcome: "unknown".to_string(),
+                elapsed_ms: started.elapsed().as_millis(),
+                steps: None,
+                reason: None,
+                telemetry,
+            },
+        }
     }
 }
 
-fn validate_sse_path(a: &SqMatrix<2>, b: &SqMatrix<2>, path: &SsePath<2>) -> Result<(), String> {
+fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
+    if rows.is_empty() {
+        return Err("matrix must have at least one row".to_string());
+    }
+    let dim = rows.len();
+    if rows.iter().any(|row| row.len() != dim) {
+        return Err("matrix must be square".to_string());
+    }
+    Ok(DynMatrix::new(
+        dim,
+        dim,
+        rows.iter().flat_map(|row| row.iter().copied()).collect(),
+    ))
+}
+
+fn validate_sse_path_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    path: &SsePath<2>,
+) -> Result<(), String> {
+    validate_sse_path_dyn(
+        &DynMatrix::from_sq(a),
+        &DynMatrix::from_sq(b),
+        &path.clone().into(),
+    )
+}
+
+fn validate_sse_path_dyn(a: &DynMatrix, b: &DynMatrix, path: &DynSsePath) -> Result<(), String> {
     if path.steps.is_empty() {
         if path.matrices.len() != 1 {
             return Err(format!(
-                "empty-step path should contain exactly one 2x2 matrix, got {}",
+                "empty-step path should contain exactly one square matrix, got {}",
                 path.matrices.len()
             ));
         }
@@ -312,17 +385,15 @@ fn validate_sse_path(a: &SqMatrix<2>, b: &SqMatrix<2>, path: &SsePath<2>) -> Res
         return Ok(());
     }
 
-    let a_dyn = DynMatrix::from_sq(a);
-    let b_dyn = DynMatrix::from_sq(b);
     let first = &path.steps[0];
     let first_uv = first.u.mul(&first.v);
-    if first_uv != a_dyn {
+    if first_uv != *a {
         return Err("first step does not start at A".to_string());
     }
 
     let last = path.steps.last().expect("non-empty path has a last step");
     let last_vu = last.v.mul(&last.u);
-    if last_vu != b_dyn {
+    if last_vu != *b {
         return Err("last step does not end at B".to_string());
     }
 
@@ -835,4 +906,40 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_case_handles_non_2x2_square_endpoints() {
+        let case = ResearchCase {
+            id: "dyn-3x3-identity".to_string(),
+            description: "identity 3x3 case".to_string(),
+            a: vec![vec![1, 0, 0], vec![0, 1, 0], vec![0, 0, 1]],
+            b: vec![vec![1, 0, 0], vec![0, 1, 0], vec![0, 0, 1]],
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 3,
+                max_entry: 1,
+                search_mode: SearchMode::Mixed,
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+        };
+
+        let result = run_case(&case);
+        assert_eq!(result.actual_outcome, "equivalent");
+        assert_eq!(result.steps, Some(0));
+    }
 }

@@ -11,11 +11,13 @@ use crate::graph_moves::enumerate_graph_move_successors;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
+    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
+    SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
     DynSsePath, DynSseResult, EsseStep, SearchConfig, SearchDirection, SearchLayerTelemetry,
-    SearchMode, SearchMoveFamilyTelemetry, SearchTelemetry, SsePath, SseResult,
+    SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult, SearchStage,
+    SearchTelemetry, SsePath, SseResult,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -117,6 +119,82 @@ pub fn search_sse_2x2_with_telemetry(
     search_sse_2x2_with_telemetry_and_observer(a, b, config, None)
 }
 
+fn search_request(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    stage: SearchStage,
+) -> SearchRequest {
+    SearchRequest {
+        source: a.clone(),
+        target: b.clone(),
+        config: config.clone(),
+        stage,
+    }
+}
+
+fn emit_started(
+    observer: &mut Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    a_canonical: &DynMatrix,
+    b_canonical: &DynMatrix,
+) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Started(SearchStartRecord {
+            request: request.clone(),
+            source_canonical: a_canonical.clone(),
+            target_canonical: b_canonical.clone(),
+        }));
+    }
+}
+
+fn emit_roots(observer: &mut Option<&mut dyn SearchObserver>, roots: &[SearchRootRecord]) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Roots(roots.to_vec()));
+    }
+}
+
+fn emit_layer(observer: &mut Option<&mut dyn SearchObserver>, records: &[SearchEdgeRecord]) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Layer(records.to_vec()));
+    }
+}
+
+fn emit_finished(
+    observer: &mut Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    result: SearchRunResult,
+    telemetry: &SearchTelemetry,
+) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_event(&SearchEvent::Finished(SearchFinishedRecord {
+            request: request.clone(),
+            result,
+            telemetry: telemetry.clone(),
+        }));
+    }
+}
+
+fn finish_search_2x2(
+    mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    result: SseResult<2>,
+    telemetry: SearchTelemetry,
+) -> (SseResult<2>, SearchTelemetry) {
+    emit_finished(&mut observer, request, result.clone().into(), &telemetry);
+    (result, telemetry)
+}
+
+fn finish_search_dyn(
+    mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    result: DynSseResult,
+    telemetry: SearchTelemetry,
+) -> (DynSseResult, SearchTelemetry) {
+    emit_finished(&mut observer, request, result.clone().into(), &telemetry);
+    (result, telemetry)
+}
+
 /// Search for a strong shift equivalence path between arbitrary square endpoints,
 /// returning aggregate telemetry.
 pub fn search_sse_with_telemetry_dyn(
@@ -124,10 +202,24 @@ pub fn search_sse_with_telemetry_dyn(
     b: &DynMatrix,
     config: &SearchConfig,
 ) -> (DynSseResult, SearchTelemetry) {
+    search_sse_with_telemetry_dyn_and_observer(a, b, config, None)
+}
+
+/// Search for a strong shift equivalence path between arbitrary square endpoints,
+/// returning aggregate telemetry and optionally recording events.
+pub fn search_sse_with_telemetry_dyn_and_observer(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    mut observer: Option<&mut dyn SearchObserver>,
+) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
+    let request = search_request(a, b, config, SearchStage::EndpointSearch);
 
     if !a.is_square() || !b.is_square() {
-        return (
+        return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::NotEquivalent("search expects square endpoint matrices".to_string()),
             telemetry,
         );
@@ -135,14 +227,18 @@ pub fn search_sse_with_telemetry_dyn(
 
     if trace_square(a) != trace_square(b) {
         telemetry.invariant_filtered = true;
-        return (
+        return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::NotEquivalent("trace(M^2) invariant mismatch".to_string()),
             telemetry,
         );
     }
     if a.trace() != b.trace() {
         telemetry.invariant_filtered = true;
-        return (
+        return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::NotEquivalent("trace invariant mismatch".to_string()),
             telemetry,
         );
@@ -152,7 +248,27 @@ pub fn search_sse_with_telemetry_dyn(
     let b_canon = b.canonical_perm();
 
     if a == b {
+        emit_started(&mut observer, &request, &a_canon, &b_canon);
+        emit_roots(
+            &mut observer,
+            &[
+                SearchRootRecord {
+                    direction: SearchDirection::Forward,
+                    canonical: a_canon.clone(),
+                    orig: a.clone(),
+                    depth: 0,
+                },
+                SearchRootRecord {
+                    direction: SearchDirection::Backward,
+                    canonical: b_canon.clone(),
+                    orig: b.clone(),
+                    depth: 0,
+                },
+            ],
+        );
         return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::Equivalent(DynSsePath {
                 matrices: vec![a.clone()],
                 steps: vec![],
@@ -166,7 +282,27 @@ pub fn search_sse_with_telemetry_dyn(
         if a != b {
             telemetry.permutation_shortcut = true;
         }
+        emit_started(&mut observer, &request, &a_canon, &b_canon);
+        emit_roots(
+            &mut observer,
+            &[
+                SearchRootRecord {
+                    direction: SearchDirection::Forward,
+                    canonical: a_canon.clone(),
+                    orig: a.clone(),
+                    depth: 0,
+                },
+                SearchRootRecord {
+                    direction: SearchDirection::Backward,
+                    canonical: b_canon.clone(),
+                    orig: b.clone(),
+                    depth: 0,
+                },
+            ],
+        );
         return finish_search_dyn(
+            observer,
+            &request,
             DynSseResult::Equivalent(DynSsePath {
                 matrices: vec![a.clone(), b.clone()],
                 steps: permutation_step_between(a, b).into_iter().collect(),
@@ -204,8 +340,27 @@ pub fn search_sse_with_telemetry_dyn(
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
 
+    emit_started(&mut observer, &request, &a_canon, &b_canon);
+    emit_roots(
+        &mut observer,
+        &[
+            SearchRootRecord {
+                direction: SearchDirection::Forward,
+                canonical: a_canon.clone(),
+                orig: a.clone(),
+                depth: 0,
+            },
+            SearchRootRecord {
+                direction: SearchDirection::Backward,
+                canonical: b_canon.clone(),
+                orig: b.clone(),
+                depth: 0,
+            },
+        ],
+    );
+
     if config.search_mode == SearchMode::GraphOnly {
-        return search_graph_only_dyn_with_telemetry(a, b, config);
+        return search_graph_only_dyn_with_telemetry(a, b, config, observer, &request);
     }
 
     for layer_index in 0..config.max_lag {
@@ -376,6 +531,8 @@ pub fn search_sse_with_telemetry_dyn(
                     move_family_telemetry: layer_move_family_telemetry,
                 });
                 return finish_search_dyn(
+                    observer,
+                    &request,
                     DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
                         a,
                         b,
@@ -461,7 +618,7 @@ pub fn search_sse_with_telemetry_dyn(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    finish_search_dyn(DynSseResult::Unknown, telemetry)
+    finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry)
 }
 
 /// Search for a strong shift equivalence path, optionally recording the visited graph.
@@ -476,10 +633,11 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     let b_dyn = DynMatrix::from_sq(b);
     let a_canon = a_dyn.canonical_perm();
     let b_canon = b_dyn.canonical_perm();
-
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_search_started(&a_dyn, &b_dyn, &a_canon, &b_canon, config);
-        let roots = [
+    let request = search_request(&a_dyn, &b_dyn, config, SearchStage::EndpointSearch);
+    emit_started(&mut observer, &request, &a_canon, &b_canon);
+    emit_roots(
+        &mut observer,
+        &[
             SearchRootRecord {
                 direction: SearchDirection::Forward,
                 canonical: a_canon.clone(),
@@ -492,14 +650,14 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 orig: b_dyn.clone(),
                 depth: 0,
             },
-        ];
-        observer.on_roots(&roots);
-    }
+        ],
+    );
 
     // Quick check: are they already equal?
     if a == b {
-        return finish_search(
+        return finish_search_2x2(
             observer,
+            &request,
             SseResult::Equivalent(SsePath {
                 matrices: vec![a.clone()],
                 steps: vec![],
@@ -511,7 +669,12 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     // Pre-filter with invariants.
     if let Some(reason) = check_invariants_2x2(a, b) {
         telemetry.invariant_filtered = true;
-        return finish_search(observer, SseResult::NotEquivalent(reason), telemetry);
+        return finish_search_2x2(
+            observer,
+            &request,
+            SseResult::NotEquivalent(reason),
+            telemetry,
+        );
     }
 
     // If a and b have the same canonical form, they are related by permutation
@@ -522,8 +685,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         let p = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
         let ap = DynMatrix::from_sq(a).mul(&p);
         let step = EsseStep { u: ap, v: p };
-        return finish_search(
+        return finish_search_2x2(
             observer,
+            &request,
             SseResult::Equivalent(SsePath {
                 matrices: vec![a.clone(), b.clone()],
                 steps: vec![step],
@@ -568,8 +732,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     if a_canon == b_canon {
         telemetry.canonical_shortcut = true;
         telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-        return finish_search(
+        return finish_search_2x2(
             observer,
+            &request,
             SseResult::Equivalent(reconstruct_bidirectional_path(
                 a,
                 b,
@@ -584,7 +749,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     }
 
     if config.search_mode == SearchMode::GraphOnly {
-        return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer);
+        return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer, &request);
     }
 
     for layer_index in 0..config.max_lag {
@@ -794,10 +959,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                         enqueued,
                     });
                 }
-                if let (Some(observer), Some(records)) =
-                    (observer.as_deref_mut(), layer_records.as_ref())
-                {
-                    observer.on_layer(records);
+                if let Some(records) = layer_records.as_ref() {
+                    emit_layer(&mut observer, records);
                 }
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
@@ -820,8 +983,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     total_visited_nodes: telemetry.total_visited_nodes,
                     move_family_telemetry: layer_move_family_telemetry,
                 });
-                return finish_search(
+                return finish_search_2x2(
                     observer,
+                    &request,
                     SseResult::Equivalent(reconstruct_bidirectional_path(
                         a,
                         b,
@@ -898,8 +1062,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
         );
-        if let (Some(observer), Some(records)) = (observer.as_deref_mut(), layer_records.as_ref()) {
-            observer.on_layer(records);
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
         }
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
@@ -945,15 +1109,16 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
         {
             telemetry.concrete_shift_shortcut = true;
-            return finish_search(
+            return finish_search_2x2(
                 observer,
+                &request,
                 SseResult::EquivalentByConcreteShift(witness),
                 telemetry,
             );
         }
     }
 
-    finish_search(observer, SseResult::Unknown, telemetry)
+    finish_search_2x2(observer, &request, SseResult::Unknown, telemetry)
 }
 
 fn is_essential_matrix_2x2(m: &SqMatrix<2>) -> bool {
@@ -988,6 +1153,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
     b: &SqMatrix<2>,
     config: &SearchConfig,
     mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
 ) -> (SseResult<2>, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
@@ -1226,14 +1392,13 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                                 enqueued: false,
                             });
                         }
-                        if let (Some(observer), Some(records)) =
-                            (observer.as_deref_mut(), layer_records.as_ref())
-                        {
-                            observer.on_layer(records);
+                        if let Some(records) = layer_records.as_ref() {
+                            emit_layer(&mut observer, records);
                         }
                         telemetry.layers.push(layer);
-                        return finish_search(
+                        return finish_search_2x2(
                             observer,
+                            request,
                             SseResult::Equivalent(reconstruct_bidirectional_path(
                                 a,
                                 b,
@@ -1290,8 +1455,8 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
             &mut telemetry.move_family_telemetry,
             &layer.move_family_telemetry,
         );
-        if let (Some(observer), Some(records)) = (observer.as_deref_mut(), layer_records.as_ref()) {
-            observer.on_layer(records);
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
         }
         telemetry.layers.push(layer);
 
@@ -1302,13 +1467,15 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    finish_search(observer, SseResult::Unknown, telemetry)
+    finish_search_2x2(observer, request, SseResult::Unknown, telemetry)
 }
 
 fn search_graph_only_dyn_with_telemetry(
     a: &DynMatrix,
     b: &DynMatrix,
     config: &SearchConfig,
+    observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
 ) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_canon = a.canonical_perm();
@@ -1501,6 +1668,8 @@ fn search_graph_only_dyn_with_telemetry(
                         );
                         telemetry.layers.push(layer);
                         return finish_search_dyn(
+                            observer,
+                            request,
                             DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
                                 a,
                                 b,
@@ -1549,7 +1718,7 @@ fn search_graph_only_dyn_with_telemetry(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
     }
 
-    finish_search_dyn(DynSseResult::Unknown, telemetry)
+    finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
 }
 
 fn choose_next_layer(
@@ -2029,24 +2198,6 @@ fn record_candidates_after_pruning_by_family(
     for expansion in expansions {
         move_family_telemetry_mut(telemetry, expansion.move_family).candidates_after_pruning += 1;
     }
-}
-
-fn finish_search(
-    mut observer: Option<&mut dyn SearchObserver>,
-    result: SseResult<2>,
-    telemetry: SearchTelemetry,
-) -> (SseResult<2>, SearchTelemetry) {
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_search_finished(&result, &telemetry);
-    }
-    (result, telemetry)
-}
-
-fn finish_search_dyn(
-    result: DynSseResult,
-    telemetry: SearchTelemetry,
-) -> (DynSseResult, SearchTelemetry) {
-    (result, telemetry)
 }
 
 fn visited_union_size(

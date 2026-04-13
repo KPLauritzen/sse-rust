@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use sse_core::matrix::{DynMatrix, SqMatrix};
 use sse_core::search::{
     search_sse_2x2_with_telemetry, search_sse_2x2_with_telemetry_and_observer,
-    search_sse_with_telemetry_dyn,
+    search_sse_with_telemetry_dyn, search_sse_with_telemetry_dyn_and_observer,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use sse_core::sqlite_graph::SqliteGraphRecorder;
@@ -60,9 +60,29 @@ fn run() -> Result<ExitCode, String> {
                 return Err("--visited-db is not supported on wasm32 targets".to_string());
             }
         }
-        return Err(
-            "--visited-db is currently only supported for 2x2 endpoint searches".to_string(),
-        );
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut recorder = SqliteGraphRecorder::new(path)?;
+            let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
+                &cli.a,
+                &cli.b,
+                &cli.config,
+                Some(&mut recorder),
+            );
+            if let Some(err) = recorder.error() {
+                return Err(format!("failed to persist visited graph to {path}: {err}"));
+            }
+            if cli.json {
+                print_json_dyn(&cli.a, &cli.b, &result, &telemetry, cli.telemetry);
+            } else {
+                print_pretty_dyn(&cli.a, &cli.b, &result, &telemetry, cli.telemetry);
+            }
+            return exit_code_dyn(result);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Err("--visited-db is not supported on wasm32 targets".to_string());
+        }
     }
 
     if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {

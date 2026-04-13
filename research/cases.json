@@ -24,6 +24,28 @@
       "tags": ["correctness", "smoke"]
     },
     {
+      "id": "self_sse_3x3",
+      "description": "Sanity check: a 3x3 identity pair should also run through the normal harness flow.",
+      "a": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      "b": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 3,
+        "max_entry": 1
+      },
+      "timeout_ms": 200,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 100,
+        "not_equivalent": -1000,
+        "unknown": -1000,
+        "timeout": -2000,
+        "panic": -2000
+      },
+      "tags": ["correctness", "smoke", "non-2x2"]
+    },
+    {
       "id": "elementary_pair",
       "description": "Known one-step SSE example from the search tests.",
       "a": [[2, 1], [1, 1]],
