@@ -209,6 +209,12 @@ files:
 sandbox:
   enabled: true
   image: my-sandbox
+  host_commands:
+    - rg
+    - uv
+    - cargo
+    - tmux
+    - bd
   extra_mounts:
     - host_path: .beads
       writable: true
