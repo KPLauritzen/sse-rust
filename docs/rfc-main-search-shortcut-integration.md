@@ -56,7 +56,9 @@ creates two problems:
 There is also a deeper design issue underneath the current split:
 
 - the dynamic search path already accepts arbitrary square endpoints,
-- but persistence and observer integration are still effectively centered on
+- but solver behavior is still materially split between the `2x2` and dynamic
+  paths,
+- persistence and observer integration are still effectively centered on
   `2x2` endpoint search,
 - and some of the most productive refinement logic is currently tailored to the
   Brix-Ruiz `k = 3` case rather than written as generic guided search
@@ -72,8 +74,11 @@ The current architecture is too specialized in the wrong places.
 ### 1. The Solver Is Not Yet Cleanly Generalized
 
 The project wants a main solver that works for arbitrary square matrices, but
-the current orchestration and persistence surface still has `2x2`-specific
-seams.
+the current solver surface still has `2x2`-specific seams.
+
+Those seams are not only about persistence.
+They also include richer `2x2` invariant filtering, observer support, and
+proof shortcuts that do not yet have dynamic-path equivalents.
 
 That is tolerable for local progress on the current hard examples, but it is
 the wrong direction for the architecture.
@@ -115,6 +120,9 @@ has.
 
 - Make the main solver endpoint-agnostic for square matrices, with the current
   practical target being dimensions up to `4`.
+- Make the solver orchestration boundary endpoint-agnostic even where some
+  proof shortcuts remain intentionally `2x2`-specific for a while, provided
+  those special cases are explicit.
 - Keep `search` as the canonical solver interface.
 - Integrate guide-aware refinement and shortcutting as generic solver stages,
   not family-specific sidecars.
@@ -180,6 +188,12 @@ architecture.
 Before integrating more guided search logic, make the orchestration boundary
 generic for square endpoints.
 
+This phase should explicitly reconcile the current semantic split between the
+`2x2` and dynamic solver paths.
+The project should decide which behaviors become generic, which remain
+intentionally `2x2`-specialized for now, and how that distinction is expressed
+in the API, telemetry, and CLI.
+
 The solver should accept a request that can describe:
 
 - arbitrary square endpoints,
@@ -190,6 +204,10 @@ The solver should accept a request that can describe:
 
 This is the architectural prerequisite for integrating refinement in a way that
 does not keep inheriting `2x2` assumptions.
+
+This request surface should be paired with a correspondingly generic result and
+observer boundary, so dynamic endpoint search can participate in the same
+telemetry and persistence pipeline rather than remaining a parallel path.
 
 ### 2. Separate Three Layers Explicitly
 
@@ -267,6 +285,26 @@ benchmark family.
 The important point is not to claim that persistence is already unified.
 It is to make unification an explicit design goal.
 
+### 4a. Define Guide Artifacts Before Wiring Them Into The CLI
+
+The project should not introduce `--stage`, `--guide-db`, or equivalent solver
+flags until guide artifacts are defined in generic terms.
+
+At minimum, a reusable guide artifact should describe:
+
+- the endpoint identity it applies to,
+- the artifact kind, such as full path, segment, waypoint set, or proposal
+  batch,
+- the matrix payload or references needed to replay it,
+- provenance, such as literature, seeded fixture, prior solver run, or manual
+  import,
+- validation status,
+- compatibility constraints for stages that consume it,
+- and quality metadata such as lag, cost, or score.
+
+Guide artifacts should be generic solver inputs, not family labels wrapped in a
+database row.
+
 ### 5. Keep Benchmark Families Out Of Core Search Logic
 
 The Brix-Ruiz family should remain central in the harness and regression
@@ -297,6 +335,12 @@ The next harness should support:
 - result reuse across runs,
 - comparison across commits or configurations,
 - and scoring that tracks both correctness outcome and search quality.
+
+The minimum viable version of that harness support is a prerequisite for solver
+generalization work, not a later convenience.
+If the project cannot express non-`2x2` cases in the corpus and run them
+through the normal comparison loop, then endpoint-agnostic solver changes will
+not have an adequate regression surface.
 
 For current goals, "search quality" should include at least:
 
@@ -339,6 +383,10 @@ research-harness run family/brix-ruiz-k3.json \
 
 Again, the exact interface can change.
 The architectural boundary is the key point.
+
+However, the CLI should only expose guide-oriented flags once the underlying
+guide artifact model is generic enough that those flags do not silently mean
+"Brix-Ruiz sidecar inputs, but under a new name".
 
 ## Architecture Sketch
 
@@ -451,38 +499,64 @@ Mitigation:
 - treat harness improvements as part of the main rollout,
 - and make scoring and run comparison first-class deliverables.
 
+### 5. Generic Interfaces Become Vague Before The First Real Stage Exists
+
+Risk:
+the project could spend time designing abstract request, artifact, and stage
+types that are too detached from the first guided stage that actually needs to
+ship.
+
+Mitigation:
+
+- design around one concrete guided-stage extraction target,
+- keep the first generic artifact schema narrow and extensible,
+- and require each new abstraction to be exercised by a real non-sidecar
+  integration step.
+
 ## Rollout Plan
 
 ### Phase 1: Generalize The Boundaries
 
-- define generic request, stage, and persistence interfaces for square
-  endpoints,
+- audit the semantic differences between the `2x2` and dynamic solver paths,
+- define generic request, result, observer, stage, and persistence interfaces
+  for square endpoints,
+- decide which behaviors remain intentionally `2x2`-specific for now and mark
+  them explicitly,
 - keep existing `mixed` and `graph-only` endpoint search behavior intact,
 - separate `SearchMode` from stage orchestration terminology,
 - and do not change default solver behavior yet.
 
-### Phase 2: Strengthen The Harness
+### Phase 2: Minimum Viable Harness Generalization
+
+- extend the case corpus and runner so non-`2x2` square endpoints can be
+  expressed and executed in the normal harness flow,
+- add enough result modeling to compare generalized solver runs honestly,
+- preserve existing `2x2` scoring while expanding the regression surface,
+- and keep the harness capable of A/B comparison across configurations.
+
+### Phase 3: Strengthen The Harness
 
 - add campaign scheduling concepts to the harness,
 - add scoring for best lag found, not just terminal outcome,
 - add reuse of persisted guides/results across runs,
 - and make it easy to compare strategies across the benchmark corpus.
 
-### Phase 3: Integrate One Guided Stage Generically
+### Phase 4: Integrate One Guided Stage Generically
 
+- define the first generic guide artifact format,
 - extract one existing guide-aware refinement path into a generic stage,
 - ensure it works for arbitrary square endpoints within current practical
   bounds,
 - and expose it as an explicit non-default solver stage.
 
-### Phase 4: Expand The Generic Experiment Surface
+### Phase 5: Expand The Generic Experiment Surface
 
 - promote benchmark families such as Brix-Ruiz into harness fixtures and seeded
   artifacts,
 - add broader non-`2x2` regression cases,
 - and compare stage combinations under the improved harness.
 
-### Phase 5: Demote Overlapping Sidecars
+### Phase 6: Demote Overlapping Sidecars
 
 - retire or demote research binaries whose logic is now covered by generic
   solver stages plus harness workflows,
