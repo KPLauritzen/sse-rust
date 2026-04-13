@@ -208,3 +208,24 @@
 
 - `guided-segment-timeout` Added generic per-segment timeout support to guided refinement.
   Kept. `GuidedRefinementConfig` and the `search` CLI now expose an optional `segment_timeout_secs` / `--guided-segment-timeout`, and the generic guided-refinement segment search enforces it with 256-node frontier chunk checks so one hard shortcut attempt no longer monopolizes a run.
+
+- `profile-mixed-brix-k3` Added gated `pprof` / `dhat` hooks to the `search` CLI and profiled the mixed `brix_ruiz_k3` endpoint run directly.
+  `pprof` concentrated on `visit_all_factorisations_with_family`, especially `enumerate_sq3_from_row0` and `solve_nonneg_2x3`, while reduced-lag `dhat` still allocated about `200 MB` across `2.58M` blocks by layer 3, so the next wins should come from cutting factorisation-side allocation churn rather than graph heuristics.
+
+- `2026-04-13-1455-solver-buffer-reuse` Reused `solve_nonneg_2x3` output buffers inside the hot `3x3` square-factorisation loop instead of allocating fresh vectors every call.
+  Kept. The second saved harness rerun dropped total elapsed from `10858 ms` to `10593 ms` with identical scores, while the mixed `brix_ruiz_k3`, `brix_ruiz_k3_wide_probe`, and `brix_ruiz_k4_probe` cases all got faster.
+
+- `2026-04-13-1516-solver-buffer-reuse-level2` Tried the same buffer-reuse pattern for `solve_nonneg_3x3` and the row-2 solution loop inside `enumerate_sq3_from_row0`.
+  Failed. The saved run regressed total elapsed from `10593 ms` to `10886 ms`, and the mixed `brix_ruiz_k3`, `wide_probe`, and `k4_probe` cases all slowed back down, so the extra bookkeeping did not pay for itself.
+
+- `2026-04-13-1530-canonical-self-fastpath` Returned `self.clone()` from the `canonical_perm` fast paths when the matrix was already canonical.
+  Failed. The saved run regressed total elapsed from `10593 ms` to `10706 ms`; `brix_ruiz_k4` improved slightly, but the harder mixed `k=3` probes and the graph-only probe all got slower overall.
+
+- `2026-04-13-profile-square-sources` Added `profile_square_factorisation_sources` and `profile_sq3_breakdown` to inspect which `3x3` sources drive `square_factorisation_3x3` traffic and where the local enumerator spends its effort.
+  Kept as profiling support. The mixed `brix_ruiz_k3` hard case showed `square_factorisation_3x3` dominating with about `320k` generated candidates but only `~2.7k` post-pruning survivors, while the source-bucket breakdown showed duplicate-row and duplicate-column `3x3` states dominating raw callback volume and the per-source enumerator breakdown showed most row-1 candidates die on the very first `2x3` column solve.
+
+- `2026-04-13-1455-exact-vu-dedup` Deduplicated exact `VU` factorisation outputs before canonicalization in the mixed frontier expander.
+  Failed. Although the profiling helpers showed large raw-to-unique collapse for some hot `3x3` sources, the saved harness rerun stayed inside noise on the mixed probes and landed at `10624 ms` total, so the extra hash checks did not buy a real win.
+
+- `2026-04-13-1505-sq3-symmetry-break` Tried symmetry breaking in the square `3x3` enumerator for sources with equal rows or columns.
+  Failed. It reduced raw `square_factorisation_3x3` counts on the hard mixed probes, but runtime regressed badly (`12411 ms` total, with all three mixed telemetry-focus probes slower), so the added ordering checks were not worth it.

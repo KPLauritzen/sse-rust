@@ -205,6 +205,18 @@ fn valid_3x2_u_rows_for_target_row(target_row: [u32; 3], max_entry: u32) -> Vec<
 /// compute the 1D null space, find a particular solution, then enumerate
 /// the free parameter t such that x0 + t*n has all entries in [0, max_entry].
 pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<[u32; 3]> {
+    let mut results = Vec::new();
+    solve_nonneg_2x3_into(u, b, max_entry, &mut results);
+    results
+}
+
+fn solve_nonneg_2x3_into(
+    u: &[[i64; 3]; 2],
+    b: &[i64; 2],
+    max_entry: u32,
+    results: &mut Vec<[u32; 3]>,
+) {
+    results.clear();
     let me = max_entry as i64;
 
     // Compute 2×2 minors: d_ij = u[0][i]*u[1][j] - u[0][j]*u[1][i]
@@ -224,7 +236,7 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
     } else {
         // Rank < 2, no solutions in general (unless b is in the column space,
         // but we skip this degenerate case).
-        return vec![];
+        return;
     };
 
     // Null vector: for pivot columns (i, j) and free column k,
@@ -249,7 +261,7 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
     let xp1_num = b[1] * u[0][p0] - b[0] * u[1][p0];
 
     if xp0_num % det != 0 || xp1_num % det != 0 {
-        return vec![];
+        return;
     }
 
     let mut x0 = [0i64; 3];
@@ -267,9 +279,9 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
     if g == 0 {
         // Null vector is zero — unique solution, just check bounds.
         if x0.iter().all(|&v| v >= 0 && v <= me) {
-            return vec![[x0[0] as u32, x0[1] as u32, x0[2] as u32]];
+            results.push([x0[0] as u32, x0[1] as u32, x0[2] as u32]);
         }
-        return vec![];
+        return;
     }
     let n = [null[0] / g as i64, null[1] / g as i64, null[2] / g as i64];
 
@@ -281,7 +293,7 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
         if n[i] == 0 {
             // x0[i] must be in [0, me] on its own.
             if x0[i] < 0 || x0[i] > me {
-                return vec![];
+                return;
             }
         } else if n[i] > 0 {
             // t >= ceil(-x0[i] / n[i]) and t <= floor((me - x0[i]) / n[i])
@@ -298,9 +310,8 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
         }
     }
 
-    let mut results = Vec::new();
     if t_min > t_max {
-        return results;
+        return;
     }
 
     for t in t_min..=t_max {
@@ -311,7 +322,6 @@ pub fn solve_nonneg_2x3(u: &[[i64; 3]; 2], b: &[i64; 2], max_entry: u32) -> Vec<
         ];
         results.push(x);
     }
-    results
 }
 
 /// Solve U·x = b where U is 3×2 (given as rows), b is 3-vector.
@@ -2205,6 +2215,9 @@ fn enumerate_sq3_from_row0(
     let [u00, u01, u02] = row0;
     let me = max_entry;
     let mut results = Vec::new();
+    let mut v_col0 = Vec::new();
+    let mut v_col1 = Vec::new();
+    let mut v_col2 = Vec::new();
 
     for u10 in 0..=me {
         for u11 in 0..=me {
@@ -2233,17 +2246,32 @@ fn enumerate_sq3_from_row0(
                 ];
 
                 // Solve for each column of V: u_top · v_j = [C[0,j], C[1,j]].
-                let v_col0 = solve_nonneg_2x3(&u_top, &[c_cols[0][0], c_cols[0][1]], max_entry);
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[0][0], c_cols[0][1]],
+                    max_entry,
+                    &mut v_col0,
+                );
                 if v_col0.is_empty() {
                     continue;
                 }
 
-                let v_col1 = solve_nonneg_2x3(&u_top, &[c_cols[1][0], c_cols[1][1]], max_entry);
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[1][0], c_cols[1][1]],
+                    max_entry,
+                    &mut v_col1,
+                );
                 if v_col1.is_empty() {
                     continue;
                 }
 
-                let v_col2 = solve_nonneg_2x3(&u_top, &[c_cols[2][0], c_cols[2][1]], max_entry);
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[2][0], c_cols[2][1]],
+                    max_entry,
+                    &mut v_col2,
+                );
                 if v_col2.is_empty() {
                     continue;
                 }
@@ -2265,7 +2293,6 @@ fn enumerate_sq3_from_row0(
                                 if u20 + u21 + u22 < min_row_sum[2] {
                                     continue;
                                 }
-
                                 let u_mat = DynMatrix::new(
                                     3,
                                     3,
@@ -2289,6 +2316,199 @@ fn enumerate_sq3_from_row0(
     }
 
     results
+}
+
+#[cfg(feature = "research-tools")]
+#[derive(Clone, Debug, Default)]
+pub struct Square3x3FactorisationBreakdown {
+    pub valid_row0_candidates: usize,
+    pub row1_candidates_total: usize,
+    pub row1_pruned_min_sum: usize,
+    pub row1_pruned_gcd: usize,
+    pub row1_pruned_col0_empty: usize,
+    pub row1_pruned_col1_empty: usize,
+    pub row1_pruned_col2_empty: usize,
+    pub row1_survived_all_cols: usize,
+    pub v_column_combinations: usize,
+    pub row2_solution_candidates: usize,
+    pub row2_pruned_min_sum: usize,
+    pub emitted_factorisations: usize,
+}
+
+#[cfg(feature = "research-tools")]
+pub fn profile_square_factorisations_3x3_breakdown(
+    c: &DynMatrix,
+    max_entry: u32,
+) -> Square3x3FactorisationBreakdown {
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let me = max_entry;
+    let c_cols: [[i64; 3]; 3] = [
+        [c.get(0, 0) as i64, c.get(1, 0) as i64, c.get(2, 0) as i64],
+        [c.get(0, 1) as i64, c.get(1, 1) as i64, c.get(2, 1) as i64],
+        [c.get(0, 2) as i64, c.get(1, 2) as i64, c.get(2, 2) as i64],
+    ];
+    let c_row2 = [c.get(2, 0) as i64, c.get(2, 1) as i64, c.get(2, 2) as i64];
+    let min_row_sum: [u32; 3] = [
+        {
+            let mx = c.get(0, 0).max(c.get(0, 1)).max(c.get(0, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+        {
+            let mx = c.get(1, 0).max(c.get(1, 1)).max(c.get(1, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+        {
+            let mx = c.get(2, 0).max(c.get(2, 1)).max(c.get(2, 2)) as u64;
+            ((mx + me as u64 - 1) / me as u64) as u32
+        },
+    ];
+
+    let mut breakdown = Square3x3FactorisationBreakdown::default();
+    let mut valid_row0s = Vec::new();
+    for u00 in 0..=me {
+        for u01 in 0..=me {
+            for u02 in 0..=me {
+                if u00 + u01 + u02 < min_row_sum[0] {
+                    continue;
+                }
+                let g = gcd3(u00 as u64, u01 as u64, u02 as u64);
+                if g > 1 {
+                    let mut skip = false;
+                    for col in &c_cols {
+                        if col[0] as u64 % g != 0 {
+                            skip = true;
+                            break;
+                        }
+                    }
+                    if skip {
+                        continue;
+                    }
+                }
+                valid_row0s.push([u00, u01, u02]);
+            }
+        }
+    }
+    breakdown.valid_row0_candidates = valid_row0s.len();
+
+    for row0 in valid_row0s {
+        profile_sq3_from_row0(
+            row0,
+            &c_cols,
+            &c_row2,
+            max_entry,
+            &min_row_sum,
+            &mut breakdown,
+        );
+    }
+
+    breakdown
+}
+
+#[cfg(feature = "research-tools")]
+fn profile_sq3_from_row0(
+    row0: [u32; 3],
+    c_cols: &[[i64; 3]; 3],
+    c_row2: &[i64; 3],
+    max_entry: u32,
+    min_row_sum: &[u32; 3],
+    breakdown: &mut Square3x3FactorisationBreakdown,
+) {
+    let [u00, u01, u02] = row0;
+    let me = max_entry;
+    let mut v_col0 = Vec::new();
+    let mut v_col1 = Vec::new();
+    let mut v_col2 = Vec::new();
+
+    for u10 in 0..=me {
+        for u11 in 0..=me {
+            for u12 in 0..=me {
+                breakdown.row1_candidates_total += 1;
+                if u10 + u11 + u12 < min_row_sum[1] {
+                    breakdown.row1_pruned_min_sum += 1;
+                    continue;
+                }
+
+                let g1 = gcd3(u10 as u64, u11 as u64, u12 as u64);
+                if g1 > 1 {
+                    let mut skip = false;
+                    for col in &c_cols[..] {
+                        if col[1] as u64 % g1 != 0 {
+                            skip = true;
+                            break;
+                        }
+                    }
+                    if skip {
+                        breakdown.row1_pruned_gcd += 1;
+                        continue;
+                    }
+                }
+
+                let u_top: [[i64; 3]; 2] = [
+                    [u00 as i64, u01 as i64, u02 as i64],
+                    [u10 as i64, u11 as i64, u12 as i64],
+                ];
+
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[0][0], c_cols[0][1]],
+                    max_entry,
+                    &mut v_col0,
+                );
+                if v_col0.is_empty() {
+                    breakdown.row1_pruned_col0_empty += 1;
+                    continue;
+                }
+
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[1][0], c_cols[1][1]],
+                    max_entry,
+                    &mut v_col1,
+                );
+                if v_col1.is_empty() {
+                    breakdown.row1_pruned_col1_empty += 1;
+                    continue;
+                }
+
+                solve_nonneg_2x3_into(
+                    &u_top,
+                    &[c_cols[2][0], c_cols[2][1]],
+                    max_entry,
+                    &mut v_col2,
+                );
+                if v_col2.is_empty() {
+                    breakdown.row1_pruned_col2_empty += 1;
+                    continue;
+                }
+
+                breakdown.row1_survived_all_cols += 1;
+                breakdown.v_column_combinations += v_col0.len() * v_col1.len() * v_col2.len();
+
+                for vc0 in &v_col0 {
+                    for vc1 in &v_col1 {
+                        for vc2 in &v_col2 {
+                            let vt: [[i64; 3]; 3] = [
+                                [vc0[0] as i64, vc0[1] as i64, vc0[2] as i64],
+                                [vc1[0] as i64, vc1[1] as i64, vc1[2] as i64],
+                                [vc2[0] as i64, vc2[1] as i64, vc2[2] as i64],
+                            ];
+                            let row2_solutions = solve_nonneg_3x3(&vt, c_row2, max_entry);
+                            breakdown.row2_solution_candidates += row2_solutions.len();
+                            for [u20, u21, u22] in row2_solutions {
+                                if u20 + u21 + u22 < min_row_sum[2] {
+                                    breakdown.row2_pruned_min_sum += 1;
+                                    continue;
+                                }
+                                breakdown.emitted_factorisations += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Unified factorisation dispatcher for any square matrix (given as DynMatrix).
