@@ -139,6 +139,8 @@ panes:
 #   - "<global>"
 #   - cargo test
 #   - cargo clippy -- -D warnings
+pre_merge:
+  - just check-k3-graph-merge
 
 # Commands to run before worktree removal (during merge or remove).
 # Useful for backing up gitignored files before cleanup.

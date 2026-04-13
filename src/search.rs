@@ -2210,7 +2210,6 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
-        let mut same_future_past_seen = HashSet::new();
 
         for (current_canon, successors) in computed {
             let current_orig = orig
@@ -2263,17 +2262,6 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                         });
                     }
                     continue;
-                }
-
-                if current_frontier_len >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD
-                    && successor.matrix.rows >= 3
-                {
-                    if let Some(signature) = same_future_past_signature(&successor.matrix) {
-                        if !same_future_past_seen.insert(signature) {
-                            layer.same_future_past_collisions += 1;
-                            continue;
-                        }
-                    }
                 }
 
                 parent.insert(
@@ -2516,7 +2504,6 @@ fn search_graph_only_dyn_with_telemetry(
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
-        let mut same_future_past_seen = HashSet::new();
         let mut timed_out = false;
 
         for chunk in current_frontier.chunks(frontier_chunk_size(current_frontier_len, deadline)) {
@@ -2570,17 +2557,6 @@ fn search_graph_only_dyn_with_telemetry(
                     if parent.contains_key(&successor.matrix) {
                         layer.collisions_with_seen += 1;
                         continue;
-                    }
-
-                    if current_frontier_len >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD
-                        && successor.matrix.rows >= 3
-                    {
-                        if let Some(signature) = same_future_past_signature(&successor.matrix) {
-                            if !same_future_past_seen.insert(signature) {
-                                layer.same_future_past_collisions += 1;
-                                continue;
-                            }
-                        }
                     }
 
                     parent.insert(

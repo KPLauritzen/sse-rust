@@ -1,6 +1,10 @@
 test:
     cargo test
 
+check-k3-graph-merge:
+    cargo build --release --bin search
+    timeout 15s target/release/search 1,3,2,1 1,6,1,1 --max-lag 22 --max-intermediate-dim 5 --max-entry 6 --search-mode graph-only --json | grep -q '"outcome": "equivalent"'
+
 bench:
     cargo bench
 

@@ -664,7 +664,7 @@
         "max_entry": 6,
         "search_mode": "graph-only"
       },
-      "timeout_ms": 60000,
+      "timeout_ms": 15000,
       "allowed_outcomes": ["equivalent"],
       "target_outcome": "equivalent",
       "points": {
