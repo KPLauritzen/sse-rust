@@ -124,6 +124,59 @@ Research notes:
 - If a reading session or experiment needs more room, add a note under
   `research/notes/` and reference the relevant commit hash or run stamp.
 
+## Profiling
+
+The sandbox has no system profiling tools (`perf`, `valgrind`, etc.).
+Two pure-Rust profilers are available as dev-dependencies instead.
+
+### CPU profiling with `pprof`
+
+Add to a binary's `main()`:
+
+```rust
+let guard = pprof::ProfilerGuardBuilder::default()
+    .frequency(1000)
+    .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+    .build()
+    .unwrap();
+
+// ... your code ...
+
+if let Ok(report) = guard.report().build() {
+    // Print a text summary of the top frames to stderr.
+    eprintln!("--- CPU profile ---");
+    eprintln!("{:?}", report);
+}
+```
+
+`report`'s `Debug` output prints a text-based stack tree with sample counts,
+readable directly in the terminal. No browser needed.
+
+### Heap profiling with `dhat`
+
+Add to a binary crate (not lib):
+
+```rust
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+fn main() {
+    let _profiler = dhat::Profiler::new_heap();
+    // ... your code ...
+}
+```
+
+`dhat` prints a text summary to stderr on exit with total allocations,
+peak heap usage, and the hottest allocation sites with backtraces.
+The summary is directly readable in the terminal — no viewer needed.
+It also writes `dhat-heap.json` for optional detailed analysis.
+
+### Guidelines
+
+- Profile on release builds (`--release`) for realistic results.
+- Remove or gate profiler instrumentation behind `#[cfg(feature = "...")]` before committing to the main experiment loop — the `#[global_allocator]` override in particular affects all allocations.
+- Both crates are in `[dev-dependencies]` so they do not affect the library or wasm builds.
+
 ## Known Constraints
 
 - `brix_ruiz_k3` is a known-SSE target and currently hard for brute-force search.

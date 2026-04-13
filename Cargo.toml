@@ -23,6 +23,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+dhat = "0.3"
+pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
 
 [[bench]]
 name = "search"
