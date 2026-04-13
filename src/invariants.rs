@@ -1,15 +1,4 @@
-use crate::matrix::{DynMatrix, SqMatrix};
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AbelianGroupSignature {
-    free_rank: usize,
-    torsion: Vec<i64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MidSearchInvariantTarget2x2 {
-    bowen_franks: AbelianGroupSignature,
-}
+use crate::matrix::SqMatrix;
 
 /// Check whether two 2x2 matrices pass all known SSE invariants.
 /// Returns `None` if all invariants match, `Some(reason)` on first mismatch.
@@ -156,7 +145,31 @@ fn smith_normal_form_2x2_i64(m: &[[i64; 2]; 2]) -> (i64, i64) {
 /// Check generalized Bowen-Franks groups Z^2 / p(A)Z^2 for a battery of
 /// polynomials from Eilers-Kiming (2008), Section 3.
 fn check_generalized_bowen_franks_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
-    for (name, coeffs) in generalized_bowen_franks_polynomials() {
+    // Polynomials from Eilers-Kiming p.7, represented as coefficient vectors
+    // [c0, c1, c2, ...] for c0 + c1*x + c2*x^2 + ...
+    let polynomials: &[(&str, &[i64])] = &[
+        // x - 1 is already checked as standard Bowen-Franks, skip
+        ("x+1", &[1, 1]),
+        ("2x-1", &[-1, 2]),
+        ("2x+1", &[1, 2]),
+        ("x^2-x-1", &[-1, -1, 1]),
+        ("x^2-x+1", &[1, -1, 1]),
+        ("x^2+x-1", &[-1, 1, 1]),
+        ("x^2+x+1", &[1, 1, 1]),
+        ("x^2-2x+1", &[1, -2, 1]),
+        ("x^2+2x+1", &[1, 2, 1]),
+        ("x^2-1", &[-1, 0, 1]),
+        ("x^2+1", &[1, 0, 1]),
+        ("2x^2-x-1", &[-1, -1, 2]),
+        ("2x^2+x-1", &[-1, 1, 2]),
+        ("2x^2-3x+1", &[1, -3, 2]),
+        ("2x^2+3x+1", &[1, 3, 2]),
+        ("4x^2-4x+1", &[1, -4, 4]),
+        ("4x^2+4x+1", &[1, 4, 4]),
+        ("4x^2-1", &[-1, 0, 4]),
+    ];
+
+    for (name, coeffs) in polynomials {
         let pa = eval_poly_at_matrix_2x2(coeffs, a);
         let pb = eval_poly_at_matrix_2x2(coeffs, b);
         let snf_a = smith_normal_form_2x2_i64(&pa);
@@ -196,209 +209,9 @@ fn check_eilers_kiming_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
     }
 }
 
-fn generalized_bowen_franks_polynomials() -> &'static [(&'static str, &'static [i64])] {
-    // Polynomials from Eilers-Kiming p.7, represented as coefficient vectors
-    // [c0, c1, c2, ...] for c0 + c1*x + c2*x^2 + ...
-    &[
-        // x - 1 is already checked as standard Bowen-Franks, skip
-        ("x+1", &[1, 1]),
-        ("2x-1", &[-1, 2]),
-        ("2x+1", &[1, 2]),
-        ("x^2-x-1", &[-1, -1, 1]),
-        ("x^2-x+1", &[1, -1, 1]),
-        ("x^2+x-1", &[-1, 1, 1]),
-        ("x^2+x+1", &[1, 1, 1]),
-        ("x^2-2x+1", &[1, -2, 1]),
-        ("x^2+2x+1", &[1, 2, 1]),
-        ("x^2-1", &[-1, 0, 1]),
-        ("x^2+1", &[1, 0, 1]),
-        ("2x^2-x-1", &[-1, -1, 2]),
-        ("2x^2+x-1", &[-1, 1, 2]),
-        ("2x^2-3x+1", &[1, -3, 2]),
-        ("2x^2+3x+1", &[1, 3, 2]),
-        ("4x^2-4x+1", &[1, -4, 4]),
-        ("4x^2+4x+1", &[1, 4, 4]),
-        ("4x^2-1", &[-1, 0, 4]),
-    ]
-}
-
-pub fn precompute_mid_search_invariants_2x2(a: &SqMatrix<2>) -> MidSearchInvariantTarget2x2 {
-    let dyn_a = DynMatrix::from_sq(a);
-    let bowen_franks = cokernel_signature_for_matrix_polynomial(&dyn_a, &[-1, 1])
-        .expect("2x2 source should support mid-search Bowen-Franks pruning");
-    MidSearchInvariantTarget2x2 { bowen_franks }
-}
-
-pub fn matches_mid_search_invariants_2x2(
-    candidate: &DynMatrix,
-    target: &MidSearchInvariantTarget2x2,
-) -> bool {
-    let Some(bowen_franks) = cokernel_signature_for_matrix_polynomial(candidate, &[-1, 1]) else {
-        return true;
-    };
-    bowen_franks == target.bowen_franks
-}
-
-fn cokernel_signature_for_matrix_polynomial(
-    a: &DynMatrix,
-    coeffs: &[i64],
-) -> Option<AbelianGroupSignature> {
-    let poly = eval_poly_at_matrix_dyn_i64(coeffs, a)?;
-    smith_normal_form_signature_square_i64(&poly, a.rows)
-}
-
-fn eval_poly_at_matrix_dyn_i64(coeffs: &[i64], a: &DynMatrix) -> Option<Vec<i64>> {
-    if !a.is_square() || a.rows == 0 || a.rows > 3 {
-        return None;
-    }
-
-    let n = a.rows;
-    let a_i64 = a.data.iter().map(|&value| value as i64).collect::<Vec<_>>();
-    let mut result = vec![0i64; n * n];
-    let mut pow = identity_flat_i64(n);
-
-    for &coeff in coeffs {
-        add_scaled_flat_i64_checked(&mut result, &pow, coeff)?;
-        pow = mul_square_flat_i64_checked(&pow, &a_i64, n)?;
-    }
-
-    Some(result)
-}
-
-fn identity_flat_i64(n: usize) -> Vec<i64> {
-    let mut data = vec![0i64; n * n];
-    for i in 0..n {
-        data[i * n + i] = 1;
-    }
-    data
-}
-
-fn add_scaled_flat_i64_checked(acc: &mut [i64], rhs: &[i64], scale: i64) -> Option<()> {
-    for (lhs, &value) in acc.iter_mut().zip(rhs.iter()) {
-        *lhs = lhs.checked_add(scale.checked_mul(value)?)?;
-    }
-    Some(())
-}
-
-fn mul_square_flat_i64_checked(lhs: &[i64], rhs: &[i64], n: usize) -> Option<Vec<i64>> {
-    let mut result = vec![0i64; n * n];
-    for i in 0..n {
-        for k in 0..n {
-            let lhs_ik = lhs[i * n + k];
-            for j in 0..n {
-                let idx = i * n + j;
-                result[idx] = result[idx].checked_add(lhs_ik.checked_mul(rhs[k * n + j])?)?;
-            }
-        }
-    }
-    Some(result)
-}
-
-fn smith_normal_form_signature_square_i64(
-    matrix: &[i64],
-    n: usize,
-) -> Option<AbelianGroupSignature> {
-    if n == 0 || n > 3 || matrix.len() != n * n {
-        return None;
-    }
-
-    let delta1 = matrix
-        .iter()
-        .fold(0u64, |acc, &value| gcd(acc, value.unsigned_abs()));
-    if delta1 == 0 {
-        return Some(AbelianGroupSignature {
-            free_rank: n,
-            torsion: Vec::new(),
-        });
-    }
-
-    let delta2 = if n >= 2 {
-        gcd_of_2x2_minors(matrix, n)
-    } else {
-        0
-    };
-    let delta_full = determinant_flat_i64(matrix, n)?.unsigned_abs();
-    let rank = if n == 1 {
-        1
-    } else if delta2 == 0 {
-        1
-    } else if n == 2 || delta_full == 0 {
-        2
-    } else {
-        3
-    };
-
-    let mut torsion = Vec::new();
-    let d1 = delta1 as i64;
-    if d1 > 1 {
-        torsion.push(d1);
-    }
-
-    if rank >= 2 {
-        let d2 = (delta2 / delta1) as i64;
-        if d2 > 1 {
-            torsion.push(d2);
-        }
-    }
-
-    if rank == 3 {
-        let d3 = (delta_full / delta2) as i64;
-        if d3 > 1 {
-            torsion.push(d3);
-        }
-    }
-
-    Some(AbelianGroupSignature {
-        free_rank: n - rank,
-        torsion,
-    })
-}
-
-fn gcd_of_2x2_minors(matrix: &[i64], n: usize) -> u64 {
-    let mut result = 0u64;
-    for r0 in 0..n {
-        for r1 in (r0 + 1)..n {
-            for c0 in 0..n {
-                for c1 in (c0 + 1)..n {
-                    let minor = matrix[r0 * n + c0] * matrix[r1 * n + c1]
-                        - matrix[r0 * n + c1] * matrix[r1 * n + c0];
-                    result = gcd(result, minor.unsigned_abs());
-                }
-            }
-        }
-    }
-    result
-}
-
-fn determinant_flat_i64(matrix: &[i64], n: usize) -> Option<i64> {
-    match n {
-        1 => Some(matrix[0]),
-        2 => Some(matrix[0].checked_mul(matrix[3])? - matrix[1].checked_mul(matrix[2])?),
-        3 => {
-            let a = matrix[0];
-            let b = matrix[1];
-            let c = matrix[2];
-            let d = matrix[3];
-            let e = matrix[4];
-            let f = matrix[5];
-            let g = matrix[6];
-            let h = matrix[7];
-            let i = matrix[8];
-            Some(
-                a.checked_mul(e.checked_mul(i)? - f.checked_mul(h)?)?
-                    - b.checked_mul(d.checked_mul(i)? - f.checked_mul(g)?)?
-                    + c.checked_mul(d.checked_mul(h)? - e.checked_mul(g)?)?,
-            )
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::factorisation::visit_all_factorisations_with_family;
-    use crate::graph_moves::enumerate_graph_move_successors;
 
     #[test]
     fn test_same_matrix_passes() {
@@ -493,45 +306,5 @@ mod tests {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         let b = SqMatrix::new([[1, 1], [1, 2]]);
         assert_eq!(check_generalized_bowen_franks_2x2(&a, &b), None);
-    }
-
-    #[test]
-    fn test_mid_search_invariants_accept_graph_successor() {
-        let a = SqMatrix::new([[1, 3], [2, 1]]);
-        let target = precompute_mid_search_invariants_2x2(&a);
-        let source = DynMatrix::from_sq(&a);
-        let successor = enumerate_graph_move_successors(&source, 3)
-            .nodes
-            .into_iter()
-            .next()
-            .expect("expected at least one graph successor");
-        assert!(matches_mid_search_invariants_2x2(
-            &successor.orig_matrix,
-            &target
-        ));
-    }
-
-    #[test]
-    fn test_mid_search_invariants_accept_factorisation_successor() {
-        let a = SqMatrix::new([[1, 3], [2, 1]]);
-        let target = precompute_mid_search_invariants_2x2(&a);
-        let source = DynMatrix::from_sq(&a);
-        let mut witness = None;
-        visit_all_factorisations_with_family(&source, 3, 6, |_family, u, v| {
-            let next = v.mul(&u);
-            if next.rows == 3 && witness.is_none() {
-                witness = Some(next);
-            }
-        });
-        let successor = witness.expect("expected at least one 3x3 factorisation successor");
-        assert!(matches_mid_search_invariants_2x2(&successor, &target));
-    }
-
-    #[test]
-    fn test_mid_search_invariants_reject_bowen_franks_mismatch() {
-        let a = SqMatrix::new([[2, 1], [1, 1]]);
-        let b = DynMatrix::from_sq(&SqMatrix::new([[2, 1], [1, 2]]));
-        let target = precompute_mid_search_invariants_2x2(&a);
-        assert!(!matches_mid_search_invariants_2x2(&b, &target));
     }
 }
