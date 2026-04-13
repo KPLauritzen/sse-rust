@@ -224,10 +224,7 @@ where
                 config.search_mode = match value.as_str() {
                     "mixed" => SearchMode::Mixed,
                     "graph-only" | "graph_only" => SearchMode::GraphOnly,
-                    "beam" => {
-                        config.beam_width = Some(config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH));
-                        SearchMode::Mixed
-                    }
+                    "beam" => SearchMode::Beam,
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
             }
@@ -317,6 +314,12 @@ where
 
     let a = a.ok_or("missing matrix A (first positional argument)")?;
     let b = b.ok_or("missing matrix B (second positional argument)")?;
+    if config.search_mode == SearchMode::Beam && config.beam_width.is_none() {
+        config.beam_width = Some(DEFAULT_BEAM_WIDTH);
+    }
+    if config.search_mode != SearchMode::Beam && config.beam_width.is_some() {
+        return Err("--beam-width requires --search-mode beam".to_string());
+    }
 
     Ok(Cli {
         a,
@@ -852,7 +855,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(cli.config.search_mode, SearchMode::Mixed);
+        assert_eq!(cli.config.search_mode, SearchMode::Beam);
         assert_eq!(cli.config.beam_width, Some(7));
     }
 
@@ -870,6 +873,22 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err, "--beam-width must be at least 1");
+    }
+
+    #[test]
+    fn parse_cli_rejects_beam_width_without_beam_mode() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--beam-width".to_string(),
+                "7".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "--beam-width requires --search-mode beam");
     }
 
     #[test]

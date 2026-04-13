@@ -1456,6 +1456,7 @@ fn search_mode_label(search_mode: SearchMode) -> &'static str {
     match search_mode {
         SearchMode::Mixed => "mixed",
         SearchMode::GraphOnly => "graph_only",
+        SearchMode::Beam => "beam",
     }
 }
 

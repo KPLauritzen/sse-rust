@@ -49,10 +49,7 @@ fn main() {
                 search_mode = match mode.as_str() {
                     "mixed" => SearchMode::Mixed,
                     "graph-only" => SearchMode::GraphOnly,
-                    "beam" => {
-                        beam_width = Some(beam_width.unwrap_or(DEFAULT_BEAM_WIDTH));
-                        SearchMode::Mixed
-                    }
+                    "beam" => SearchMode::Beam,
                     _ => panic!("invalid --search-mode value: {mode}"),
                 };
             }
@@ -74,6 +71,13 @@ fn main() {
             _ => panic!("unknown argument: {arg}"),
         }
     }
+    if search_mode == SearchMode::Beam && beam_width.is_none() {
+        beam_width = Some(DEFAULT_BEAM_WIDTH);
+    }
+    assert!(
+        search_mode == SearchMode::Beam || beam_width.is_none(),
+        "--beam-width requires --search-mode beam"
+    );
 
     let config = SearchConfig {
         max_lag,
@@ -85,8 +89,12 @@ fn main() {
 
     println!("Brix-Ruiz k=3: A = {:?}, B = {:?}", a, b);
     println!(
-        "Config: max_lag={}, max_intermediate_dim={}, max_entry={}, search_mode={:?}",
-        config.max_lag, config.max_intermediate_dim, config.max_entry, config.search_mode
+        "Config: max_lag={}, max_intermediate_dim={}, max_entry={}, search_mode={:?}, beam_width={:?}",
+        config.max_lag,
+        config.max_intermediate_dim,
+        config.max_entry,
+        config.search_mode,
+        config.beam_width
     );
     println!();
 

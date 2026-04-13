@@ -10,6 +10,7 @@ pub enum SearchMode {
     Mixed,
     #[serde(alias = "graph-only")]
     GraphOnly,
+    Beam,
 }
 
 pub const DEFAULT_BEAM_WIDTH: usize = 64;
@@ -477,9 +478,11 @@ mod tests {
     fn test_search_mode_deserializes_snake_and_kebab_case_graph_only() {
         let snake: SearchMode = serde_json::from_str("\"graph_only\"").unwrap();
         let kebab: SearchMode = serde_json::from_str("\"graph-only\"").unwrap();
+        let beam: SearchMode = serde_json::from_str("\"beam\"").unwrap();
 
         assert_eq!(snake, SearchMode::GraphOnly);
         assert_eq!(kebab, SearchMode::GraphOnly);
+        assert_eq!(beam, SearchMode::Beam);
     }
 
     #[test]

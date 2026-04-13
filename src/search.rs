@@ -22,7 +22,7 @@ use crate::types::{
     GuideArtifactValidation, GuidedRefinementConfig, SearchConfig, SearchDirection,
     SearchLayerTelemetry, SearchMode, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
     SearchStage, SearchTelemetry, ShortcutSearchConfig, ShortcutSearchRoundTelemetry,
-    ShortcutSearchStopReason, SsePath, SseResult,
+    ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1295,9 +1295,15 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         );
     }
 
-    if let Some(beam_width) = config.beam_width {
+    if config.search_mode == SearchMode::Beam {
         return search_beam_dyn_with_telemetry(
-            a, b, config, observer, &request, deadline, beam_width,
+            a,
+            b,
+            config,
+            observer,
+            &request,
+            deadline,
+            config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
         );
     }
 
@@ -1693,9 +1699,14 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         );
     }
 
-    if let Some(beam_width) = config.beam_width {
+    if config.search_mode == SearchMode::Beam {
         return search_beam_2x2_with_telemetry_and_observer(
-            a, b, config, observer, &request, beam_width,
+            a,
+            b,
+            config,
+            observer,
+            &request,
+            config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
         );
     }
 
@@ -1817,7 +1828,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
-            config.search_mode,
+            SearchMode::Mixed,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -2101,7 +2112,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
 
     // If bounded ESSE search exhausts on a finite essential pair, try the
     // aligned concrete-shift substrate before reporting `Unknown`.
-    if config.search_mode == SearchMode::Mixed && should_try_concrete_shift_fallback(a, b, config) {
+    if matches!(config.search_mode, SearchMode::Mixed | SearchMode::Beam)
+        && should_try_concrete_shift_fallback(a, b, config)
+    {
         let concrete_config = ConcreteShiftSearchConfig2x2 {
             relation: ConcreteShiftRelation2x2::Aligned,
             max_lag: config.max_lag as u32,
@@ -2390,7 +2403,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
             orig,
             config.max_intermediate_dim,
             config.max_entry,
-            config.search_mode,
+            SearchMode::Mixed,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
@@ -2636,7 +2649,9 @@ fn search_beam_2x2_with_telemetry_and_observer(
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-    if config.search_mode == SearchMode::Mixed && should_try_concrete_shift_fallback(a, b, config) {
+    if matches!(config.search_mode, SearchMode::Mixed | SearchMode::Beam)
+        && should_try_concrete_shift_fallback(a, b, config)
+    {
         let concrete_config = ConcreteShiftSearchConfig2x2 {
             relation: ConcreteShiftRelation2x2::Aligned,
             max_lag: config.max_lag as u32,
@@ -4553,7 +4568,7 @@ mod tests {
             max_lag: 4,
             max_intermediate_dim: 3,
             max_entry: 6,
-            search_mode: SearchMode::Mixed,
+            search_mode: SearchMode::Beam,
             beam_width: Some(4),
         };
 
