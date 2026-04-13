@@ -14,16 +14,20 @@ This repo can support autonomous search work, but only through the fixed researc
    - `src/search.rs`
    - `src/factorisation.rs`
    - `src/invariants.rs`
-3. Before making any changes, capture the baseline:
+3. Check the current actionable backlog:
+   - `bd ready --json`
+   - if you pick an existing item, update it as you work
+   - if the work is new, create a `bd` item before you start editing
+4. Before making any changes, capture the baseline:
    - `just research-json-save baseline`
    - record the baseline result for comparison
-4. Verify the baseline harness is green:
+5. Verify the baseline harness is green:
    - `just research`
    - `cargo test -q`
-5. Create `research/results.tsv` if it does not exist yet.
+6. Create `research/results.tsv` if it does not exist yet.
    Header:
    `commit	required_passes	required_total	target_hits	total_points	focus_score	total_ms	status	description	artifact_path`
-6. Leave `research/results.tsv` untracked by git.
+7. Leave `research/results.tsv` untracked by git.
    It is a local lab notebook, not repository history.
 
 ## Frozen Files
@@ -84,7 +88,7 @@ This writes `research/runs/<stamp>.json`.
 
 LOOP FOREVER
 
-1. Inspect git state.
+1. Inspect git state and current `bd` status.
 2. Make one focused search improvement.
 3. Run `cargo test -q`.
 4. Run `just research-json-save <stamp>`.
@@ -95,6 +99,7 @@ LOOP FOREVER
    - If required cases stay green, prefer changes that improve `target_hits`, then `total_points`, then `telemetry_focus_score`, then `total_ms`.
    - If the experiment did not improve the score, explicitly revert the commit (`git revert --no-edit HEAD`).
 7. Append one row to `research/results.tsv`, including the artifact path.
+8. Update or close the corresponding `bd` item.
 
 Every experiment — kept or rejected — stays in git history as a commit plus its revert. This gives full history for revisiting past attempts.
 

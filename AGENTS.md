@@ -14,10 +14,10 @@
 - Goal 3: Find any path for `k = 4` or above.
 - Goal 4: Make the main solver endpoint-agnostic for square matrices up to dimension 4, possibly higher later.
 
-## Beads Trial
+## Beads
 
-- Beads (`bd`) is in trial use for task tracking in this repo.
-- During the trial, prefer `bd` for actionable work tracking instead of adding new markdown TODO items.
+- Beads (`bd`) is the default task tracker in this repo.
+- Use `bd` for actionable work tracking instead of adding new markdown TODO items.
 - Treat existing markdown planning files as the source material to migrate from; do not assume they have already been imported into `bd`.
 - Check ready work with `bd ready --json` or `bd list --json`.
 - Create work with `bd create "Title" -t task|feature|bug -p 0-4 --json`.

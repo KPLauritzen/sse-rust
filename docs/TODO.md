@@ -4,9 +4,9 @@ This file tracks outstanding search work after reconciling the roadmap with the
 actual codebase. Items below are either still open or only partially complete.
 Fully completed items have been removed.
 
-During the Beads trial, the live actionable backlog has been migrated to `bd`.
-Use this document as roadmap context and status notes; use Beads for active task
-tracking and prioritization.
+The live actionable backlog is tracked in `bd`.
+Use this document as roadmap context and status notes; use Beads for active
+task tracking and prioritization.
 
 The current solver stack is:
 

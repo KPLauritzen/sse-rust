@@ -116,7 +116,9 @@ telemetry, graph-only runs, and concrete-shift witness details.
 
 ### Search improvements
 
-See [docs/TODO.md](docs/TODO.md) for concrete approaches: bidirectional BFS, iterative deepening, smarter factorisation pruning, spectral pruning, and aligned shift equivalence.
+See [docs/TODO.md](docs/TODO.md) for roadmap context on concrete approaches:
+bidirectional BFS, iterative deepening, smarter factorisation pruning,
+spectral pruning, and aligned shift equivalence. Use `bd` for the live backlog.
 
 ### Parallelism
 
@@ -127,7 +129,7 @@ Native builds now expand each BFS frontier layer in parallel with `rayon`, using
 - [`docs/README.md`](docs/README.md) explains how repo docs are split between
   project overview, roadmap context, and research workflow.
 - [`docs/TODO.md`](docs/TODO.md) is roadmap context only; use `bd` for live
-  actionable work during the Beads trial.
+  actionable work.
 - [`research/README.md`](research/README.md) explains where to put terse log
   entries, longer research notes, and local run artifacts.
 

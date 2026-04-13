@@ -5,8 +5,7 @@ This repo now uses three documentation layers with different jobs:
 - [`../README.md`](../README.md) is the entry point for the project itself:
   problem statement, research context, capabilities, and build/deploy notes.
 - [`TODO.md`](TODO.md) is roadmap context for solver and search work.
-  It is not the live task list during the Beads trial; use `bd` for actionable
-  backlog items.
+  It is not the live task list; use `bd` for actionable backlog items.
 - [`../research/README.md`](../research/README.md) describes the experiment
   workflow, logs, notes, and local run artifacts.
 
