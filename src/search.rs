@@ -12,6 +12,7 @@ use crate::factorisation::visit_all_factorisations_with_family;
 use crate::graph_moves::enumerate_graph_move_successors;
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
+use crate::path_scoring::score_node;
 use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
     SearchRootRecord, SearchStartRecord,
@@ -226,12 +227,34 @@ impl BeamFrontier {
         }
     }
 
+    fn pop_batch_same_depth(&mut self, max_batch: usize) -> Vec<BeamFrontierEntry> {
+        let Some(first) = self.pop_best() else {
+            return Vec::new();
+        };
+
+        let target_depth = first.depth;
+        let mut batch = vec![first];
+        let mut index = 0usize;
+        while batch.len() < max_batch && index < self.entries.len() {
+            if self.entries[index].depth == target_depth {
+                batch.push(self.entries.remove(index));
+            } else {
+                index += 1;
+            }
+        }
+        batch
+    }
+
     fn peek(&self) -> Option<&BeamFrontierEntry> {
         self.entries.first()
     }
 
     fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    fn expansion_batch_size(&self) -> usize {
+        self.beam_width.min(8).max(1)
     }
 }
 
@@ -2168,7 +2191,7 @@ fn compare_beam_frontier_entries(left: &BeamFrontierEntry, right: &BeamFrontierE
     right
         .approximate_hit
         .cmp(&left.approximate_hit)
-        .then_with(|| right.score.cmp(&left.score))
+        .then_with(|| left.score.cmp(&right.score))
         .then_with(|| left.depth.cmp(&right.depth))
         .then_with(|| left.serial.cmp(&right.serial))
 }
@@ -2189,65 +2212,14 @@ fn choose_next_beam_direction(
     }
 }
 
-fn beam_vector_gap_u64(
-    left: impl IntoIterator<Item = u64>,
-    right: impl IntoIterator<Item = u64>,
-) -> i64 {
-    let mut left = left.into_iter().collect::<Vec<_>>();
-    let mut right = right.into_iter().collect::<Vec<_>>();
-    left.sort_unstable();
-    right.sort_unstable();
-    let len = left.len().max(right.len());
-    (0..len)
-        .map(|index| {
-            let l = left.get(index).copied().unwrap_or(0);
-            let r = right.get(index).copied().unwrap_or(0);
-            l.abs_diff(r) as i64
-        })
-        .sum()
-}
-
 fn beam_candidate_score(
     matrix: &DynMatrix,
-    depth: usize,
     other_signatures: &HashSet<ApproxSignature>,
-    target_signature: &ApproxSignature,
+    target: &DynMatrix,
 ) -> (i64, bool) {
     let signature = approx_signature(matrix);
     let approximate_hit = other_signatures.contains(&signature);
-    let dim_gap = signature.dim.abs_diff(target_signature.dim) as i64;
-    let entry_sum_gap = signature.entry_sum.abs_diff(target_signature.entry_sum) as i64;
-    let row_gap = beam_vector_gap_u64(
-        signature.row_sums.iter().map(|value| *value as u64),
-        target_signature.row_sums.iter().map(|value| *value as u64),
-    );
-    let col_gap = beam_vector_gap_u64(
-        signature.col_sums.iter().map(|value| *value as u64),
-        target_signature.col_sums.iter().map(|value| *value as u64),
-    );
-    let row_support_gap = beam_vector_gap_u64(
-        signature.row_supports.iter().map(|value| *value as u64),
-        target_signature
-            .row_supports
-            .iter()
-            .map(|value| *value as u64),
-    );
-    let col_support_gap = beam_vector_gap_u64(
-        signature.col_supports.iter().map(|value| *value as u64),
-        target_signature
-            .col_supports
-            .iter()
-            .map(|value| *value as u64),
-    );
-    let score = if approximate_hit { 1_000_000_000 } else { 0 }
-        - depth as i64 * 1_000_000
-        - dim_gap * 100_000
-        - entry_sum_gap * 100
-        - row_gap * 10
-        - col_gap * 10
-        - row_support_gap * 5
-        - col_support_gap * 5
-        - matrix.max_entry() as i64;
+    let score = (score_node(matrix, target) * 4.0).round() as i64;
     (score, approximate_hit)
 }
 
@@ -2256,11 +2228,10 @@ fn push_beam_frontier_entry(
     canonical: &DynMatrix,
     depth: usize,
     other_signatures: &HashSet<ApproxSignature>,
-    target_signature: &ApproxSignature,
+    target: &DynMatrix,
     serial: &mut usize,
 ) {
-    let (score, approximate_hit) =
-        beam_candidate_score(canonical, depth, other_signatures, target_signature);
+    let (score, approximate_hit) = beam_candidate_score(canonical, other_signatures, target);
     frontier.push(BeamFrontierEntry {
         canonical: canonical.clone(),
         depth,
@@ -2304,8 +2275,6 @@ fn search_beam_2x2_with_telemetry_and_observer(
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
 
-    let target_fwd_signature = approx_signature(&b_canon);
-    let target_bwd_signature = approx_signature(&a_canon);
     let mut serial = 0usize;
     let mut fwd_frontier = BeamFrontier::new(beam_width);
     let mut bwd_frontier = BeamFrontier::new(beam_width);
@@ -2314,7 +2283,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
         &a_canon,
         0,
         &bwd_signatures,
-        &target_fwd_signature,
+        &b_canon,
         &mut serial,
     );
     push_beam_frontier_entry(
@@ -2322,7 +2291,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
         &b_canon,
         0,
         &fwd_signatures,
-        &target_bwd_signature,
+        &a_canon,
         &mut serial,
     );
     telemetry.max_frontier_size = 1;
@@ -2357,47 +2326,44 @@ fn search_beam_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
             .max(fwd_frontier.len().max(bwd_frontier.len()));
-        let (
-            frontier,
-            parent,
-            depths,
-            orig,
-            signatures,
-            other_depths,
-            other_signatures,
-            target_signature,
-        ) = if expand_forward {
-            (
-                &mut fwd_frontier,
-                &mut fwd_parent,
-                &mut fwd_depths,
-                &mut fwd_orig,
-                &mut fwd_signatures,
-                &bwd_depths as &HashMap<_, _>,
-                &bwd_signatures as &HashSet<_>,
-                &target_fwd_signature,
-            )
-        } else {
-            (
-                &mut bwd_frontier,
-                &mut bwd_parent,
-                &mut bwd_depths,
-                &mut bwd_orig,
-                &mut bwd_signatures,
-                &fwd_depths as &HashMap<_, _>,
-                &fwd_signatures as &HashSet<_>,
-                &target_bwd_signature,
-            )
-        };
+        let (frontier, parent, depths, orig, signatures, other_depths, other_signatures, target) =
+            if expand_forward {
+                (
+                    &mut fwd_frontier,
+                    &mut fwd_parent,
+                    &mut fwd_depths,
+                    &mut fwd_orig,
+                    &mut fwd_signatures,
+                    &bwd_depths as &HashMap<_, _>,
+                    &bwd_signatures as &HashSet<_>,
+                    &b_canon,
+                )
+            } else {
+                (
+                    &mut bwd_frontier,
+                    &mut bwd_parent,
+                    &mut bwd_depths,
+                    &mut bwd_orig,
+                    &mut bwd_signatures,
+                    &fwd_depths as &HashMap<_, _>,
+                    &fwd_signatures as &HashSet<_>,
+                    &a_canon,
+                )
+            };
 
-        let Some(current_entry) = frontier.pop_best() else {
+        let current_entries = frontier.pop_batch_same_depth(frontier.expansion_batch_size());
+        if current_entries.is_empty() {
             continue;
-        };
-        if current_entry.depth >= config.max_lag {
+        }
+        let current_depth = current_entries[0].depth;
+        if current_depth >= config.max_lag {
             continue;
         }
 
-        let current_frontier = vec![current_entry.canonical.clone()];
+        let current_frontier = current_entries
+            .iter()
+            .map(|entry| entry.canonical.clone())
+            .collect::<Vec<_>>();
         let (expansions, expansion_stats) = expand_frontier_layer(
             &current_frontier,
             orig,
@@ -2424,7 +2390,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
         let mut layer_records = observer
             .as_ref()
             .map(|_| Vec::with_capacity(expansions.len()));
-        let next_depth = current_entry.depth + 1;
+        let next_depth = current_depth + 1;
 
         for expansion in &expansions {
             let parent_orig = orig
@@ -2442,7 +2408,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                         from_orig: parent_orig.clone(),
                         to_canonical: expansion.next_canon.clone(),
                         to_orig: expansion.next_orig.clone(),
-                        from_depth: current_entry.depth,
+                        from_depth: current_depth,
                         to_depth: next_depth,
                         step: expansion.step.clone(),
                         status: SearchEdgeStatus::SeenCollision,
@@ -2492,7 +2458,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                         from_orig: parent_orig.clone(),
                         to_canonical: expansion.next_canon.clone(),
                         to_orig: expansion.next_orig.clone(),
-                        from_depth: current_entry.depth,
+                        from_depth: current_depth,
                         to_depth: next_depth,
                         step: expansion.step.clone(),
                         status: record_status,
@@ -2579,7 +2545,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                     &expansion.next_canon,
                     next_depth,
                     other_signatures,
-                    target_signature,
+                    target,
                     &mut serial,
                 );
                 enqueued_nodes += 1;
@@ -2593,7 +2559,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                     from_orig: parent_orig,
                     to_canonical: expansion.next_canon.clone(),
                     to_orig: expansion.next_orig.clone(),
-                    from_depth: current_entry.depth,
+                    from_depth: current_depth,
                     to_depth: next_depth,
                     step: expansion.step.clone(),
                     status: record_status,
@@ -2706,8 +2672,6 @@ fn search_beam_dyn_with_telemetry(
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
 
-    let target_fwd_signature = approx_signature(&b_canon);
-    let target_bwd_signature = approx_signature(&a_canon);
     let mut serial = 0usize;
     let mut fwd_frontier = BeamFrontier::new(beam_width);
     let mut bwd_frontier = BeamFrontier::new(beam_width);
@@ -2716,7 +2680,7 @@ fn search_beam_dyn_with_telemetry(
         &a_canon,
         0,
         &bwd_signatures,
-        &target_fwd_signature,
+        &b_canon,
         &mut serial,
     );
     push_beam_frontier_entry(
@@ -2724,7 +2688,7 @@ fn search_beam_dyn_with_telemetry(
         &b_canon,
         0,
         &fwd_signatures,
-        &target_bwd_signature,
+        &a_canon,
         &mut serial,
     );
     telemetry.max_frontier_size = 1;
@@ -2762,47 +2726,44 @@ fn search_beam_dyn_with_telemetry(
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
             .max(fwd_frontier.len().max(bwd_frontier.len()));
-        let (
-            frontier,
-            parent,
-            depths,
-            orig,
-            signatures,
-            other_depths,
-            other_signatures,
-            target_signature,
-        ) = if expand_forward {
-            (
-                &mut fwd_frontier,
-                &mut fwd_parent,
-                &mut fwd_depths,
-                &mut fwd_orig,
-                &mut fwd_signatures,
-                &bwd_depths as &HashMap<_, _>,
-                &bwd_signatures as &HashSet<_>,
-                &target_fwd_signature,
-            )
-        } else {
-            (
-                &mut bwd_frontier,
-                &mut bwd_parent,
-                &mut bwd_depths,
-                &mut bwd_orig,
-                &mut bwd_signatures,
-                &fwd_depths as &HashMap<_, _>,
-                &fwd_signatures as &HashSet<_>,
-                &target_bwd_signature,
-            )
-        };
+        let (frontier, parent, depths, orig, signatures, other_depths, other_signatures, target) =
+            if expand_forward {
+                (
+                    &mut fwd_frontier,
+                    &mut fwd_parent,
+                    &mut fwd_depths,
+                    &mut fwd_orig,
+                    &mut fwd_signatures,
+                    &bwd_depths as &HashMap<_, _>,
+                    &bwd_signatures as &HashSet<_>,
+                    &b_canon,
+                )
+            } else {
+                (
+                    &mut bwd_frontier,
+                    &mut bwd_parent,
+                    &mut bwd_depths,
+                    &mut bwd_orig,
+                    &mut bwd_signatures,
+                    &fwd_depths as &HashMap<_, _>,
+                    &fwd_signatures as &HashSet<_>,
+                    &a_canon,
+                )
+            };
 
-        let Some(current_entry) = frontier.pop_best() else {
+        let current_entries = frontier.pop_batch_same_depth(frontier.expansion_batch_size());
+        if current_entries.is_empty() {
             continue;
-        };
-        if current_entry.depth >= config.max_lag {
+        }
+        let current_depth = current_entries[0].depth;
+        if current_depth >= config.max_lag {
             continue;
         }
 
-        let current_frontier = vec![current_entry.canonical.clone()];
+        let current_frontier = current_entries
+            .iter()
+            .map(|entry| entry.canonical.clone())
+            .collect::<Vec<_>>();
         let (expansions, expansion_stats, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
@@ -2830,7 +2791,7 @@ fn search_beam_dyn_with_telemetry(
         let mut layer_records = observer
             .as_ref()
             .map(|_| Vec::with_capacity(expansions.len()));
-        let next_depth = current_entry.depth + 1;
+        let next_depth = current_depth + 1;
 
         for expansion in &expansions {
             let parent_orig = orig
@@ -2848,7 +2809,7 @@ fn search_beam_dyn_with_telemetry(
                         from_orig: parent_orig.clone(),
                         to_canonical: expansion.next_canon.clone(),
                         to_orig: expansion.next_orig.clone(),
-                        from_depth: current_entry.depth,
+                        from_depth: current_depth,
                         to_depth: next_depth,
                         step: expansion.step.clone(),
                         status: SearchEdgeStatus::SeenCollision,
@@ -2898,7 +2859,7 @@ fn search_beam_dyn_with_telemetry(
                         from_orig: parent_orig.clone(),
                         to_canonical: expansion.next_canon.clone(),
                         to_orig: expansion.next_orig.clone(),
-                        from_depth: current_entry.depth,
+                        from_depth: current_depth,
                         to_depth: next_depth,
                         step: expansion.step.clone(),
                         status: record_status,
@@ -2985,7 +2946,7 @@ fn search_beam_dyn_with_telemetry(
                     &expansion.next_canon,
                     next_depth,
                     other_signatures,
-                    target_signature,
+                    target,
                     &mut serial,
                 );
                 enqueued_nodes += 1;
@@ -2999,7 +2960,7 @@ fn search_beam_dyn_with_telemetry(
                     from_orig: parent_orig,
                     to_canonical: expansion.next_canon.clone(),
                     to_orig: expansion.next_orig.clone(),
-                    from_depth: current_entry.depth,
+                    from_depth: current_depth,
                     to_depth: next_depth,
                     step: expansion.step.clone(),
                     status: record_status,
@@ -4609,8 +4570,47 @@ mod tests {
         });
 
         assert_eq!(frontier.len(), 2);
-        assert_eq!(frontier.pop_best().unwrap().score, 3);
+        assert_eq!(frontier.pop_best().unwrap().score, 1);
         assert_eq!(frontier.pop_best().unwrap().score, 2);
+    }
+
+    #[test]
+    fn test_beam_frontier_batches_same_depth_entries() {
+        let mut frontier = BeamFrontier::new(4);
+        frontier.push(BeamFrontierEntry {
+            canonical: DynMatrix::new(1, 1, vec![1]),
+            depth: 1,
+            score: 0,
+            approximate_hit: false,
+            serial: 0,
+        });
+        frontier.push(BeamFrontierEntry {
+            canonical: DynMatrix::new(1, 1, vec![2]),
+            depth: 2,
+            score: 1,
+            approximate_hit: false,
+            serial: 1,
+        });
+        frontier.push(BeamFrontierEntry {
+            canonical: DynMatrix::new(1, 1, vec![3]),
+            depth: 1,
+            score: 2,
+            approximate_hit: false,
+            serial: 2,
+        });
+        frontier.push(BeamFrontierEntry {
+            canonical: DynMatrix::new(1, 1, vec![4]),
+            depth: 3,
+            score: 3,
+            approximate_hit: false,
+            serial: 3,
+        });
+
+        let batch = frontier.pop_batch_same_depth(4);
+        assert_eq!(batch.len(), 2);
+        assert!(batch.iter().all(|entry| entry.depth == 1));
+        assert_eq!(frontier.pop_best().unwrap().depth, 2);
+        assert_eq!(frontier.pop_best().unwrap().depth, 3);
     }
 
     #[test]
