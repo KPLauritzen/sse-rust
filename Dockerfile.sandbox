@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     just \
     time \
+    pkg-config \
+    cmake \
     python3.13 \
     && rm -rf /var/lib/apt/lists/*
 
