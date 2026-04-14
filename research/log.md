@@ -288,3 +288,6 @@
 
 - `loop16-equivalent-lag-dominance-cache` Added safe segment-cache dominance reuse for equivalent results across lag caps in `shortcut_search`.
   Kept. The cache now reuses shortest known equivalent `(source,target)` paths when `path_lag <= requested_max_lag` (exact-key cache still checked first; no Unknown dominance reuse). On the dim4 lagcap5 full-gap probe (`attempts=512`), this deterministically improved cache reuse (`hits 151 -> 164`, `misses 361 -> 348`) and reduced work (`factorisations 33,957,312 -> 33,499,328`, `visited 6,486,917 -> 6,472,560`) with unchanged lag (`7`). Harness gate stayed stable at `24/24` required cases. Details are in `research/notes/2026-04-14-k3-shortcut-equivalent-lag-dominance-cache.md`.
+
+- `loop17-endpoint-seed-diversity-ab` Tested true guide diversity (unique guides increased) by injecting a distinct lag-8 endpoint-derived seed into hard dim5 stage-2.
+  Failed (negative). At attempts `64`, the pool+seed run increased `unique_guides` (`12 -> 13`) but kept lag/improvement outcomes unchanged (still lag 7, improvements/promotions 3/1) while increasing work substantially. Raising attempts to `128` with this seed timed out at the 240s outer cap. Details are in `research/notes/2026-04-14-k3-shortcut-endpoint-seed-diversity-ab.md`.
