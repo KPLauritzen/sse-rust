@@ -143,10 +143,11 @@ fn main() {
                 println!("  VU = {:?}", vu.data);
             }
         }
-        SseResult::EquivalentByConcreteShift(witness) => {
+        SseResult::EquivalentByConcreteShift(proof) => {
             println!(
-                "Found via concrete shift witness: lag={}",
-                witness.shift.lag
+                "Found via {}: lag={}",
+                proof.description(),
+                proof.witness.shift.lag
             );
         }
         SseResult::NotEquivalent(reason) => {

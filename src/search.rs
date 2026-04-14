@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::aligned::{
-    search_concrete_shift_equivalence_2x2, ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2,
+    search_concrete_shift_equivalence_with_lag_2x2, ConcreteShiftRelation2x2,
     ConcreteShiftSearchResult2x2,
 };
 use crate::factorisation::visit_all_factorisations_with_family;
@@ -18,12 +18,13 @@ use crate::search_observer::{
     SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact, GuideArtifactCompatibility,
-    GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
-    GuideArtifactValidation, GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig,
-    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
-    SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
-    ShortcutSearchRoundTelemetry, ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    ConcreteShiftProof2x2, DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact,
+    GuideArtifactCompatibility, GuideArtifactEndpoints, GuideArtifactPayload,
+    GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig,
+    MoveFamilyPolicy, SearchConfig, SearchDirection, SearchLayerTelemetry,
+    SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, ShortcutSearchRoundTelemetry,
+    ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2329,27 +2330,15 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
     // If bounded ESSE search exhausts on a finite essential pair, try the
-    // aligned concrete-shift substrate before reporting `Unknown`.
-    if config.move_family_policy == MoveFamilyPolicy::Mixed
-        && should_try_concrete_shift_fallback(a, b, config)
-    {
-        let concrete_config = ConcreteShiftSearchConfig2x2 {
-            relation: ConcreteShiftRelation2x2::Aligned,
-            max_lag: config.max_lag as u32,
-            max_entry: config.max_entry,
-            max_witnesses: concrete_shift_witness_budget(config),
-        };
-        if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
-            search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
-        {
-            telemetry.concrete_shift_shortcut = true;
-            return finish_search_2x2(
-                observer,
-                &request,
-                SseResult::EquivalentByConcreteShift(witness),
-                telemetry,
-            );
-        }
+    // bounded concrete-shift relations before reporting `Unknown`.
+    if let Some(witness) = try_concrete_shift_shortcut_2x2(a, b, config) {
+        telemetry.concrete_shift_shortcut = true;
+        return finish_search_2x2(
+            observer,
+            &request,
+            SseResult::EquivalentByConcreteShift(witness),
+            telemetry,
+        );
     }
 
     finish_search_2x2(observer, &request, SseResult::Unknown, telemetry)
@@ -2380,6 +2369,61 @@ fn should_try_concrete_shift_fallback(
         && is_essential_matrix_2x2(b)
         && config.max_lag <= 4
         && config.max_entry <= 6
+}
+
+fn try_concrete_shift_shortcut_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &SearchConfig,
+) -> Option<ConcreteShiftProof2x2> {
+    if config.move_family_policy != MoveFamilyPolicy::Mixed
+        || !should_try_concrete_shift_fallback(a, b, config)
+    {
+        return None;
+    }
+
+    let max_witnesses = concrete_shift_witness_budget(config);
+    find_concrete_shift_shortcut_proof(config.max_lag as u32, |lag, relation| {
+        search_concrete_shift_equivalence_with_lag_2x2(
+            a,
+            b,
+            lag,
+            config.max_entry,
+            max_witnesses,
+            relation,
+        )
+    })
+}
+
+fn find_concrete_shift_shortcut_proof<F>(
+    max_lag: u32,
+    mut probe: F,
+) -> Option<ConcreteShiftProof2x2>
+where
+    F: FnMut(u32, ConcreteShiftRelation2x2) -> ConcreteShiftSearchResult2x2,
+{
+    for lag in 1..=max_lag {
+        let mut any_limit = false;
+        for relation in [
+            ConcreteShiftRelation2x2::Aligned,
+            ConcreteShiftRelation2x2::Balanced,
+            ConcreteShiftRelation2x2::Compatible,
+        ] {
+            match probe(lag, relation) {
+                ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                    return Some(ConcreteShiftProof2x2 { relation, witness });
+                }
+                ConcreteShiftSearchResult2x2::Exhausted => {}
+                ConcreteShiftSearchResult2x2::SearchLimitReached => any_limit = true,
+            }
+        }
+
+        if any_limit {
+            return None;
+        }
+    }
+
+    None
 }
 
 fn compare_beam_frontier_entries(left: &BeamFrontierEntry, right: &BeamFrontierEntry) -> Ordering {
@@ -2928,26 +2972,14 @@ fn search_beam_2x2_with_telemetry_and_observer(
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-    if config.move_family_policy == MoveFamilyPolicy::Mixed
-        && should_try_concrete_shift_fallback(a, b, config)
-    {
-        let concrete_config = ConcreteShiftSearchConfig2x2 {
-            relation: ConcreteShiftRelation2x2::Aligned,
-            max_lag: config.max_lag as u32,
-            max_entry: config.max_entry,
-            max_witnesses: concrete_shift_witness_budget(config),
-        };
-        if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
-            search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
-        {
-            telemetry.concrete_shift_shortcut = true;
-            return finish_search_2x2(
-                observer,
-                request,
-                SseResult::EquivalentByConcreteShift(witness),
-                telemetry,
-            );
-        }
+    if let Some(witness) = try_concrete_shift_shortcut_2x2(a, b, config) {
+        telemetry.concrete_shift_shortcut = true;
+        return finish_search_2x2(
+            observer,
+            request,
+            SseResult::EquivalentByConcreteShift(witness),
+            telemetry,
+        );
     }
 
     finish_search_2x2(observer, request, SseResult::Unknown, telemetry)
@@ -3390,26 +3422,14 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
             telemetry,
         );
     }
-    if config.move_family_policy == MoveFamilyPolicy::Mixed
-        && should_try_concrete_shift_fallback(a, b, config)
-    {
-        let concrete_config = ConcreteShiftSearchConfig2x2 {
-            relation: ConcreteShiftRelation2x2::Aligned,
-            max_lag: config.max_lag as u32,
-            max_entry: config.max_entry,
-            max_witnesses: concrete_shift_witness_budget(config),
-        };
-        if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
-            search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
-        {
-            telemetry.concrete_shift_shortcut = true;
-            return finish_search_2x2(
-                observer,
-                request,
-                SseResult::EquivalentByConcreteShift(witness),
-                telemetry,
-            );
-        }
+    if let Some(witness) = try_concrete_shift_shortcut_2x2(a, b, config) {
+        telemetry.concrete_shift_shortcut = true;
+        return finish_search_2x2(
+            observer,
+            request,
+            SseResult::EquivalentByConcreteShift(witness),
+            telemetry,
+        );
     }
 
     finish_search_2x2(observer, request, SseResult::Unknown, telemetry)
@@ -6678,6 +6698,125 @@ mod tests {
                 assert_eq!(step.u.cols, step.v.rows);
             }
         }
+    }
+
+    #[test]
+    fn test_try_concrete_shift_shortcut_returns_witness_for_identity_pair() {
+        let a = SqMatrix::new([[1, 0], [0, 1]]);
+        let config = SearchConfig {
+            max_entry: 1,
+            ..default_config()
+        };
+        let proof = try_concrete_shift_shortcut_2x2(&a, &a, &config).unwrap();
+        assert_eq!(proof.relation, ConcreteShiftRelation2x2::Aligned);
+    }
+
+    #[test]
+    fn test_try_concrete_shift_shortcut_skips_graph_only_policy() {
+        let a = SqMatrix::new([[1, 0], [0, 1]]);
+        let config = SearchConfig {
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            ..default_config()
+        };
+        let proof = try_concrete_shift_shortcut_2x2(&a, &a, &config);
+        assert!(proof.is_none());
+    }
+
+    #[test]
+    fn test_shortcut_helper_preserves_concrete_shift_relation() {
+        let a = SqMatrix::identity();
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 2,
+            max_entry: 1,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+        };
+
+        let shortcut_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
+            .expect("identity pair should produce a bounded concrete-shift proof");
+        assert_eq!(shortcut_proof.relation, ConcreteShiftRelation2x2::Aligned);
+        assert_eq!(
+            shortcut_proof.description(),
+            "aligned concrete-shift witness"
+        );
+
+        let run_result: SearchRunResult =
+            SseResult::EquivalentByConcreteShift(shortcut_proof.clone()).into();
+        match run_result {
+            SearchRunResult::EquivalentByConcreteShift(run_proof) => {
+                assert_eq!(run_proof.relation, ConcreteShiftRelation2x2::Aligned)
+            }
+            other => panic!("expected concrete-shift run result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_find_concrete_shift_shortcut_proof_prefers_lower_lag() {
+        let a = SqMatrix::identity();
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 2,
+            max_entry: 1,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+        };
+        let base_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
+            .expect("identity pair should produce a bounded concrete-shift proof");
+
+        let mut balanced_lag_one = base_proof.witness.clone();
+        balanced_lag_one.shift.lag = 1;
+
+        let mut probe_calls = Vec::new();
+        let chosen = find_concrete_shift_shortcut_proof(4, |lag, relation| {
+            probe_calls.push((lag, relation));
+            match (lag, relation) {
+                (1, ConcreteShiftRelation2x2::Balanced) => {
+                    ConcreteShiftSearchResult2x2::Equivalent(balanced_lag_one.clone())
+                }
+                (4, ConcreteShiftRelation2x2::Aligned) => {
+                    panic!("search should stop after finding the lag-1 proof")
+                }
+                _ => ConcreteShiftSearchResult2x2::Exhausted,
+            }
+        })
+        .expect("expected a chosen proof");
+
+        assert_eq!(chosen.relation, ConcreteShiftRelation2x2::Balanced);
+        assert_eq!(chosen.witness.shift.lag, 1);
+        assert_eq!(
+            probe_calls,
+            vec![
+                (1, ConcreteShiftRelation2x2::Aligned),
+                (1, ConcreteShiftRelation2x2::Balanced),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_find_concrete_shift_shortcut_proof_stops_after_lower_lag_limit() {
+        let mut probe_calls = Vec::new();
+        let proof = find_concrete_shift_shortcut_proof(3, |lag, relation| {
+            probe_calls.push((lag, relation));
+            match (lag, relation) {
+                (1, ConcreteShiftRelation2x2::Aligned) => {
+                    ConcreteShiftSearchResult2x2::SearchLimitReached
+                }
+                _ => ConcreteShiftSearchResult2x2::Exhausted,
+            }
+        });
+
+        assert!(proof.is_none());
+        assert_eq!(
+            probe_calls,
+            vec![
+                (1, ConcreteShiftRelation2x2::Aligned),
+                (1, ConcreteShiftRelation2x2::Balanced),
+                (1, ConcreteShiftRelation2x2::Compatible),
+            ]
+        );
     }
 
     #[test]
