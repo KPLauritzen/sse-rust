@@ -246,3 +246,6 @@
 
 - `loop3-segment-cache` Added per-run segment-query memoization for `shortcut_search` guided segments with cache hit/miss telemetry.
   Kept. Profiling still shows factorisation-dominated segment cost, and memoization produced concrete reuse on hard `k=3` runs (`22` hits at control-128, `38` hits at focused-128). Control-128 kept lag 7 but reduced work (`frontier_nodes_expanded 20088 -> 17918`, `total_visited_nodes 1263782 -> 1121478`), and the previously timeout-prone focused-128 run completed under the same 300s cap (still lag 7). Details are in `research/notes/2026-04-14-k3-shortcut-segment-cache.md`.
+
+- `loop4-budget-ramp` Ramped cache-enabled shortcut attempt budgets from `128` to `192` and `256`, then probed `guided_max_shortcut_lag=5`.
+  Mixed. Larger budgets now complete and increase local segment improvements (`11 -> 24 -> 41`) with substantial cache reuse, but best lag stayed at 7. The lag-cap-5 probe timed out at 300s without a completed artifact, so broadening per-segment depth appears too costly. Details are in `research/notes/2026-04-14-k3-shortcut-cache-budget-ramp.md`.
