@@ -1,5 +1,6 @@
 # Keep repo reviews on Codex even when host defaults differ.
 review_agent = "codex"
+review_model = "gpt-5.3-codex-spark"
 
 review_guidelines = """
 This repository is research code for strong shift equivalence search, not a generic application.
