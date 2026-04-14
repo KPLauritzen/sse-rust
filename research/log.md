@@ -309,3 +309,6 @@
 
 - `loop24-min-gap3-timeout` Tested segment-selection policy `guided_min_gap=3` on the rebuilt `mixed + max_entry=5` hard-dim5 baseline.
   Failed. Both attempts 128 and 160 timed out at 240s (empty JSON), while the corresponding min-gap-2 baseline at attempts 160 completed with lag 7 and improvements 20. Decision: keep `guided_min_gap=2`; min-gap-3 is regressive on this surface. Details in `research/notes/2026-04-14-k3-shortcut-maxentry5-min-gap3-timeout.md`.
+
+- `loop25-dim-priority-ordering` Tested and reverted dimension-priority segment ordering for timeout-bounded shortcut refinement.
+  Reverted. Harness gate stayed stable (24/24 required; target/points/telemetry-focus unchanged, slight total-elapsed improvement), but the hard dim5 decision probe (`mixed + max_entry=5 + gap<=5 + attempts160 + guides8`) regressed work with no lag/progress gain (`factorisations 12,970,458 -> 13,435,679`, `visited 539,515 -> 559,880`, lag stayed 7). Details in `research/notes/2026-04-14-k3-shortcut-dim-priority-ordering-reverted.md`.
