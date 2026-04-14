@@ -294,3 +294,6 @@
 
 - `loop18-admission-lagband` Tested and reverted a lag-band guide-admission heuristic in `shortcut_search` (`effective_lag <= best_lag + slack`).
   Reverted. With `slack=0`, hard dim5 stage-2 probes became cheaper and one previously timing-out plus-seed attempts-128 probe completed, but harness telemetry-focus metrics regressed (`45,802,619 -> 43,380,841`) despite unchanged required correctness/targets. Retuning to `slack=1` lost the tractability gain (attempts-128 timed out again). Details are in `research/notes/2026-04-14-k3-shortcut-admission-lagband-reverted.md`.
+
+- `loop19-dim5-lagcap5-timeout-boundary` Mapped the hard dim5 lag-cap-5 timeout cliff on the kept codebase (post-loop16 cache change).
+  Kept as evidence only. Attempts `96` completed (lag 7, improvements 5, promoted 2), while `104/112/128` all timed out at 240s. At attempts `128`, reducing `max_guides` (`12 -> 8 -> 4`) and reducing `shortcut_rounds` (`2 -> 1`) still timed out. This confirms a steep segment-mix cost cliff not fixed by coarse outer knobs. Details are in `research/notes/2026-04-14-k3-shortcut-dim5-lagcap5-timeout-boundary.md`.
