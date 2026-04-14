@@ -142,6 +142,11 @@ path = "src/bin/analyze_path_signal_corpus.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "assemble_k3_guide_pool"
+path = "src/bin/assemble_k3_guide_pool.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "replay_graph_path_scores"
 path = "src/bin/replay_graph_path_scores.rs"
 required-features = ["research-tools"]
