@@ -240,3 +240,6 @@
 
 - `worktree` Tested a gap-prioritized segment-attempt ordering for guided shortcut refinement on the hard k=3 pair.
   Failed. Under the same 128-attempt shortcut budget, lag stayed at 7 with unchanged segment-improvement and promotion counts, while frontier work increased (`frontier_nodes_expanded 20088 -> 21665`, `total_visited_nodes 1263782 -> 1394505`), so the heuristic was reverted. Details are in `research/notes/2026-04-14-k3-shortcut-gap-priority-ordering.md`.
+
+- `worktree` Ran a gap-focus A/B for k=3 shortcut search (`min_gap=2,max_gap=6` control vs `min_gap=3,max_gap=7` focused).
+  Failed. The focused policy did not improve lag (still 7), timed out at 128 attempts, and at 64 attempts increased search work despite slightly higher local improvement counts (`frontier_nodes_expanded 10882 -> 16592`, `total_visited_nodes 712040 -> 1135613`). Details are in `research/notes/2026-04-14-k3-shortcut-gap-focus-ab.md`.
