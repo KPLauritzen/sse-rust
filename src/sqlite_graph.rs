@@ -335,11 +335,13 @@ impl SqliteGraphRecorder {
             SearchRunResult::Equivalent(path) => {
                 ("equivalent", None, Some(path.steps.len() as i64))
             }
-            SearchRunResult::EquivalentByConcreteShift(_) => {
-                ("equivalent_by_concrete_shift", None, None)
-            }
+            SearchRunResult::EquivalentByConcreteShift(proof) => (
+                "equivalent_by_concrete_shift",
+                Some(proof.description()),
+                None,
+            ),
             SearchRunResult::NotEquivalent(reason) => {
-                ("not_equivalent", Some(reason.as_str()), None)
+                ("not_equivalent", Some(reason.clone()), None)
             }
             SearchRunResult::Unknown => ("unknown", None, None),
         };
@@ -806,5 +808,61 @@ mod tests {
         assert_eq!(value["outcome"], "equivalent_by_concrete_shift");
         assert_eq!(value["relation"], "balanced");
         assert_eq!(value["witness"]["lag"], 1);
+    }
+
+    #[test]
+    fn sqlite_graph_finish_run_persists_concrete_shift_reason() {
+        let path = temp_db_path();
+        {
+            let mut recorder = SqliteGraphRecorder::new(&path).unwrap();
+            let matrix = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+            let request = crate::types::SearchRequest {
+                source: matrix.clone(),
+                target: matrix.clone(),
+                config: SearchConfig::default(),
+                stage: SearchStage::EndpointSearch,
+                guide_artifacts: Vec::new(),
+                guided_refinement: crate::types::GuidedRefinementConfig::default(),
+                shortcut_search: crate::types::ShortcutSearchConfig::default(),
+            };
+            let start = SearchStartRecord {
+                request,
+                source_canonical: matrix.clone(),
+                target_canonical: matrix,
+            };
+            recorder.insert_run(&start).unwrap();
+
+            let a = SqMatrix::identity();
+            let witness = canonical_module_shift_witness_2x2(
+                &a,
+                &a,
+                ShiftEquivalenceWitness2x2 {
+                    lag: 1,
+                    r: SqMatrix::identity(),
+                    s: SqMatrix::identity(),
+                },
+            )
+            .unwrap();
+            let result = SearchRunResult::EquivalentByConcreteShift(ConcreteShiftProof2x2 {
+                relation: ConcreteShiftRelation2x2::Compatible,
+                witness,
+            });
+            recorder
+                .finish_run(&result, &SearchTelemetry::default())
+                .unwrap();
+        }
+
+        let conn = Connection::open(&path).unwrap();
+        let (outcome, reason): (String, Option<String>) = conn
+            .query_row(
+                "SELECT outcome, reason FROM search_runs LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "equivalent_by_concrete_shift");
+        assert_eq!(reason.as_deref(), Some("compatible concrete-shift witness"));
+
+        let _ = fs::remove_file(&path);
     }
 }

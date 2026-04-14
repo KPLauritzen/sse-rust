@@ -2383,11 +2383,13 @@ fn try_concrete_shift_shortcut_2x2(
     }
 
     let max_witnesses = concrete_shift_witness_budget(config);
-    for relation in [
+    let proofs = [
         ConcreteShiftRelation2x2::Aligned,
         ConcreteShiftRelation2x2::Balanced,
         ConcreteShiftRelation2x2::Compatible,
-    ] {
+    ]
+    .into_iter()
+    .filter_map(|relation| {
         let concrete_config = ConcreteShiftSearchConfig2x2 {
             relation,
             max_lag: config.max_lag as u32,
@@ -2397,11 +2399,32 @@ fn try_concrete_shift_shortcut_2x2(
         if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
             search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
         {
-            return Some(ConcreteShiftProof2x2 { relation, witness });
+            Some(ConcreteShiftProof2x2 { relation, witness })
+        } else {
+            None
         }
-    }
+    });
 
-    None
+    choose_min_lag_concrete_shift_proof(proofs)
+}
+
+fn concrete_shift_relation_priority(relation: ConcreteShiftRelation2x2) -> usize {
+    match relation {
+        ConcreteShiftRelation2x2::Aligned => 0,
+        ConcreteShiftRelation2x2::Balanced => 1,
+        ConcreteShiftRelation2x2::Compatible => 2,
+    }
+}
+
+fn choose_min_lag_concrete_shift_proof(
+    proofs: impl IntoIterator<Item = ConcreteShiftProof2x2>,
+) -> Option<ConcreteShiftProof2x2> {
+    proofs.into_iter().min_by_key(|proof| {
+        (
+            proof.witness.shift.lag,
+            concrete_shift_relation_priority(proof.relation),
+        )
+    })
 }
 
 fn compare_beam_frontier_entries(left: &BeamFrontierEntry, right: &BeamFrontierEntry) -> Ordering {
@@ -6728,6 +6751,34 @@ mod tests {
             }
             other => panic!("expected concrete-shift run result, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_choose_min_lag_concrete_shift_proof_prefers_lower_lag() {
+        let a = SqMatrix::identity();
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 2,
+            max_entry: 1,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+        };
+        let base_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
+            .expect("identity pair should produce a bounded concrete-shift proof");
+
+        let mut aligned_lag_four = base_proof.clone();
+        aligned_lag_four.relation = ConcreteShiftRelation2x2::Aligned;
+        aligned_lag_four.witness.shift.lag = 4;
+
+        let mut balanced_lag_one = base_proof;
+        balanced_lag_one.relation = ConcreteShiftRelation2x2::Balanced;
+        balanced_lag_one.witness.shift.lag = 1;
+
+        let chosen = choose_min_lag_concrete_shift_proof([aligned_lag_four, balanced_lag_one])
+            .expect("expected a chosen proof");
+        assert_eq!(chosen.relation, ConcreteShiftRelation2x2::Balanced);
+        assert_eq!(chosen.witness.shift.lag, 1);
     }
 
     #[test]
