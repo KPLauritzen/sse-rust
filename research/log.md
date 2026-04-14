@@ -306,3 +306,6 @@
 
 - `loop23-maxentry5-gap-followup` Checked whether the `max_entry=5` lever opens wider gap windows and tuned guide count in the tractable window.
   Kept as evidence only. `gap=6` remained poor under `max_entry=5` (attempts 128 timed out; attempts 96 completed but with lower yield and higher cost than `gap=5`). In `gap=5`, attempts 160 remained lag 7 with identical improvement outcomes across guides 12/8/6, with only modest runtime/work reductions for guides 8/6. This confirms the active baseline as `mixed + max_entry=5 + gap=5`, and points next work toward segment-order/admission quality rather than broader gaps or guide-count tweaks. Details in `research/notes/2026-04-14-k3-shortcut-maxentry5-gap-window-followup.md`.
+
+- `loop24-min-gap3-timeout` Tested segment-selection policy `guided_min_gap=3` on the rebuilt `mixed + max_entry=5` hard-dim5 baseline.
+  Failed. Both attempts 128 and 160 timed out at 240s (empty JSON), while the corresponding min-gap-2 baseline at attempts 160 completed with lag 7 and improvements 20. Decision: keep `guided_min_gap=2`; min-gap-3 is regressive on this surface. Details in `research/notes/2026-04-14-k3-shortcut-maxentry5-min-gap3-timeout.md`.
