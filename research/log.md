@@ -237,3 +237,6 @@
 
 - `worktree` Ran iterative generic `shortcut_search` over the normalized k=3 pool with staged bound increases.
   Kept as evidence. Completed runs at 48 and 128 segment-attempt caps both held best lag at 7 and converged to the same witness signature as the Lind-Marcus/Baker guide; a 256-attempt run timed out at 420s. Details are in `research/notes/2026-04-14-k3-normalized-guide-pool-shortcutting.md`.
+
+- `worktree` Tested a gap-prioritized segment-attempt ordering for guided shortcut refinement on the hard k=3 pair.
+  Failed. Under the same 128-attempt shortcut budget, lag stayed at 7 with unchanged segment-improvement and promotion counts, while frontier work increased (`frontier_nodes_expanded 20088 -> 21665`, `total_visited_nodes 1263782 -> 1394505`), so the heuristic was reverted. Details are in `research/notes/2026-04-14-k3-shortcut-gap-priority-ordering.md`.
