@@ -1,2 +1,10 @@
 # Keep repo reviews on Codex even when host defaults differ.
 review_agent = "codex"
+
+review_guidelines = """
+This repository is research code for strong shift equivalence search, not a generic application.
+
+Prioritize findings that affect correctness, possible performance regressions, search completeness, pruning safety, shortest-path claims, or bugs where telemetry, guide artifacts, or review output could misstate what the solver actually proved.
+
+Prefer findings with concrete behavioral consequences, minimal repros, or clear references to affected files and lines.
+"""
