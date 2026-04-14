@@ -9,6 +9,7 @@ use crate::matrix::{DynMatrix, SqMatrix};
 pub enum FrontierMode {
     Bfs,
     Beam,
+    BeamBfsHandoff,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -24,6 +25,12 @@ pub const DEFAULT_BEAM_WIDTH: usize = 64;
 impl Default for FrontierMode {
     fn default() -> Self {
         Self::Bfs
+    }
+}
+
+impl FrontierMode {
+    pub fn uses_beam_width(self) -> bool {
+        matches!(self, Self::Beam | Self::BeamBfsHandoff)
     }
 }
 
@@ -517,9 +524,11 @@ mod tests {
     fn test_frontier_mode_deserializes_bfs_and_beam() {
         let bfs: FrontierMode = serde_json::from_str("\"bfs\"").unwrap();
         let beam: FrontierMode = serde_json::from_str("\"beam\"").unwrap();
+        let beam_bfs_handoff: FrontierMode = serde_json::from_str("\"beam_bfs_handoff\"").unwrap();
 
         assert_eq!(bfs, FrontierMode::Bfs);
         assert_eq!(beam, FrontierMode::Beam);
+        assert_eq!(beam_bfs_handoff, FrontierMode::BeamBfsHandoff);
     }
 
     #[test]

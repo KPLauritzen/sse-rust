@@ -615,6 +615,7 @@ fn search_mode_label(config: &SearchConfig) -> &'static str {
         (FrontierMode::Bfs, MoveFamilyPolicy::Mixed) => "mixed",
         (FrontierMode::Bfs, MoveFamilyPolicy::GraphOnly) => "graph_only",
         (FrontierMode::Beam, _) => "beam",
+        (FrontierMode::BeamBfsHandoff, _) => "beam_bfs_handoff",
     }
 }
 
@@ -622,6 +623,7 @@ fn frontier_mode_label(mode: FrontierMode) -> &'static str {
     match mode {
         FrontierMode::Bfs => "bfs",
         FrontierMode::Beam => "beam",
+        FrontierMode::BeamBfsHandoff => "beam_bfs_handoff",
     }
 }
 
@@ -746,6 +748,14 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: Some(8),
         };
+        let beam_bfs_handoff = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+            frontier_mode: FrontierMode::BeamBfsHandoff,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: Some(8),
+        };
 
         assert_eq!(search_mode_label(&SearchConfig::default()), "mixed");
         assert_eq!(
@@ -757,6 +767,11 @@ mod tests {
         );
         assert_eq!(search_mode_label(&beam_graph_only), "beam");
         assert_eq!(frontier_mode_label(beam_graph_only.frontier_mode), "beam");
+        assert_eq!(search_mode_label(&beam_bfs_handoff), "beam_bfs_handoff");
+        assert_eq!(
+            frontier_mode_label(beam_bfs_handoff.frontier_mode),
+            "beam_bfs_handoff"
+        );
         assert_eq!(
             move_family_policy_label(beam_graph_only.move_family_policy),
             "graph_only"

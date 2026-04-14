@@ -183,7 +183,7 @@ where
                        --max-lag N              max elementary SSE steps (default: 4)\n\
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
-                       --frontier-mode MODE     bfs | beam (default: bfs)\n\
+                       --frontier-mode MODE     bfs | beam | beam-bfs-handoff (default: bfs)\n\
                        --move-policy POLICY     mixed | graph-only (default: mixed)\n\
                        --search-mode MODE       legacy shortcut: mixed | graph-only | beam\n\
                        --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
@@ -319,11 +319,11 @@ where
 
     let a = a.ok_or("missing matrix A (first positional argument)")?;
     let b = b.ok_or("missing matrix B (second positional argument)")?;
-    if config.frontier_mode == FrontierMode::Beam && config.beam_width.is_none() {
+    if config.frontier_mode.uses_beam_width() && config.beam_width.is_none() {
         config.beam_width = Some(DEFAULT_BEAM_WIDTH);
     }
-    if config.frontier_mode != FrontierMode::Beam && config.beam_width.is_some() {
-        return Err("--beam-width requires --frontier-mode beam".to_string());
+    if !config.frontier_mode.uses_beam_width() && config.beam_width.is_some() {
+        return Err("--beam-width requires --frontier-mode beam or beam-bfs-handoff".to_string());
     }
 
     Ok(Cli {
@@ -348,6 +348,7 @@ fn parse_frontier_mode(value: &str) -> Result<FrontierMode, String> {
     match value {
         "bfs" => Ok(FrontierMode::Bfs),
         "beam" => Ok(FrontierMode::Beam),
+        "beam-bfs-handoff" | "beam_bfs_handoff" => Ok(FrontierMode::BeamBfsHandoff),
         _ => Err(format!("unknown frontier mode: {value}")),
     }
 }
@@ -956,6 +957,13 @@ mod tests {
                 MoveFamilyPolicy::GraphOnly,
                 Some("9"),
             ),
+            (
+                "beam-bfs-handoff",
+                "mixed",
+                FrontierMode::BeamBfsHandoff,
+                MoveFamilyPolicy::Mixed,
+                Some("11"),
+            ),
         ];
 
         for (frontier, move_policy, expected_frontier, expected_move_policy, beam_width) in cases {
@@ -1031,7 +1039,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(err, "--beam-width requires --frontier-mode beam");
+        assert_eq!(
+            err,
+            "--beam-width requires --frontier-mode beam or beam-bfs-handoff"
+        );
     }
 
     #[test]

@@ -84,19 +84,19 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam] [--move-policy mixed|graph-only] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam|beam-bfs-handoff] [--move-policy mixed|graph-only] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
                 );
                 return;
             }
             _ => panic!("unknown argument: {arg}"),
         }
     }
-    if frontier_mode == FrontierMode::Beam && beam_width.is_none() {
+    if frontier_mode.uses_beam_width() && beam_width.is_none() {
         beam_width = Some(DEFAULT_BEAM_WIDTH);
     }
     assert!(
-        frontier_mode == FrontierMode::Beam || beam_width.is_none(),
-        "--beam-width requires beam frontier"
+        frontier_mode.uses_beam_width() || beam_width.is_none(),
+        "--beam-width requires beam or beam-bfs-handoff frontier"
     );
 
     let config = SearchConfig {
@@ -220,6 +220,7 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
     match value {
         "bfs" => FrontierMode::Bfs,
         "beam" => FrontierMode::Beam,
+        "beam-bfs-handoff" | "beam_bfs_handoff" => FrontierMode::BeamBfsHandoff,
         _ => panic!("invalid --frontier-mode value: {value}"),
     }
 }
