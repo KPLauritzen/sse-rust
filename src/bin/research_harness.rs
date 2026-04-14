@@ -14,7 +14,7 @@ use sse_core::types::{
     DynSsePath, FrontierMode, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
     GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
     GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
 };
 
 #[derive(Debug)]
@@ -53,6 +53,8 @@ struct ResearchCase {
     seeded_guide_ids: Vec<String>,
     #[serde(default)]
     guide_artifact_paths: Vec<String>,
+    #[serde(default = "default_case_required")]
+    required: bool,
     config: JsonSearchConfig,
     timeout_ms: u64,
     allowed_outcomes: Vec<String>,
@@ -77,7 +79,11 @@ struct JsonSearchConfig {
     max_lag: usize,
     max_intermediate_dim: usize,
     max_entry: u32,
-    #[serde(default = "default_search_mode")]
+    #[serde(default)]
+    frontier_mode: FrontierMode,
+    #[serde(default)]
+    beam_width: Option<usize>,
+    #[serde(default = "default_search_mode", alias = "move_policy")]
     search_mode: MoveFamilyPolicy,
     #[serde(default)]
     stage: SearchStage,
@@ -137,6 +143,10 @@ struct ResolvedCase {
     guide_artifacts: Vec<GuideArtifact>,
 }
 
+fn default_case_required() -> bool {
+    true
+}
+
 fn default_search_mode() -> MoveFamilyPolicy {
     MoveFamilyPolicy::Mixed
 }
@@ -177,6 +187,7 @@ struct HarnessSummary {
 struct FitnessSummary {
     required_cases: usize,
     passed_required_cases: usize,
+    non_required_cases: usize,
     target_hits: usize,
     total_points: i64,
     total_elapsed_ms: u128,
@@ -210,6 +221,7 @@ struct CaseSummary {
     actual_outcome: String,
     allowed_outcomes: Vec<String>,
     target_outcome: Option<String>,
+    required: bool,
     passed: bool,
     hit_target: bool,
     points: i64,
@@ -920,6 +932,20 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
         }
     };
 
+    let normalized_beam_width =
+        match normalized_beam_width(case.config.frontier_mode, case.config.beam_width) {
+            Ok(width) => width,
+            Err(reason) => {
+                return panic_result(
+                    &case.id,
+                    resolved.endpoint.source_dim,
+                    resolved.endpoint.target_dim,
+                    started.elapsed().as_millis(),
+                    reason,
+                )
+            }
+        };
+
     let request = SearchRequest {
         source: a.clone(),
         target: b.clone(),
@@ -927,9 +953,9 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
             max_lag: case.config.max_lag,
             max_intermediate_dim: case.config.max_intermediate_dim,
             max_entry: case.config.max_entry,
-            frontier_mode: FrontierMode::Bfs,
+            frontier_mode: case.config.frontier_mode,
             move_family_policy: case.config.search_mode,
-            beam_width: None,
+            beam_width: normalized_beam_width,
         },
         stage: case.config.stage,
         guide_artifacts: resolved.guide_artifacts,
@@ -1034,6 +1060,25 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
             ),
             telemetry,
         },
+    }
+}
+
+fn normalized_beam_width(
+    frontier_mode: FrontierMode,
+    beam_width: Option<usize>,
+) -> Result<Option<usize>, String> {
+    if !frontier_mode.uses_beam_width() {
+        if beam_width.is_some() {
+            return Err(
+                "beam_width requires frontier_mode to be beam or beam_bfs_handoff".to_string(),
+            );
+        }
+        return Ok(None);
+    }
+    match beam_width {
+        Some(0) => Err("beam_width must be at least 1".to_string()),
+        Some(width) => Ok(Some(width)),
+        None => Ok(Some(DEFAULT_BEAM_WIDTH)),
     }
 }
 
@@ -1188,9 +1233,14 @@ fn not_equivalent_result_model(
 
 fn stage_combination_label(config: &JsonSearchConfig) -> String {
     match config.stage {
-        SearchStage::EndpointSearch => format!("endpoint_search/{:?}", config.search_mode),
+        SearchStage::EndpointSearch => format!(
+            "endpoint_search/frontier={:?}/beam_width={:?}/move_policy={:?}",
+            config.frontier_mode, config.beam_width, config.search_mode
+        ),
         SearchStage::GuidedRefinement => format!(
-            "guided_refinement/{:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}/segment_timeout_secs={:?}",
+            "guided_refinement/frontier={:?}/beam_width={:?}/move_policy={:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}/segment_timeout_secs={:?}",
+            config.frontier_mode,
+            config.beam_width,
             config.search_mode,
             config.guided_refinement.max_shortcut_lag,
             config.guided_refinement.min_gap,
@@ -1199,7 +1249,9 @@ fn stage_combination_label(config: &JsonSearchConfig) -> String {
             config.guided_refinement.segment_timeout_secs,
         ),
         SearchStage::ShortcutSearch => format!(
-            "shortcut_search/{:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}/guided_shortcut_lag={}/guided_min_gap={}/guided_max_gap={:?}/guided_rounds={}/guided_segment_timeout_secs={:?}",
+            "shortcut_search/frontier={:?}/beam_width={:?}/move_policy={:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}/guided_shortcut_lag={}/guided_min_gap={}/guided_max_gap={:?}/guided_rounds={}/guided_segment_timeout_secs={:?}",
+            config.frontier_mode,
+            config.beam_width,
             config.search_mode,
             config.shortcut_search.max_guides,
             config.shortcut_search.rounds,
@@ -1238,7 +1290,9 @@ fn run_harness(
             .unwrap_or_else(|| (1usize, String::new(), 0usize, case.id.clone()))
     });
 
+    let mut required_cases = 0usize;
     let mut passed_required_cases = 0usize;
+    let mut non_required_cases = 0usize;
     let mut target_hits = 0usize;
     let mut total_points = 0i64;
     let mut total_elapsed_ms = 0u128;
@@ -1265,8 +1319,13 @@ fn run_harness(
             .is_some_and(|target| target == &executed.actual_outcome);
         let points = case.points.for_outcome(&executed.actual_outcome);
 
-        if passed {
-            passed_required_cases += 1;
+        if case.required {
+            required_cases += 1;
+            if passed {
+                passed_required_cases += 1;
+            }
+        } else {
+            non_required_cases += 1;
         }
         if hit_target {
             target_hits += 1;
@@ -1325,6 +1384,7 @@ fn run_harness(
             actual_outcome: executed.actual_outcome,
             allowed_outcomes: case.allowed_outcomes.clone(),
             target_outcome: case.target_outcome.clone(),
+            required: case.required,
             passed,
             hit_target,
             points,
@@ -1350,8 +1410,9 @@ fn run_harness(
         cases_path: cases_path.display().to_string(),
         reused_history_sources: reused_results.sources.len(),
         fitness: FitnessSummary {
-            required_cases: corpus.cases.len(),
+            required_cases,
             passed_required_cases,
+            non_required_cases,
             target_hits,
             total_points,
             total_elapsed_ms,
@@ -1527,7 +1588,7 @@ fn build_strategy_summaries(cases: &[CaseSummary]) -> Vec<StrategySummary> {
             let mut best_known_improvements = 0usize;
 
             for case in &group_cases {
-                if case.passed {
+                if case.required && case.passed {
                     passed_required_cases += 1;
                 }
                 if case.hit_target {
@@ -1938,6 +1999,10 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
         "required_passes: {}/{}\n",
         summary.fitness.passed_required_cases, summary.fitness.required_cases
     ));
+    out.push_str(&format!(
+        "non_required_cases: {}\n",
+        summary.fitness.non_required_cases
+    ));
     out.push_str(&format!("target_hits: {}\n", summary.fitness.target_hits));
     out.push_str(&format!("total_points: {}\n", summary.fitness.total_points));
     out.push_str(&format!(
@@ -1993,17 +2058,19 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
             for variant in &comparison.variants {
                 out.push_str(&format!(
-                    "  {}: strategy={} stage_combo={} mode={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
-                    variant.case_id,
-                    variant
-                        .campaign
-                        .as_ref()
-                        .map(|campaign| campaign.strategy.as_str())
-                        .unwrap_or("-"),
-                    variant.stage_combination,
-                    variant.config.search_mode,
-                    variant.config.stage,
-                    variant.config.max_lag,
+                "  {}: strategy={} stage_combo={} frontier={:?} beam_width={:?} move_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
+                variant.case_id,
+                variant
+                    .campaign
+                    .as_ref()
+                    .map(|campaign| campaign.strategy.as_str())
+                    .unwrap_or("-"),
+                variant.stage_combination,
+                variant.config.frontier_mode,
+                variant.config.beam_width,
+                variant.config.search_mode,
+                variant.config.stage,
+                variant.config.max_lag,
                     variant.config.max_intermediate_dim,
                     variant.config.max_entry,
                     variant.actual_outcome,
@@ -2071,8 +2138,9 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
 
     for case in &summary.cases {
         out.push_str(&format!(
-            "- {}: outcome={} passed={} target={} points={} elapsed={}ms\n",
+            "- {}: required={} outcome={} passed={} target={} points={} elapsed={}ms\n",
             case.id,
+            case.required,
             case.actual_outcome,
             case.passed,
             case.hit_target,
@@ -2080,9 +2148,11 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             case.elapsed_ms
         ));
         out.push_str(&format!(
-            "  endpoints: {}x{} config: mode={:?} stage={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
+            "  endpoints: {}x{} config: frontier={:?} beam_width={:?} move_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
             case.endpoint.source_dim,
             case.endpoint.target_dim,
+            case.config.frontier_mode,
+            case.config.beam_width,
             case.config.search_mode,
             case.config.stage,
             case.config.max_lag,
@@ -2213,6 +2283,8 @@ mod tests {
                 max_lag: 1,
                 max_intermediate_dim: 3,
                 max_entry: 1,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -2221,6 +2293,7 @@ mod tests {
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             points: OutcomePoints {
                 equivalent: 1,
                 not_equivalent: 0,
@@ -2259,6 +2332,8 @@ mod tests {
                 max_lag: 1,
                 max_intermediate_dim: 3,
                 max_entry: 1,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -2267,6 +2342,7 @@ mod tests {
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             points: OutcomePoints {
                 equivalent: 1,
                 not_equivalent: 0,
@@ -2292,6 +2368,50 @@ mod tests {
         assert_eq!(result.result_model.source_dim, 2);
         assert_eq!(result.result_model.target_dim, 3);
         assert_eq!(result.result_model.witness_lag, Some(1));
+    }
+
+    #[test]
+    fn run_case_rejects_beam_width_without_beam_frontier() {
+        let case = ResearchCase {
+            id: "invalid-beam-width".to_string(),
+            description: "beam width requires beam frontier".to_string(),
+            a: vec![vec![1, 0], vec![0, 1]],
+            b: vec![vec![1, 0], vec![0, 1]],
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
+            required: true,
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 2,
+                max_entry: 1,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: Some(4),
+                search_mode: MoveFamilyPolicy::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+        };
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "panic");
+        assert!(result
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("beam_width requires frontier_mode")));
     }
 
     #[test]
@@ -2344,6 +2464,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 2,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
@@ -2358,6 +2480,7 @@ mod tests {
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             points: OutcomePoints {
                 equivalent: 1,
                 not_equivalent: 0,
@@ -2396,6 +2519,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 2,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
@@ -2410,6 +2535,7 @@ mod tests {
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             points: OutcomePoints {
                 equivalent: 1,
                 not_equivalent: 0,
@@ -2446,6 +2572,8 @@ mod tests {
                 max_lag: 2,
                 max_intermediate_dim: 3,
                 max_entry: 2,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::ShortcutSearch,
                 guided_refinement: GuidedRefinementConfig {
@@ -2465,6 +2593,7 @@ mod tests {
             timeout_ms: 1_000,
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             points: OutcomePoints {
                 equivalent: 1,
                 not_equivalent: 0,
@@ -2522,6 +2651,8 @@ mod tests {
                     max_lag: 1,
                     max_intermediate_dim: 2,
                     max_entry: 1,
+                    frontier_mode: FrontierMode::Bfs,
+                    beam_width: None,
                     search_mode: MoveFamilyPolicy::Mixed,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
@@ -2530,6 +2661,7 @@ mod tests {
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
                 target_outcome: Some("equivalent".to_string()),
+                required: true,
                 passed: true,
                 hit_target: true,
                 points: 1,
@@ -2568,6 +2700,8 @@ mod tests {
                     max_lag: 2,
                     max_intermediate_dim: 2,
                     max_entry: 2,
+                    frontier_mode: FrontierMode::Bfs,
+                    beam_width: None,
                     search_mode: MoveFamilyPolicy::GraphOnly,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
@@ -2576,6 +2710,7 @@ mod tests {
                 actual_outcome: "equivalent".to_string(),
                 allowed_outcomes: vec!["equivalent".to_string()],
                 target_outcome: Some("equivalent".to_string()),
+                required: true,
                 passed: true,
                 hit_target: true,
                 points: 1,
@@ -2737,6 +2872,8 @@ mod tests {
                 max_lag: 6,
                 max_intermediate_dim: 3,
                 max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -2745,6 +2882,7 @@ mod tests {
             actual_outcome: "unknown".to_string(),
             allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             passed: true,
             hit_target: false,
             points: 0,
@@ -2811,6 +2949,8 @@ mod tests {
                 max_lag: 4,
                 max_intermediate_dim: 2,
                 max_entry: 4,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
                 search_mode: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -2819,6 +2959,7 @@ mod tests {
             actual_outcome: "equivalent".to_string(),
             allowed_outcomes: vec!["equivalent".to_string()],
             target_outcome: Some("equivalent".to_string()),
+            required: true,
             passed: true,
             hit_target: true,
             points: 10,
