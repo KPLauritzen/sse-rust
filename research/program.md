@@ -1,190 +1,134 @@
-# SSE Autoresearch
+# SSE Autoresearch Program
 
-This repo can support autonomous search work, but only through the fixed research harness.
+This program defines how to run autonomous solver work against the current
+`research_harness` surface.
 
-## Setup
+## Scope
 
-1. Create a fresh branch for the run.
-   Prefer `autoresearch/<tag>`.
-2. Read these files before editing:
-   - `README.md`
-   - `research/README.md`
-   - `docs/TODO.md`
-   - `research/cases.json`
-   - `src/search.rs`
-   - `src/factorisation.rs`
-   - `src/invariants.rs`
-3. Check the current actionable backlog:
+Use this workflow for normal solver iteration (`src/search.rs`,
+`src/factorisation.rs`, `src/invariants.rs`, and related runtime plumbing).
+
+For harness or corpus schema work (`src/bin/research_harness.rs`,
+`research/cases.json`, fixture wiring), open or claim a dedicated `bd` item
+first and keep the change set explicitly scoped.
+
+## Ground Rules
+
+- `bd` is the active backlog. Do not track active work in ad hoc markdown TODOs.
+- `research/cases.json` is the canonical evaluation corpus.
+- Required-case correctness is the hard gate; runtime is secondary.
+- Keep `research/log.md` terse; put longer evidence in `research/notes/`.
+
+## Baseline Setup
+
+1. Check backlog and claim/update your issue:
    - `bd ready --json`
-   - if you pick an existing item, update it as you work
-   - if the work is new, create a `bd` item before you start editing
-4. Before making any changes, capture the baseline:
+   - `bd show <id> --json`
+   - `bd update <id> --status in_progress --notes "..." --json`
+2. Capture a baseline artifact:
    - `just research-json-save baseline`
-   - record the baseline result for comparison
-5. Verify the baseline harness is green:
-   - `just research`
+3. Run fast correctness checks:
    - `cargo test -q`
-6. Create `research/results.tsv` if it does not exist yet.
-   Header:
-   `commit	required_passes	required_total	target_hits	total_points	focus_score	total_ms	status	description	artifact_path`
-7. Leave `research/results.tsv` untracked by git.
-   It is a local lab notebook, not repository history.
 
-## Frozen Files
+## Current Bottlenecks (2026-04 Refresh)
 
-- `research/cases.json` is the ground-truth evaluator unless the human explicitly asks for case work.
-- `src/bin/research_harness.rs` is frozen during normal search experiments unless the human explicitly asks for harness work.
-- `research/program.md` is also frozen during the loop unless the human explicitly asks for workflow changes.
-- Do not change the expected outcomes for cases to make the score look better.
-- Do not lower correctness pressure just to manufacture target hits.
+Prioritize work that moves one of these weak spots:
 
-## Editable Surface
+1. `k = 3` shortcut plateau:
+   - generic staged shortcut search repeatedly converges to lag `7` on
+     `brix_ruiz_k3` when seeded from the normalized guide pool.
+   - open objective remains lag `< 7`.
+2. Frontier growth on hard probes:
+   - mixed `k=3`/`k=4` telemetry-focus probes still spend most effort in broad
+     candidate generation and pruning churn.
+3. Frontier strategy quality:
+   - beam and beam-to-BFS-handoff are now implemented surfaces, but ranking and
+     handoff policies are still unstable on hard graph-only controls.
+4. Missing short structured vocabulary around the `4x4` family region:
+   - the remaining short-path gap is structural, not just deeper brute force.
 
-Start narrow. Prefer changes in:
+## Harness Scoring Contract
 
+The harness remains lexicographic, with required cases as the correctness gate:
+
+1. Pass all **required** cases.
+2. Increase `target_hits`.
+3. Increase `total_points`.
+4. Improve telemetry-focus progress metrics.
+5. Reduce `total_elapsed_ms`.
+
+Never accept a change that regresses required-case correctness for runtime gain.
+
+## Benchmark-Style Measurements Through Harness
+
+Decision:
+
+- Scenario-level benchmark probes **should** be expressible through
+  `research_harness` so they share the same endpoint fixtures, stage configs,
+  and telemetry schema as normal research cases.
+- They must be marked as non-gating corpus entries (`"required": false`) to
+  avoid distorting correctness gates.
+
+Usage rules for measurement cases:
+
+- set `required` to `false`,
+- keep `target_outcome` as `null`,
+- keep points neutral (typically `0` across normal outcomes),
+- use campaign IDs/strategies that clearly label them as measurement probes.
+
+Microbench-level timing of isolated hot loops still belongs in dedicated bench
+surfaces, not in harness pass/fail logic.
+
+See `docs/research-harness-benchmark-policy.md` for tradeoffs and follow-up.
+
+## Experiment Loop
+
+Repeat:
+
+1. Pick one bottleneck hypothesis.
+2. Make one focused code change.
+3. Run `cargo test -q`.
+4. Run `just research-json-save <stamp>`.
+5. Compare against baseline and latest kept artifact.
+6. Commit with a descriptive message.
+7. Update `bd` notes with evidence and decision.
+
+If a change regresses required-case correctness, revert it promptly.
+
+If a change is neutral or negative on the active bottleneck, prefer reverting
+instead of stacking speculative complexity.
+
+## What To Read Before Deep Changes
+
+- `research/README.md`
+- `research/cases.json`
+- `research/log.md`
+- relevant notes in `research/notes/`
 - `src/search.rs`
 - `src/factorisation.rs`
 - `src/invariants.rs`
 
-Avoid editing wasm/deploy/docs files during the experiment loop unless the human asks.
-Avoid editing the harness or cases during normal solver experiments.
+For frontier-strategy work, include:
 
-## Objective
+- `research/notes/2026-04-13-beam-k3-executor-retune.md`
+- `research/notes/2026-04-14-beam-bfs-handoff-graph-only-k3.md`
 
-The harness score is lexicographic:
+For shortcut plateau work, include:
 
-1. Pass all required cases in `research/cases.json`.
-2. Increase `target_hits`.
-3. Increase `total_points`.
-4. Increase `telemetry_focus_score` on cases tagged `telemetry-focus`.
-5. Reduce `total_ms`.
+- `research/notes/2026-04-12-baker-k3-factor-shape.md`
+- `research/notes/2026-04-14-k3-normalized-guide-pool-shortcutting.md`
 
-Never accept a change that breaks a required correctness case just to improve runtime.
-Never accept a runtime win that leaves a telemetry-focus case strictly less informative than before.
+## Profiling Guidance
 
-## Command
+The sandbox does not provide system profilers. Use Rust-level profiling hooks
+(`pprof`, `dhat`) only when needed, and remove or gate instrumentation before
+finalizing commits.
 
-Use:
+## Session Close
 
-```sh
-just research
-```
+Before pausing or handing off:
 
-For machine-readable output:
-
-```sh
-just research-json
-```
-
-To save a machine-readable artifact for an experiment:
-
-```sh
-just research-json-save <stamp>
-```
-
-This writes `research/runs/<stamp>.json`.
-
-## Experiment Loop
-
-LOOP FOREVER
-
-1. Inspect git state and current `bd` status.
-2. Make one focused search improvement.
-3. Run `cargo test -q`.
-4. Run `just research-json-save <stamp>`.
-   The `<stamp>` should be stable and sortable, for example `2026-04-05-1530-k3-best-first`.
-5. Commit the change with a descriptive message prefixed with `experiment:`.
-6. Evaluate the result:
-   - If required cases regress, explicitly revert the commit (`git revert --no-edit HEAD`).
-   - If required cases stay green, prefer changes that improve `target_hits`, then `total_points`, then `telemetry_focus_score`, then `total_ms`.
-   - If the experiment did not improve the score, explicitly revert the commit (`git revert --no-edit HEAD`).
-7. Append one row to `research/results.tsv`, including the artifact path.
-8. Update or close the corresponding `bd` item.
-
-Every experiment — kept or rejected — stays in git history as a commit plus its revert. This gives full history for revisiting past attempts.
-
-When `brix_ruiz_k3` is still `unknown`, inspect the proxy telemetry from `just research` or `just research-json`.
-Use it to identify whether the current bottleneck is frontier growth, factorisation volume, pruning quality, or collision rate.
-In particular, pay attention to:
-
-- `terminal_bottleneck`
-- `productive_layers`
-- `deepest_productive_layer`
-- `first_stagnant_layer`
-- the compact per-layer dump for cases tagged `telemetry-focus`
-
-Do not treat raw runtime alone as the optimisation target.
-`unknown` is only acceptable for `brix_ruiz_k3`; treat it as a regression for the other cases.
-Zero telemetry on some easy cases is expected when they exit through a shortcut or invariant check before BFS.
-
-The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
-
-NEVER STOP: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working indefinitely until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
-
-Research notes:
-
-- Keep the terse chronological ledger in `research/log.md`.
-- Write short, concise, `1-3` line log entries describing what you tried and,
-  if it failed, why you think it did not work. No implementation details there.
-- If a reading session or experiment needs more room, add a note under
-  `research/notes/` and reference the relevant commit hash or run stamp.
-
-## Profiling
-
-The sandbox has no system profiling tools (`perf`, `valgrind`, etc.).
-Two pure-Rust profilers are available as dev-dependencies instead.
-
-### CPU profiling with `pprof`
-
-Add to a binary's `main()`:
-
-```rust
-let guard = pprof::ProfilerGuardBuilder::default()
-    .frequency(1000)
-    .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-    .build()
-    .unwrap();
-
-// ... your code ...
-
-if let Ok(report) = guard.report().build() {
-    // Print a text summary of the top frames to stderr.
-    eprintln!("--- CPU profile ---");
-    eprintln!("{:?}", report);
-}
-```
-
-`report`'s `Debug` output prints a text-based stack tree with sample counts,
-readable directly in the terminal. No browser needed.
-
-### Heap profiling with `dhat`
-
-Add to a binary crate (not lib):
-
-```rust
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
-fn main() {
-    let _profiler = dhat::Profiler::new_heap();
-    // ... your code ...
-}
-```
-
-`dhat` prints a text summary to stderr on exit with total allocations,
-peak heap usage, and the hottest allocation sites with backtraces.
-The summary is directly readable in the terminal — no viewer needed.
-It also writes `dhat-heap.json` for optional detailed analysis.
-
-### Guidelines
-
-- Profile on release builds (`--release`) for realistic results.
-- Remove or gate profiler instrumentation behind `#[cfg(feature = "...")]` before committing to the main experiment loop — the `#[global_allocator]` override in particular affects all allocations.
-- Both crates are in `[dev-dependencies]` so they do not affect the library or wasm builds.
-
-## Known Constraints
-
-- `brix_ruiz_k3` is a known-SSE target and currently hard for brute-force search.
-- Matrix-level aligned or compatible search is now in scope, but it is larger work than the BFS and telemetry loop.
-- Optimisation work should usually focus on the existing BFS and factorisation stack unless the human explicitly changes scope.
-- Preferred attack directions: structured move ordering, positive-conjugacy-guided proposals, best-first frontier ordering, factorisation memoisation, and iterative deepening on search bounds.
+1. ensure `bd` status/notes reflect reality,
+2. keep or revert the final experiment commit based on evidence,
+3. log results in `research/log.md` and `research/notes/` as needed,
+4. keep run artifacts in `research/runs/` (local unless explicitly requested).

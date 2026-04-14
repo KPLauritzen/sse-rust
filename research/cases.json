@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "cases": [
     {
       "id": "self_sse",
@@ -679,6 +679,107 @@
         "id": "brix_ruiz_k3",
         "strategy": "graph_only_probe",
         "schedule_order": 30
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_graph_only_beam_probe",
+      "description": "Benchmark-style measurement probe: graph-only endpoint search with the beam frontier on the hard k=3 family target.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 10,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "search_mode": "graph-only",
+        "frontier_mode": "beam",
+        "beam_width": 10
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement"],
+      "campaign": {
+        "id": "brix_ruiz_k3_frontier",
+        "strategy": "graph_only_beam_probe",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_graph_only_beam_bfs_handoff_probe",
+      "description": "Benchmark-style measurement probe: graph-only endpoint search with beam-to-BFS handoff on the hard k=3 family target.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 10,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "search_mode": "graph-only",
+        "frontier_mode": "beam_bfs_handoff",
+        "beam_width": 10
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement"],
+      "campaign": {
+        "id": "brix_ruiz_k3_frontier",
+        "strategy": "graph_only_beam_bfs_handoff_probe",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_shortcut_normalized_pool_probe",
+      "description": "Benchmark-style measurement probe: shortcut search over the normalized k=3 guide pool under a bounded staged configuration.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "guide_artifact_paths": ["research/guide_artifacts/k3_normalized_guide_pool.json"],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 4,
+        "max_entry": 5,
+        "search_mode": "mixed",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 3,
+          "min_gap": 2,
+          "max_gap": 4,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 6,
+          "rounds": 1,
+          "max_total_segment_attempts": 48
+        }
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "shortcut-stage", "guide-pool", "benchmark-measurement"],
+      "campaign": {
+        "id": "brix_ruiz_k3_shortcut_pool",
+        "strategy": "shortcut_search_normalized_pool_probe",
+        "schedule_order": 10
       }
     },
     {

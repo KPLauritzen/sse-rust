@@ -9,6 +9,8 @@ repo. It is not the active backlog; use `bd` for actionable tasks.
   constraints around the harness.
 - [`cases.json`](cases.json) is the ground-truth benchmark set for
   `research_harness`.
+  Required cases (`"required": true`, default) gate correctness; non-required
+  cases (`"required": false`) are for benchmark-style measurement probes.
 - [`log.md`](log.md) is the terse chronological ledger. Keep entries short.
 - [`notes/README.md`](notes/README.md) defines the structure for longer-form
   notes that do not fit cleanly in the log.
@@ -31,6 +33,9 @@ cargo run --profile dist --features research-tools --bin research_harness -- \
 
 Those local artifacts should stay untracked unless the human explicitly asks
 for repository changes to that policy.
+
+Benchmark-style case policy is documented in
+[`../docs/research-harness-benchmark-policy.md`](../docs/research-harness-benchmark-policy.md).
 
 ## Supported Entry Points
 
