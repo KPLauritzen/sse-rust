@@ -737,7 +737,23 @@ fn print_json(
     telemetry: &SearchTelemetry,
     show_telemetry: bool,
 ) {
-    let (outcome, steps, reason) = match result {
+    let obj = build_result_json(a, b, stage, result, telemetry, show_telemetry);
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&obj).expect("json serialization")
+    );
+}
+
+fn build_result_json(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    stage: SearchStage,
+    result: &SearchRunResult,
+    telemetry: &SearchTelemetry,
+    show_telemetry: bool,
+) -> serde_json::Value {
+    let (outcome, steps, reason, relation) = match result {
         SearchRunResult::Equivalent(path) => (
             "equivalent",
             Some(
@@ -747,38 +763,46 @@ fn print_json(
                     .collect::<Vec<serde_json::Value>>(),
             ),
             None,
+            None,
         ),
         SearchRunResult::EquivalentByConcreteShift(proof) => (
             "equivalent_by_concrete_shift",
             None,
             Some(proof.description()),
+            Some(proof.relation.as_str().to_string()),
         ),
-        SearchRunResult::NotEquivalent(reason) => ("not_equivalent", None, Some(reason.clone())),
-        SearchRunResult::Unknown => ("unknown", None, None),
+        SearchRunResult::NotEquivalent(reason) => {
+            ("not_equivalent", None, Some(reason.clone()), None)
+        }
+        SearchRunResult::Unknown => ("unknown", None, None, None),
     };
 
-    print_json_value(
+    let obj = build_json_value(
         serde_json::json!(dyn_matrix_to_vecs(a)),
         serde_json::json!(dyn_matrix_to_vecs(b)),
         stage,
         outcome,
         steps,
         reason,
+        relation,
         telemetry,
         show_telemetry,
     );
+
+    obj
 }
 
-fn print_json_value(
+fn build_json_value(
     a: serde_json::Value,
     b: serde_json::Value,
     stage: SearchStage,
     outcome: &str,
     steps: Option<Vec<serde_json::Value>>,
     reason: Option<String>,
+    relation: Option<String>,
     telemetry: &SearchTelemetry,
     show_telemetry: bool,
-) {
+) -> serde_json::Value {
     let mut obj = serde_json::json!({
         "a": a,
         "b": b,
@@ -792,14 +816,14 @@ fn print_json_value(
     if let Some(reason) = reason {
         obj["reason"] = serde_json::json!(reason);
     }
+    if let Some(relation) = relation {
+        obj["relation"] = serde_json::json!(relation);
+    }
     if show_telemetry {
         obj["telemetry"] = serde_json::to_value(telemetry).unwrap_or_default();
     }
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&obj).expect("json serialization")
-    );
+    obj
 }
 
 fn step_json(step: &sse_core::types::EsseStep) -> serde_json::Value {
@@ -829,10 +853,15 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cli, parse_matrix, run_with_args};
+    use super::{build_result_json, parse_cli, parse_matrix, run_with_args};
     use rusqlite::Connection;
+    use sse_core::aligned::{
+        canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
+    };
+    use sse_core::matrix::{DynMatrix, SqMatrix};
     use sse_core::types::{
-        FrontierMode, GuideArtifact, GuideArtifactPayload, MoveFamilyPolicy, SearchStage,
+        ConcreteShiftProof2x2, FrontierMode, GuideArtifact, GuideArtifactPayload, MoveFamilyPolicy,
+        SearchRunResult, SearchStage, SearchTelemetry,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -926,6 +955,38 @@ mod tests {
         assert_eq!(cli.shortcut_search.rounds, 2);
         assert_eq!(cli.shortcut_search.max_total_segment_attempts, 16);
         assert!(cli.shortcut_search.artifacts.emit_promoted_guides);
+    }
+
+    #[test]
+    fn concrete_shift_json_includes_relation_field() {
+        let a = SqMatrix::identity();
+        let witness = canonical_module_shift_witness_2x2(
+            &a,
+            &a,
+            ShiftEquivalenceWitness2x2 {
+                lag: 1,
+                r: a.clone(),
+                s: a.clone(),
+            },
+        )
+        .expect("identity should admit canonical witness");
+        let proof = ConcreteShiftProof2x2 {
+            relation: ConcreteShiftRelation2x2::Balanced,
+            witness,
+        };
+        let dyn_a = DynMatrix::from_sq(&a);
+        let json = build_result_json(
+            &dyn_a,
+            &dyn_a,
+            SearchStage::EndpointSearch,
+            &SearchRunResult::EquivalentByConcreteShift(proof),
+            &SearchTelemetry::default(),
+            false,
+        );
+
+        assert_eq!(json["outcome"], "equivalent_by_concrete_shift");
+        assert_eq!(json["reason"], "balanced concrete-shift witness");
+        assert_eq!(json["relation"], "balanced");
     }
 
     #[test]

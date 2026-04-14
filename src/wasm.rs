@@ -12,6 +12,8 @@ use crate::types::{FrontierMode, MoveFamilyPolicy, SearchConfig};
 struct WasmSseResult {
     status: String,
     reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relation: Option<String>,
     /// Each step is a (U, V) pair: the current matrix equals UV, the next equals VU.
     steps: Option<Vec<WasmSseStep>>,
 }
@@ -63,6 +65,45 @@ fn module_witness_to_wasm(witness: &ModuleShiftWitness2x2) -> WasmAlignedModuleW
     }
 }
 
+fn wasm_sse_result_from(result: crate::types::SseResult<2>) -> WasmSseResult {
+    match result {
+        crate::types::SseResult::Equivalent(path) => {
+            let steps: Vec<WasmSseStep> = path
+                .steps
+                .iter()
+                .map(|s| WasmSseStep {
+                    u: dynmatrix_to_vecs(&s.u),
+                    v: dynmatrix_to_vecs(&s.v),
+                })
+                .collect();
+            WasmSseResult {
+                status: "equivalent".into(),
+                reason: None,
+                relation: None,
+                steps: Some(steps),
+            }
+        }
+        crate::types::SseResult::EquivalentByConcreteShift(proof) => WasmSseResult {
+            status: "equivalent".into(),
+            reason: Some(proof.description()),
+            relation: Some(proof.relation.as_str().to_string()),
+            steps: None,
+        },
+        crate::types::SseResult::NotEquivalent(reason) => WasmSseResult {
+            status: "not_equivalent".into(),
+            reason: Some(reason),
+            relation: None,
+            steps: None,
+        },
+        crate::types::SseResult::Unknown => WasmSseResult {
+            status: "unknown".into(),
+            reason: None,
+            relation: None,
+            steps: None,
+        },
+    }
+}
+
 /// Search for strong shift equivalence between two 2x2 nonneg integer matrices.
 ///
 /// Returns a JSON string with the result.
@@ -93,38 +134,7 @@ pub fn search_sse(
 
     let result = search_sse_2x2(&a, &b, &config);
 
-    let wasm_result = match result {
-        crate::types::SseResult::Equivalent(path) => {
-            let steps: Vec<WasmSseStep> = path
-                .steps
-                .iter()
-                .map(|s| WasmSseStep {
-                    u: dynmatrix_to_vecs(&s.u),
-                    v: dynmatrix_to_vecs(&s.v),
-                })
-                .collect();
-            WasmSseResult {
-                status: "equivalent".into(),
-                reason: None,
-                steps: Some(steps),
-            }
-        }
-        crate::types::SseResult::EquivalentByConcreteShift(proof) => WasmSseResult {
-            status: "equivalent".into(),
-            reason: Some(proof.description()),
-            steps: None,
-        },
-        crate::types::SseResult::NotEquivalent(reason) => WasmSseResult {
-            status: "not_equivalent".into(),
-            reason: Some(reason),
-            steps: None,
-        },
-        crate::types::SseResult::Unknown => WasmSseResult {
-            status: "unknown".into(),
-            reason: None,
-            steps: None,
-        },
-    };
+    let wasm_result = wasm_sse_result_from(result);
 
     serde_json::to_string(&wasm_result).unwrap()
 }
@@ -202,6 +212,42 @@ pub fn search_aligned_shift(
         max_entry,
         max_module_witnesses,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wasm_sse_result_from;
+    use crate::aligned::{
+        canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
+    };
+    use crate::matrix::SqMatrix;
+    use crate::types::{ConcreteShiftProof2x2, SseResult};
+
+    #[test]
+    fn concrete_shift_wasm_json_includes_relation_field() {
+        let a = SqMatrix::identity();
+        let witness = canonical_module_shift_witness_2x2(
+            &a,
+            &a,
+            ShiftEquivalenceWitness2x2 {
+                lag: 1,
+                r: a.clone(),
+                s: a.clone(),
+            },
+        )
+        .expect("identity should admit canonical witness");
+        let json = serde_json::to_value(wasm_sse_result_from(
+            SseResult::<2>::EquivalentByConcreteShift(ConcreteShiftProof2x2 {
+                relation: ConcreteShiftRelation2x2::Compatible,
+                witness,
+            }),
+        ))
+        .expect("wasm result should serialize");
+
+        assert_eq!(json["status"], "equivalent");
+        assert_eq!(json["reason"], "compatible concrete-shift witness");
+        assert_eq!(json["relation"], "compatible");
+    }
 }
 
 /// Backwards-compatible alias for older frontend code.

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::aligned::{
-    search_concrete_shift_equivalence_2x2, ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2,
+    search_concrete_shift_equivalence_with_lag_2x2, ConcreteShiftRelation2x2,
     ConcreteShiftSearchResult2x2,
 };
 use crate::factorisation::visit_all_factorisations_with_family;
@@ -2383,48 +2383,47 @@ fn try_concrete_shift_shortcut_2x2(
     }
 
     let max_witnesses = concrete_shift_witness_budget(config);
-    let proofs = [
-        ConcreteShiftRelation2x2::Aligned,
-        ConcreteShiftRelation2x2::Balanced,
-        ConcreteShiftRelation2x2::Compatible,
-    ]
-    .into_iter()
-    .filter_map(|relation| {
-        let concrete_config = ConcreteShiftSearchConfig2x2 {
-            relation,
-            max_lag: config.max_lag as u32,
-            max_entry: config.max_entry,
+    find_concrete_shift_shortcut_proof(config.max_lag as u32, |lag, relation| {
+        search_concrete_shift_equivalence_with_lag_2x2(
+            a,
+            b,
+            lag,
+            config.max_entry,
             max_witnesses,
-        };
-        if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
-            search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
-        {
-            Some(ConcreteShiftProof2x2 { relation, witness })
-        } else {
-            None
-        }
-    });
-
-    choose_min_lag_concrete_shift_proof(proofs)
-}
-
-fn concrete_shift_relation_priority(relation: ConcreteShiftRelation2x2) -> usize {
-    match relation {
-        ConcreteShiftRelation2x2::Aligned => 0,
-        ConcreteShiftRelation2x2::Balanced => 1,
-        ConcreteShiftRelation2x2::Compatible => 2,
-    }
-}
-
-fn choose_min_lag_concrete_shift_proof(
-    proofs: impl IntoIterator<Item = ConcreteShiftProof2x2>,
-) -> Option<ConcreteShiftProof2x2> {
-    proofs.into_iter().min_by_key(|proof| {
-        (
-            proof.witness.shift.lag,
-            concrete_shift_relation_priority(proof.relation),
+            relation,
         )
     })
+}
+
+fn find_concrete_shift_shortcut_proof<F>(
+    max_lag: u32,
+    mut probe: F,
+) -> Option<ConcreteShiftProof2x2>
+where
+    F: FnMut(u32, ConcreteShiftRelation2x2) -> ConcreteShiftSearchResult2x2,
+{
+    for lag in 1..=max_lag {
+        let mut any_limit = false;
+        for relation in [
+            ConcreteShiftRelation2x2::Aligned,
+            ConcreteShiftRelation2x2::Balanced,
+            ConcreteShiftRelation2x2::Compatible,
+        ] {
+            match probe(lag, relation) {
+                ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                    return Some(ConcreteShiftProof2x2 { relation, witness });
+                }
+                ConcreteShiftSearchResult2x2::Exhausted => {}
+                ConcreteShiftSearchResult2x2::SearchLimitReached => any_limit = true,
+            }
+        }
+
+        if any_limit {
+            return None;
+        }
+    }
+
+    None
 }
 
 fn compare_beam_frontier_entries(left: &BeamFrontierEntry, right: &BeamFrontierEntry) -> Ordering {
@@ -6754,7 +6753,7 @@ mod tests {
     }
 
     #[test]
-    fn test_choose_min_lag_concrete_shift_proof_prefers_lower_lag() {
+    fn test_find_concrete_shift_shortcut_proof_prefers_lower_lag() {
         let a = SqMatrix::identity();
         let config = SearchConfig {
             max_lag: 1,
@@ -6767,18 +6766,57 @@ mod tests {
         let base_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
             .expect("identity pair should produce a bounded concrete-shift proof");
 
-        let mut aligned_lag_four = base_proof.clone();
-        aligned_lag_four.relation = ConcreteShiftRelation2x2::Aligned;
-        aligned_lag_four.witness.shift.lag = 4;
+        let mut balanced_lag_one = base_proof.witness.clone();
+        balanced_lag_one.shift.lag = 1;
 
-        let mut balanced_lag_one = base_proof;
-        balanced_lag_one.relation = ConcreteShiftRelation2x2::Balanced;
-        balanced_lag_one.witness.shift.lag = 1;
+        let mut probe_calls = Vec::new();
+        let chosen = find_concrete_shift_shortcut_proof(4, |lag, relation| {
+            probe_calls.push((lag, relation));
+            match (lag, relation) {
+                (1, ConcreteShiftRelation2x2::Balanced) => {
+                    ConcreteShiftSearchResult2x2::Equivalent(balanced_lag_one.clone())
+                }
+                (4, ConcreteShiftRelation2x2::Aligned) => {
+                    panic!("search should stop after finding the lag-1 proof")
+                }
+                _ => ConcreteShiftSearchResult2x2::Exhausted,
+            }
+        })
+        .expect("expected a chosen proof");
 
-        let chosen = choose_min_lag_concrete_shift_proof([aligned_lag_four, balanced_lag_one])
-            .expect("expected a chosen proof");
         assert_eq!(chosen.relation, ConcreteShiftRelation2x2::Balanced);
         assert_eq!(chosen.witness.shift.lag, 1);
+        assert_eq!(
+            probe_calls,
+            vec![
+                (1, ConcreteShiftRelation2x2::Aligned),
+                (1, ConcreteShiftRelation2x2::Balanced),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_find_concrete_shift_shortcut_proof_stops_after_lower_lag_limit() {
+        let mut probe_calls = Vec::new();
+        let proof = find_concrete_shift_shortcut_proof(3, |lag, relation| {
+            probe_calls.push((lag, relation));
+            match (lag, relation) {
+                (1, ConcreteShiftRelation2x2::Aligned) => {
+                    ConcreteShiftSearchResult2x2::SearchLimitReached
+                }
+                _ => ConcreteShiftSearchResult2x2::Exhausted,
+            }
+        });
+
+        assert!(proof.is_none());
+        assert_eq!(
+            probe_calls,
+            vec![
+                (1, ConcreteShiftRelation2x2::Aligned),
+                (1, ConcreteShiftRelation2x2::Balanced),
+                (1, ConcreteShiftRelation2x2::Compatible),
+            ]
+        );
     }
 
     #[test]
