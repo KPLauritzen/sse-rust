@@ -254,7 +254,22 @@ impl BeamFrontier {
     }
 
     fn expansion_batch_size(&self) -> usize {
-        self.beam_width.min(8).max(1)
+        self.beam_width.max(1)
+    }
+
+    fn refresh_approximate_hits(&mut self, other_signatures: &HashSet<ApproxSignature>) {
+        let mut changed = false;
+        for entry in &mut self.entries {
+            if !entry.approximate_hit
+                && other_signatures.contains(&approx_signature(&entry.canonical))
+            {
+                entry.approximate_hit = true;
+                changed = true;
+            }
+        }
+        if changed {
+            self.entries.sort_by(compare_beam_frontier_entries);
+        }
     }
 }
 
@@ -2317,7 +2332,12 @@ fn search_beam_2x2_with_telemetry_and_observer(
     );
 
     let mut layer_index = 0usize;
-    while let Some(expand_forward) = choose_next_beam_direction(&fwd_frontier, &bwd_frontier) {
+    loop {
+        fwd_frontier.refresh_approximate_hits(&bwd_signatures);
+        bwd_frontier.refresh_approximate_hits(&fwd_signatures);
+        let Some(expand_forward) = choose_next_beam_direction(&fwd_frontier, &bwd_frontier) else {
+            break;
+        };
         let direction = if expand_forward {
             SearchDirection::Forward
         } else {
@@ -2714,7 +2734,12 @@ fn search_beam_dyn_with_telemetry(
     );
 
     let mut layer_index = 0usize;
-    while let Some(expand_forward) = choose_next_beam_direction(&fwd_frontier, &bwd_frontier) {
+    loop {
+        fwd_frontier.refresh_approximate_hits(&bwd_signatures);
+        bwd_frontier.refresh_approximate_hits(&fwd_signatures);
+        let Some(expand_forward) = choose_next_beam_direction(&fwd_frontier, &bwd_frontier) else {
+            break;
+        };
         if deadline_reached(deadline) {
             break;
         }
@@ -4634,6 +4659,36 @@ mod tests {
         assert!(batch.iter().all(|entry| entry.depth == 1));
         assert_eq!(frontier.pop_best().unwrap().depth, 2);
         assert_eq!(frontier.pop_best().unwrap().depth, 3);
+    }
+
+    #[test]
+    fn test_beam_frontier_refreshes_approximate_hits() {
+        let mut frontier = BeamFrontier::new(2);
+        let exact = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let other = DynMatrix::new(2, 2, vec![1, 1, 1, 1]);
+
+        frontier.push(BeamFrontierEntry {
+            canonical: other.clone(),
+            depth: 1,
+            score: 0,
+            approximate_hit: false,
+            serial: 0,
+        });
+        frontier.push(BeamFrontierEntry {
+            canonical: exact.clone(),
+            depth: 1,
+            score: 5,
+            approximate_hit: false,
+            serial: 1,
+        });
+
+        let mut other_signatures = HashSet::new();
+        other_signatures.insert(approx_signature(&exact));
+        frontier.refresh_approximate_hits(&other_signatures);
+
+        let best = frontier.pop_best().unwrap();
+        assert!(best.approximate_hit);
+        assert_eq!(best.canonical, exact);
     }
 
     #[test]

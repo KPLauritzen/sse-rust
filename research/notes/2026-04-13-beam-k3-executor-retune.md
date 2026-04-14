@@ -49,3 +49,38 @@ Results after the executor retune:
   `unknown` in single-digit seconds.
 - The executor retune therefore improved bounded beam viability on the known
   `k=3` control, but it still does not produce an exact meet under `max_lag 7`.
+
+## Follow-Up Executor Sweep
+
+2026-04-14 follow-up kept the same score function and destructive beam pruning,
+but changed two executor details in `src/search.rs`:
+
+- queued beam entries now refresh their `approximate_hit` flag against the live
+  opposite-side signature set before direction choice;
+- same-depth expansion batches now consume the full kept beam slice for that
+  depth instead of a fixed `min(width, 8)` subset.
+
+Validation on the same bounded control:
+
+- beam width `50`: `unknown`
+  - `frontier_nodes_expanded = 602`
+  - `approximate_other_side_hits = 74`
+  - `total_visited_nodes = 11038`
+  - `layers = 14`
+  - `collisions_with_other_frontier = 0`
+- beam width `1000`: `unknown`
+  - `frontier_nodes_expanded = 11384`
+  - `approximate_other_side_hits = 1147`
+  - `total_visited_nodes = 217407`
+  - `layers = 14`
+  - `collisions_with_other_frontier = 0`
+
+Interpretation:
+
+- the beam now finishes substantially wider bounded probes that previously were
+  not practical under the same `60s` cap;
+- the run shape is much more layer-like (`14` beam layers instead of dozens of
+  tiny batches), so width scaling is better characterised;
+- despite that, the retuned executor still never reaches a canonical
+  cross-frontier meet on the bounded known `k=3` control, so the remaining gap
+  is still ranking quality rather than basic executor throughput.
