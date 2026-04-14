@@ -70,7 +70,7 @@
 # - Left bottom: shell
 # - Right: agent
 panes:
-  - command: nvim
+  - command: nvim .
   - command: <agent>
     split: horizontal
     focus: true
