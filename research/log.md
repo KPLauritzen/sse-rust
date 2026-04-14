@@ -252,3 +252,9 @@
 
 - `loop5-cache-followups` Tested two post-cache semantic tweaks: miss-only attempt budgeting and endpoint-level lag-dominance cache reuse.
   Failed. Both variants caused the core control run (attempts 128, min_gap=2/max_gap=6) to time out at 300s and were reverted. Details are in `research/notes/2026-04-14-k3-shortcut-cache-followups-reverted.md`.
+
+- `loop6-fair-share-budgeting` Tried deterministic per-guide fair-share segment-attempt allocation within each shortcut round.
+  Failed and reverted. It preserved required-case correctness on rerun but regressed harness telemetry-focus score (`45802619 -> 42689216`) with no lag improvement, so the code change was dropped.
+
+- `loop7-guide-count-sweep` Ran a measurement-first `shortcut_max_guides` sweep to test budget concentration.
+  Kept as evidence only. On the hard `dim5/entry6` surface, attempts-64 timed out for guides `4/8/12` (no completed artifacts). On a stable `dim4/entry5` surface, guides=4 was slightly cheaper at attempts=96, while guides=12 produced more local improvements at attempts=128; all variants stayed at lag 7. Details are in `research/notes/2026-04-14-k3-shortcut-guide-count-sweep.md`.
