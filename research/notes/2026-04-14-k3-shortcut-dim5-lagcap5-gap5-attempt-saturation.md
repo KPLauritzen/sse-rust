@@ -66,3 +66,7 @@ Common config:
 ## Next hypothesis
 
 Given saturation on the current segment schedule, prioritize segment quality over raw attempt count: use profiling to target high-cost/low-yield segment families (currently square-factorisation-heavy) and cut expensive no-gain segment searches rather than raising global attempt budgets.
+
+## Correction (rebuild validation)
+
+These loop20 measurements were produced before an explicit `cargo build --profile dist --features research-tools --bin search` refresh in a later loop. A subsequent rebuild-validated rerun campaign is logged in `research/notes/2026-04-14-k3-shortcut-rebuild-validated-maxentry5-mixed.md`. Treat loop20 runtime/throughput deltas as provisional where they conflict with rebuild-validated artifacts.
