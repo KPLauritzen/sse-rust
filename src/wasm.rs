@@ -111,7 +111,7 @@ pub fn search_sse(
         }
         crate::types::SseResult::EquivalentByConcreteShift(_witness) => WasmSseResult {
             status: "equivalent".into(),
-            reason: Some("aligned concrete-shift witness".into()),
+            reason: Some("concrete-shift witness".into()),
             steps: None,
         },
         crate::types::SseResult::NotEquivalent(reason) => WasmSseResult {

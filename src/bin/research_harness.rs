@@ -991,7 +991,7 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
             actual_outcome: "equivalent".to_string(),
             elapsed_ms: started.elapsed().as_millis(),
             steps: None,
-            reason: Some("aligned concrete-shift witness".to_string()),
+            reason: Some("concrete-shift witness".to_string()),
             result_model: result_model(
                 solver_path_for_dims(a.rows, b.rows),
                 a.rows,
