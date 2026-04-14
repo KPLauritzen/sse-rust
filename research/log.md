@@ -276,3 +276,6 @@
 
 - `loop13-staged-refinement-followup` Tested whether a `max_gap=4` stage-1 best path can be compressed further by a stage-2 full-gap pass.
   Failed. The stage-2 run on the exported lag-7 stage-1 best guide (`max_gap=6`, lag-cap 4) produced no improvements before pool exhaustion, and raising lag-cap to 5 timed out under 240s for attempts 32 and 64. Logged in `research/notes/2026-04-14-k3-shortcut-gap-window-campaign.md`.
+
+- `loop14-profiled-dim4-lagcap5-campaign` Re-profiled the hard shortcut surface and ran a dim4/lag-cap-5 attempt expansion campaign with bounded binary-timeout execution.
+  Kept as evidence only. `pprof` on the hard dim5 control remained factorisation-dominated (notably `visit_binary_sparse_factorisations_4x4_to_5` / `solve_nonneg_4x4`). Switching to dim4 made large lag-cap-5 runs tractable (including attempts 512 and 2048) and produced many local guide improvements, but every run still converged to lag 7. Narrow gap (`max_gap=4`) was extremely cheap and saturated to `guide_pool_exhausted` without global lag gain. Details are in `research/notes/2026-04-14-k3-shortcut-dim4-lagcap5-profiled-campaign.md`.
