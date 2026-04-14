@@ -89,6 +89,16 @@ pub enum ConcreteShiftRelation2x2 {
     Compatible,
 }
 
+impl ConcreteShiftRelation2x2 {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Aligned => "aligned",
+            Self::Balanced => "balanced",
+            Self::Compatible => "compatible",
+        }
+    }
+}
+
 /// Configuration for bounded concrete-shift search on 2x2 matrices.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConcreteShiftSearchConfig2x2 {

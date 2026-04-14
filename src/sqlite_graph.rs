@@ -573,16 +573,17 @@ fn result_json(result: &SearchRunResult) -> Result<String, String> {
                 })
                 .collect::<Vec<_>>(),
         }),
-        SearchRunResult::EquivalentByConcreteShift(witness) => json!({
+        SearchRunResult::EquivalentByConcreteShift(proof) => json!({
             "outcome": "equivalent_by_concrete_shift",
+            "relation": proof.relation.as_str(),
             "witness": {
-                "lag": witness.shift.lag,
-                "r": witness.shift.r.data,
-                "s": witness.shift.s.data,
-                "sigma_g": witness.sigma_g.mapping,
-                "sigma_h": witness.sigma_h.mapping,
-                "omega_e": witness.omega_e.mapping,
-                "omega_f": witness.omega_f.mapping,
+                "lag": proof.witness.shift.lag,
+                "r": proof.witness.shift.r.data,
+                "s": proof.witness.shift.s.data,
+                "sigma_g": proof.witness.sigma_g.mapping,
+                "sigma_h": proof.witness.sigma_h.mapping,
+                "omega_e": proof.witness.omega_e.mapping,
+                "omega_f": proof.witness.omega_f.mapping,
             },
         }),
         SearchRunResult::NotEquivalent(reason) => json!({
@@ -663,9 +664,12 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::aligned::{
+        canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
+    };
     use crate::matrix::SqMatrix;
     use crate::search::search_sse_2x2_with_telemetry_and_observer;
-    use crate::types::SearchConfig;
+    use crate::types::{ConcreteShiftProof2x2, SearchConfig, SearchRunResult};
 
     fn temp_db_path() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -776,5 +780,31 @@ mod tests {
             move_family_policy_label(beam_graph_only.move_family_policy),
             "graph_only"
         );
+    }
+
+    #[test]
+    fn sqlite_graph_serialises_concrete_shift_relation() {
+        let a = SqMatrix::identity();
+        let witness = canonical_module_shift_witness_2x2(
+            &a,
+            &a,
+            ShiftEquivalenceWitness2x2 {
+                lag: 1,
+                r: SqMatrix::identity(),
+                s: SqMatrix::identity(),
+            },
+        )
+        .unwrap();
+        let result = SearchRunResult::EquivalentByConcreteShift(ConcreteShiftProof2x2 {
+            relation: ConcreteShiftRelation2x2::Balanced,
+            witness,
+        });
+
+        let json = result_json(&result).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["outcome"], "equivalent_by_concrete_shift");
+        assert_eq!(value["relation"], "balanced");
+        assert_eq!(value["witness"]["lag"], 1);
     }
 }

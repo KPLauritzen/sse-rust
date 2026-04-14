@@ -1,4 +1,4 @@
-use crate::aligned::ConcreteShiftWitness2x2;
+use crate::aligned::{ConcreteShiftRelation2x2, ConcreteShiftWitness2x2};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -318,13 +318,25 @@ impl From<SsePath<2>> for DynSsePath {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConcreteShiftProof2x2 {
+    pub relation: ConcreteShiftRelation2x2,
+    pub witness: ConcreteShiftWitness2x2,
+}
+
+impl ConcreteShiftProof2x2 {
+    pub fn description(&self) -> String {
+        format!("{} concrete-shift witness", self.relation.as_str())
+    }
+}
+
 /// Result of an SSE search.
 #[derive(Clone, Debug)]
 pub enum SseResult<const N: usize> {
     /// Found a path proving SSE.
     Equivalent(SsePath<N>),
     /// Found a direct aligned/balanced/compatible concrete-shift witness.
-    EquivalentByConcreteShift(ConcreteShiftWitness2x2),
+    EquivalentByConcreteShift(ConcreteShiftProof2x2),
     /// Proved not SSE by an invariant mismatch.
     NotEquivalent(String),
     /// Search exhausted without finding a path or proving non-equivalence.
@@ -346,7 +358,7 @@ pub enum DynSseResult {
 #[derive(Clone, Debug)]
 pub enum SearchRunResult {
     Equivalent(DynSsePath),
-    EquivalentByConcreteShift(ConcreteShiftWitness2x2),
+    EquivalentByConcreteShift(ConcreteShiftProof2x2),
     NotEquivalent(String),
     Unknown,
 }
@@ -355,9 +367,7 @@ impl From<SseResult<2>> for SearchRunResult {
     fn from(result: SseResult<2>) -> Self {
         match result {
             SseResult::Equivalent(path) => Self::Equivalent(path.into()),
-            SseResult::EquivalentByConcreteShift(witness) => {
-                Self::EquivalentByConcreteShift(witness)
-            }
+            SseResult::EquivalentByConcreteShift(proof) => Self::EquivalentByConcreteShift(proof),
             SseResult::NotEquivalent(reason) => Self::NotEquivalent(reason),
             SseResult::Unknown => Self::Unknown,
         }
@@ -501,11 +511,15 @@ pub struct SearchTelemetry {
 #[cfg(test)]
 mod tests {
     use super::{
-        DynMatrix, DynSsePath, EsseStep, FrontierMode, GuideArtifact, GuideArtifactCompatibility,
-        GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance,
-        GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig, MoveFamilyPolicy,
-        SearchConfig, SearchStage, ShortcutGuideRankingPolicy, ShortcutPromotionPolicy,
-        ShortcutSearchConfig, SsePath, DEFAULT_BEAM_WIDTH,
+        ConcreteShiftProof2x2, DynMatrix, DynSsePath, EsseStep, FrontierMode, GuideArtifact,
+        GuideArtifactCompatibility, GuideArtifactEndpoints, GuideArtifactPayload,
+        GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation,
+        GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchStage,
+        ShortcutGuideRankingPolicy, ShortcutPromotionPolicy, ShortcutSearchConfig, SsePath,
+        DEFAULT_BEAM_WIDTH,
+    };
+    use crate::aligned::{
+        canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
     };
     use crate::matrix::SqMatrix;
 
@@ -667,5 +681,26 @@ mod tests {
         assert_eq!(config.max_total_segment_attempts, 16);
         assert!(config.artifacts.emit_promoted_guides);
         assert!(config.artifacts.supported_stages.is_empty());
+    }
+
+    #[test]
+    fn test_concrete_shift_proof_description_includes_relation() {
+        let a = SqMatrix::identity();
+        let witness = canonical_module_shift_witness_2x2(
+            &a,
+            &a,
+            ShiftEquivalenceWitness2x2 {
+                lag: 1,
+                r: SqMatrix::identity(),
+                s: SqMatrix::identity(),
+            },
+        )
+        .unwrap();
+        let proof = ConcreteShiftProof2x2 {
+            relation: ConcreteShiftRelation2x2::Compatible,
+            witness,
+        };
+
+        assert_eq!(proof.description(), "compatible concrete-shift witness");
     }
 }

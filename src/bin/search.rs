@@ -584,8 +584,8 @@ fn print_pretty(
                 println!("  V = {}", format_dyn_matrix(&step.v));
             }
         }
-        SearchRunResult::EquivalentByConcreteShift(_witness) => {
-            println!("Result: EQUIVALENT (concrete shift witness)");
+        SearchRunResult::EquivalentByConcreteShift(proof) => {
+            println!("Result: EQUIVALENT ({})", proof.description());
         }
         SearchRunResult::NotEquivalent(reason) => {
             println!("Result: NOT EQUIVALENT");
@@ -748,9 +748,11 @@ fn print_json(
             ),
             None,
         ),
-        SearchRunResult::EquivalentByConcreteShift(_) => {
-            ("equivalent_by_concrete_shift", None, None)
-        }
+        SearchRunResult::EquivalentByConcreteShift(proof) => (
+            "equivalent_by_concrete_shift",
+            None,
+            Some(proof.description()),
+        ),
         SearchRunResult::NotEquivalent(reason) => ("not_equivalent", None, Some(reason.clone())),
         SearchRunResult::Unknown => ("unknown", None, None),
     };

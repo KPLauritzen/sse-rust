@@ -18,12 +18,13 @@ use crate::search_observer::{
     SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact, GuideArtifactCompatibility,
-    GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
-    GuideArtifactValidation, GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig,
-    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
-    SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
-    ShortcutSearchRoundTelemetry, ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    ConcreteShiftProof2x2, DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact,
+    GuideArtifactCompatibility, GuideArtifactEndpoints, GuideArtifactPayload,
+    GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig,
+    MoveFamilyPolicy, SearchConfig, SearchDirection, SearchLayerTelemetry,
+    SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, ShortcutSearchRoundTelemetry,
+    ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2374,7 +2375,7 @@ fn try_concrete_shift_shortcut_2x2(
     a: &SqMatrix<2>,
     b: &SqMatrix<2>,
     config: &SearchConfig,
-) -> Option<crate::aligned::ConcreteShiftWitness2x2> {
+) -> Option<ConcreteShiftProof2x2> {
     if config.move_family_policy != MoveFamilyPolicy::Mixed
         || !should_try_concrete_shift_fallback(a, b, config)
     {
@@ -2396,7 +2397,7 @@ fn try_concrete_shift_shortcut_2x2(
         if let ConcreteShiftSearchResult2x2::Equivalent(witness) =
             search_concrete_shift_equivalence_2x2(a, b, &concrete_config)
         {
-            return Some(witness);
+            return Some(ConcreteShiftProof2x2 { relation, witness });
         }
     }
 
@@ -6684,8 +6685,8 @@ mod tests {
             max_entry: 1,
             ..default_config()
         };
-        let witness = try_concrete_shift_shortcut_2x2(&a, &a, &config);
-        assert!(witness.is_some());
+        let proof = try_concrete_shift_shortcut_2x2(&a, &a, &config).unwrap();
+        assert_eq!(proof.relation, ConcreteShiftRelation2x2::Aligned);
     }
 
     #[test]
@@ -6695,8 +6696,38 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             ..default_config()
         };
-        let witness = try_concrete_shift_shortcut_2x2(&a, &a, &config);
-        assert!(witness.is_none());
+        let proof = try_concrete_shift_shortcut_2x2(&a, &a, &config);
+        assert!(proof.is_none());
+    }
+
+    #[test]
+    fn test_shortcut_helper_preserves_concrete_shift_relation() {
+        let a = SqMatrix::identity();
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 2,
+            max_entry: 1,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+        };
+
+        let shortcut_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
+            .expect("identity pair should produce a bounded concrete-shift proof");
+        assert_eq!(shortcut_proof.relation, ConcreteShiftRelation2x2::Aligned);
+        assert_eq!(
+            shortcut_proof.description(),
+            "aligned concrete-shift witness"
+        );
+
+        let run_result: SearchRunResult =
+            SseResult::EquivalentByConcreteShift(shortcut_proof.clone()).into();
+        match run_result {
+            SearchRunResult::EquivalentByConcreteShift(run_proof) => {
+                assert_eq!(run_proof.relation, ConcreteShiftRelation2x2::Aligned)
+            }
+            other => panic!("expected concrete-shift run result, got {:?}", other),
+        }
     }
 
     #[test]
