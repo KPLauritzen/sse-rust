@@ -258,3 +258,6 @@
 
 - `loop7-guide-count-sweep` Ran a measurement-first `shortcut_max_guides` sweep to test budget concentration.
   Kept as evidence only. On the hard `dim5/entry6` surface, attempts-64 timed out for guides `4/8/12` (no completed artifacts). On a stable `dim4/entry5` surface, guides=4 was slightly cheaper at attempts=96, while guides=12 produced more local improvements at attempts=128; all variants stayed at lag 7. Details are in `research/notes/2026-04-14-k3-shortcut-guide-count-sweep.md`.
+
+- `loop8-round-budget-split` Tried splitting `shortcut_search` segment attempts across rounds to force promoted-guide follow-up.
+  Failed and reverted. The patch preserved required-case correctness but on targeted `dim4/entry5` probes reduced local shortcut-improvement throughput without improving lag, and it still timed out on the hard `dim5/entry6` attempts-64 probe. Details are in `research/notes/2026-04-14-k3-shortcut-round-budget-split-reverted.md`.
