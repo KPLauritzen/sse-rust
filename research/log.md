@@ -297,3 +297,6 @@
 
 - `loop19-dim5-lagcap5-timeout-boundary` Mapped the hard dim5 lag-cap-5 timeout cliff on the kept codebase (post-loop16 cache change).
   Kept as evidence only. Attempts `96` completed (lag 7, improvements 5, promoted 2), while `104/112/128` all timed out at 240s. At attempts `128`, reducing `max_guides` (`12 -> 8 -> 4`) and reducing `shortcut_rounds` (`2 -> 1`) still timed out. This confirms a steep segment-mix cost cliff not fixed by coarse outer knobs. Details are in `research/notes/2026-04-14-k3-shortcut-dim5-lagcap5-timeout-boundary.md`.
+
+- `loop20-gap5-attempt-saturation` Mapped the tractable dim5 lag-cap-5 gap window and measured attempt saturation on `max_gap=5`.
+  Kept as evidence only. `max_gap=6` timed out at attempts 128, while `max_gap=5` completed and saturated by attempts 160/192 with unchanged lag/improvement outcomes (still lag 7, improvements 10, promoted 2) and higher work (`factorisations 12.08M -> 13.71M -> 14.29M`). This supports focusing on segment-quality/cost pruning instead of larger attempt budgets. Details are in `research/notes/2026-04-14-k3-shortcut-dim5-lagcap5-gap5-attempt-saturation.md`.
