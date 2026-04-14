@@ -291,3 +291,6 @@
 
 - `loop17-endpoint-seed-diversity-ab` Tested true guide diversity (unique guides increased) by injecting a distinct lag-8 endpoint-derived seed into hard dim5 stage-2.
   Failed (negative). At attempts `64`, the pool+seed run increased `unique_guides` (`12 -> 13`) but kept lag/improvement outcomes unchanged (still lag 7, improvements/promotions 3/1) while increasing work substantially. Raising attempts to `128` with this seed timed out at the 240s outer cap. Details are in `research/notes/2026-04-14-k3-shortcut-endpoint-seed-diversity-ab.md`.
+
+- `loop18-admission-lagband` Tested and reverted a lag-band guide-admission heuristic in `shortcut_search` (`effective_lag <= best_lag + slack`).
+  Reverted. With `slack=0`, hard dim5 stage-2 probes became cheaper and one previously timing-out plus-seed attempts-128 probe completed, but harness telemetry-focus metrics regressed (`45,802,619 -> 43,380,841`) despite unchanged required correctness/targets. Retuning to `slack=1` lost the tractability gain (attempts-128 timed out again). Details are in `research/notes/2026-04-14-k3-shortcut-admission-lagband-reverted.md`.
