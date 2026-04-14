@@ -312,3 +312,6 @@
 
 - `loop25-dim-priority-ordering` Tested and reverted dimension-priority segment ordering for timeout-bounded shortcut refinement.
   Reverted. Harness gate stayed stable (24/24 required; target/points/telemetry-focus unchanged, slight total-elapsed improvement), but the hard dim5 decision probe (`mixed + max_entry=5 + gap<=5 + attempts160 + guides8`) regressed work with no lag/progress gain (`factorisations 12,970,458 -> 13,435,679`, `visited 539,515 -> 559,880`, lag stayed 7). Details in `research/notes/2026-04-14-k3-shortcut-dim-priority-ordering-reverted.md`.
+
+- `loop26-beam-timeout-ab` Measured beam frontier variants for timeout-bounded shortcut segment searches on the rebuilt hard-dim5 baseline.
+  Failed to improve the active objective. Beam with timeout 5 reduced work counters but was slower on wall time than BFS and did not improve lag. Beam width 4 with timeout 1 was faster but under-produced and saturated local improvements (13 at attempts 160-192) versus BFS attempts-160 (20), with lag unchanged at 7. Decision: keep BFS baseline. Details in `research/notes/2026-04-14-k3-shortcut-beam-timeout1-ab.md`.
