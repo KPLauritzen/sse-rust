@@ -1,0 +1,2 @@
+# Keep repo reviews on Codex even when host defaults differ.
+review_agent = "codex"
