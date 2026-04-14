@@ -285,3 +285,6 @@
 
 - `loop15-dim4-feeder-diversity-ab` Tested whether adding a dim4-feeder lag-7 artifact changes hard dim5 lag-cap-5 shortcut behavior.
   Failed (neutral). In a controlled dim5 stage-2 A/B (`attempts=64`, `guided_segment_timeout=5`), adding the feeder artifact increased loaded guides (`12 -> 13`) but not unique guides (`12 -> 12`), and lag/work outcomes remained effectively unchanged (still lag 7, same guided improvements/promotions). Details are in `research/notes/2026-04-14-k3-shortcut-diversity-feed-stage2-ab.md`.
+
+- `loop16-equivalent-lag-dominance-cache` Added safe segment-cache dominance reuse for equivalent results across lag caps in `shortcut_search`.
+  Kept. The cache now reuses shortest known equivalent `(source,target)` paths when `path_lag <= requested_max_lag` (exact-key cache still checked first; no Unknown dominance reuse). On the dim4 lagcap5 full-gap probe (`attempts=512`), this deterministically improved cache reuse (`hits 151 -> 164`, `misses 361 -> 348`) and reduced work (`factorisations 33,957,312 -> 33,499,328`, `visited 6,486,917 -> 6,472,560`) with unchanged lag (`7`). Harness gate stayed stable at `24/24` required cases. Details are in `research/notes/2026-04-14-k3-shortcut-equivalent-lag-dominance-cache.md`.

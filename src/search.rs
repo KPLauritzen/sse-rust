@@ -160,7 +160,58 @@ struct GuidedSegmentCacheKey {
     max_lag: usize,
 }
 
-type GuidedSegmentCache = HashMap<GuidedSegmentCacheKey, DynSseResult>;
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct GuidedSegmentEndpointKey {
+    source: DynMatrix,
+    target: DynMatrix,
+}
+
+#[derive(Default)]
+struct GuidedSegmentCache {
+    exact_results: HashMap<GuidedSegmentCacheKey, DynSseResult>,
+    shortest_equivalent_paths: HashMap<GuidedSegmentEndpointKey, DynSsePath>,
+}
+
+impl GuidedSegmentCache {
+    fn get(&self, key: &GuidedSegmentCacheKey) -> Option<DynSseResult> {
+        if let Some(result) = self.exact_results.get(key) {
+            return Some(result.clone());
+        }
+        let endpoint_key = GuidedSegmentEndpointKey {
+            source: key.source.clone(),
+            target: key.target.clone(),
+        };
+        self.shortest_equivalent_paths
+            .get(&endpoint_key)
+            .and_then(|path| {
+                if path.steps.len() <= key.max_lag {
+                    Some(DynSseResult::Equivalent(path.clone()))
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn insert(&mut self, key: GuidedSegmentCacheKey, result: DynSseResult) {
+        if let DynSseResult::Equivalent(path) = &result {
+            let endpoint_key = GuidedSegmentEndpointKey {
+                source: key.source.clone(),
+                target: key.target.clone(),
+            };
+            match self.shortest_equivalent_paths.entry(endpoint_key) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if path.steps.len() < entry.get().steps.len() {
+                        entry.insert(path.clone());
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(path.clone());
+                }
+            }
+        }
+        self.exact_results.insert(key, result);
+    }
+}
 
 #[derive(Default)]
 struct ShortcutGuidePool {
@@ -539,7 +590,7 @@ fn search_shortcut_search_with_observer(
     };
     let mut guide_pool = ShortcutGuidePool::new(prepared.guides);
     let mut remaining_segment_attempts = request.shortcut_search.max_total_segment_attempts;
-    let mut segment_cache: GuidedSegmentCache = HashMap::default();
+    let mut segment_cache = GuidedSegmentCache::default();
     let mut promoted_serial = 0usize;
     let mut stop_reason = ShortcutSearchStopReason::MaxRoundsReached;
 
@@ -1129,7 +1180,7 @@ fn refine_guide_path(
     telemetry: &mut SearchTelemetry,
 ) -> DynSsePath {
     let mut remaining_segment_attempts = usize::MAX;
-    let mut segment_cache: GuidedSegmentCache = HashMap::default();
+    let mut segment_cache = GuidedSegmentCache::default();
     refine_guide_path_with_budget(
         request,
         initial,
@@ -6274,7 +6325,74 @@ mod tests {
 
         let mut telemetry = SearchTelemetry::default();
         let mut remaining_segment_attempts = 4usize;
-        let mut segment_cache: GuidedSegmentCache = HashMap::default();
+        let mut segment_cache = GuidedSegmentCache::default();
+        segment_cache.insert(
+            GuidedSegmentCacheKey {
+                source: a.clone(),
+                target: b.clone(),
+                max_lag: 1,
+            },
+            DynSseResult::Equivalent(cached),
+        );
+
+        let refined = refine_guide_path_once(
+            &guide,
+            &config,
+            &guided,
+            &mut telemetry,
+            &mut remaining_segment_attempts,
+            &mut segment_cache,
+        );
+
+        assert_eq!(refined.steps.len(), 1);
+        validate_sse_path_dyn(&a, &b, &refined).unwrap();
+        assert_eq!(remaining_segment_attempts, 3);
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(telemetry.guided_segments_improved, 1);
+        assert_eq!(telemetry.shortcut_search.segment_cache_hits, 1);
+        assert_eq!(telemetry.shortcut_search.segment_cache_misses, 0);
+        assert_eq!(telemetry.frontier_nodes_expanded, 0);
+    }
+
+    #[test]
+    fn test_refine_guide_path_once_reuses_equivalent_cache_result_across_lag_caps() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid1 = base.conjugate_by_perm(&[2, 0, 1]);
+        let mid2 = base.conjugate_by_perm(&[0, 2, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid1.clone(), mid2.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid1).unwrap(),
+                permutation_step_between(&mid1, &mid2).unwrap(),
+                permutation_step_between(&mid2, &b).unwrap(),
+            ],
+        };
+        let cached = DynSsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![permutation_step_between(&a, &b).unwrap()],
+        };
+
+        let config = SearchConfig {
+            max_lag: 3,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+        };
+        let guided = GuidedRefinementConfig {
+            max_shortcut_lag: 2,
+            min_gap: 3,
+            max_gap: Some(3),
+            rounds: 1,
+            segment_timeout_secs: None,
+        };
+
+        let mut telemetry = SearchTelemetry::default();
+        let mut remaining_segment_attempts = 4usize;
+        let mut segment_cache = GuidedSegmentCache::default();
         segment_cache.insert(
             GuidedSegmentCacheKey {
                 source: a.clone(),
