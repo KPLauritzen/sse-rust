@@ -7,6 +7,23 @@
 - In this setup, some commands can still be proxied to the host by workmux host-command plumbing. Treat host paths like `/tmp` carefully: a command run via host tooling may write to host `/tmp`, not the sandbox's `/tmp`. When you need artifacts visible from both sides, prefer writing into the worktree.
 - Use the repo-local `tmp/` directory for scratch artifacts that need to be visible from both sandboxed commands and host-executed tooling. It is intentionally gitignored except for `tmp/.gitkeep`.
 
+## Workmux Model
+
+- A dispatched workmux agent usually works in its own git worktree on its own branch.
+- In this repo, those worktrees may also run inside a container sandbox built from `Dockerfile.sandbox`.
+- The git repository and worktree files are shared across host and sandbox, but process environment and some paths are not.
+- Treat `.beads/` and the worktree itself as shared state; treat `/tmp` and host-global config as potentially different between host and sandbox.
+- If a command behaves differently than expected, first check whether you are on the host or in the sandbox, then whether the command is being proxied through workmux host-command plumbing.
+
+## Where To Look
+
+- External workmux reference: `https://workmux.raine.dev/`
+- Terminology and domain language: `TERMINOLOGY.md`
+- Research workflow and current loop guidance: `research/program.md`
+- Research background and notes: `research/README.md`, `research/notes/`
+- Additional docs and durable repo context: `docs/README.md`
+- Task tracking and live priorities: `bd`, especially `bd ready`, `bd show <id>`, and `bd prime`
+
 ## Project Goals
 
 - Goal 1: Find any path for `k = 3`. This is already solved.
