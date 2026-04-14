@@ -249,3 +249,6 @@
 
 - `loop4-budget-ramp` Ramped cache-enabled shortcut attempt budgets from `128` to `192` and `256`, then probed `guided_max_shortcut_lag=5`.
   Mixed. Larger budgets now complete and increase local segment improvements (`11 -> 24 -> 41`) with substantial cache reuse, but best lag stayed at 7. The lag-cap-5 probe timed out at 300s without a completed artifact, so broadening per-segment depth appears too costly. Details are in `research/notes/2026-04-14-k3-shortcut-cache-budget-ramp.md`.
+
+- `loop5-cache-followups` Tested two post-cache semantic tweaks: miss-only attempt budgeting and endpoint-level lag-dominance cache reuse.
+  Failed. Both variants caused the core control run (attempts 128, min_gap=2/max_gap=6) to time out at 300s and were reverted. Details are in `research/notes/2026-04-14-k3-shortcut-cache-followups-reverted.md`.
