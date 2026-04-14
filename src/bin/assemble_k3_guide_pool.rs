@@ -161,19 +161,19 @@ fn run() -> Result<(), String> {
 
     let mut by_path_key: HashMap<String, GuideArtifact> = HashMap::new();
     let reference = build_lind_marcus_reference_guide()?;
-    if endpoint_pairs_match_up_to_permutation_and_orientation(
-        &endpoint_source,
-        &endpoint_target,
-        &reference.endpoints.source,
-        &reference.endpoints.target,
-    ) {
-        let reference_key = path_key(match &reference.payload {
-            GuideArtifactPayload::FullPath { path } => path,
-        });
-        by_path_key.insert(reference_key, reference);
-        reference_guides += 1;
-    } else {
-        println!("skipping Lind-Marcus/Baker reference guide for non-matching fixture endpoints");
+    match orient_guide_artifact_to_endpoints(reference, &endpoint_source, &endpoint_target)? {
+        Some(reference) => {
+            let reference_key = path_key(match &reference.payload {
+                GuideArtifactPayload::FullPath { path } => path,
+            });
+            by_path_key.insert(reference_key, reference);
+            reference_guides += 1;
+        }
+        None => {
+            println!(
+                "skipping Lind-Marcus/Baker reference guide for non-matching fixture endpoints"
+            );
+        }
     }
 
     for candidate in candidates {
@@ -649,17 +649,93 @@ fn candidate_endpoint_orientation(
     None
 }
 
-fn endpoint_pairs_match_up_to_permutation_and_orientation(
-    source_a: &DynMatrix,
-    target_a: &DynMatrix,
-    source_b: &DynMatrix,
-    target_b: &DynMatrix,
-) -> bool {
-    let source_a = source_a.canonical_perm();
-    let target_a = target_a.canonical_perm();
-    let source_b = source_b.canonical_perm();
-    let target_b = target_b.canonical_perm();
-    (source_a == source_b && target_a == target_b) || (source_a == target_b && target_a == source_b)
+fn endpoint_orientation(
+    source: &DynMatrix,
+    target: &DynMatrix,
+    requested_source: &DynMatrix,
+    requested_target: &DynMatrix,
+) -> Option<bool> {
+    let source_canonical = source.canonical_perm();
+    let target_canonical = target.canonical_perm();
+    let requested_source_canonical = requested_source.canonical_perm();
+    let requested_target_canonical = requested_target.canonical_perm();
+    if source_canonical == requested_source_canonical
+        && target_canonical == requested_target_canonical
+    {
+        return Some(false);
+    }
+    if source_canonical == requested_target_canonical
+        && target_canonical == requested_source_canonical
+    {
+        return Some(true);
+    }
+    None
+}
+
+fn orient_guide_artifact_to_endpoints(
+    mut artifact: GuideArtifact,
+    requested_source: &DynMatrix,
+    requested_target: &DynMatrix,
+) -> Result<Option<GuideArtifact>, String> {
+    let Some(reverse) = endpoint_orientation(
+        &artifact.endpoints.source,
+        &artifact.endpoints.target,
+        requested_source,
+        requested_target,
+    ) else {
+        return Ok(None);
+    };
+
+    if reverse {
+        let GuideArtifactPayload::FullPath { path } = &artifact.payload;
+        let reversed = reverse_dyn_sse_path(path);
+        validate_sse_path_dyn(requested_source, requested_target, &reversed).map_err(|err| {
+            format!(
+                "failed to orient guide artifact {}: {err}",
+                artifact_label(&artifact)
+            )
+        })?;
+        artifact.endpoints = GuideArtifactEndpoints {
+            source: requested_source.clone(),
+            target: requested_target.clone(),
+        };
+        artifact.payload = GuideArtifactPayload::FullPath { path: reversed };
+        artifact.provenance.label = artifact
+            .provenance
+            .label
+            .as_ref()
+            .map(|label| format!("{label} [reversed]"));
+        artifact.provenance.source_ref = artifact
+            .provenance
+            .source_ref
+            .as_ref()
+            .map(|source_ref| format!("{source_ref}#reversed"));
+    }
+
+    Ok(Some(artifact))
+}
+
+fn artifact_label(artifact: &GuideArtifact) -> &str {
+    artifact
+        .artifact_id
+        .as_deref()
+        .or(artifact.provenance.label.as_deref())
+        .unwrap_or("<unnamed>")
+}
+
+fn reverse_dyn_sse_path(path: &DynSsePath) -> DynSsePath {
+    DynSsePath {
+        matrices: path.matrices.iter().cloned().rev().collect(),
+        steps: path
+            .steps
+            .iter()
+            .rev()
+            .map(|step| EsseStep {
+                u: step.v.clone(),
+                v: step.u.clone(),
+            })
+            .collect(),
+    }
 }
 
 fn materialize_candidate(candidate: &PathCandidate) -> Result<DynSsePath, String> {
@@ -689,37 +765,33 @@ fn materialize_candidate(candidate: &PathCandidate) -> Result<DynSsePath, String
     };
 
     for window in candidate.matrices.windows(2) {
-        let request = SearchRequest {
-            source: window[0].clone(),
-            target: window[1].clone(),
-            config: SearchConfig {
-                max_lag: 1,
-                max_intermediate_dim: max_dim,
-                max_entry,
-                frontier_mode: FrontierMode::Bfs,
-                move_family_policy: MoveFamilyPolicy::Mixed,
-                beam_width: None,
-            },
-            stage: SearchStage::EndpointSearch,
-            guide_artifacts: Vec::new(),
-            guided_refinement: GuidedRefinementConfig::default(),
-            shortcut_search: ShortcutSearchConfig::default(),
-        };
-
-        let (result, _telemetry) = execute_search_request(&request).map_err(|err| {
-            format!(
-                "segment {}x{} -> {}x{} search failed: {err}",
-                window[0].rows, window[0].cols, window[1].rows, window[1].cols
-            )
-        })?;
-
-        let segment = match result {
+        if window[0] == window[1] {
+            continue;
+        }
+        let segment = match search_segment(&window[0], &window[1], max_dim, max_entry, 1)? {
             SearchRunResult::Equivalent(path) => path,
             SearchRunResult::EquivalentByConcreteShift(_) => {
-                return Err(
-                    "segment returned a concrete-shift witness without an explicit path"
-                        .to_string(),
-                )
+                let fallback_lag = 3usize;
+                match search_segment(&window[0], &window[1], max_dim, max_entry, fallback_lag)? {
+                    SearchRunResult::Equivalent(path) => path,
+                    SearchRunResult::EquivalentByConcreteShift(_) => {
+                        return Err(
+                            "segment only resolved via concrete-shift witness; explicit path replay unavailable"
+                                .to_string(),
+                        )
+                    }
+                    SearchRunResult::NotEquivalent(reason) => {
+                        return Err(format!(
+                            "segment fallback unexpectedly not-equivalent: {reason}"
+                        ))
+                    }
+                    SearchRunResult::Unknown => {
+                        return Err(
+                            "segment fallback search returned unknown after concrete-shift replay"
+                                .to_string(),
+                        )
+                    }
+                }
             }
             SearchRunResult::NotEquivalent(reason) => {
                 return Err(format!("segment unexpectedly not-equivalent: {reason}"))
@@ -757,6 +829,39 @@ fn materialize_candidate(candidate: &PathCandidate) -> Result<DynSsePath, String
     .map_err(|err| format!("materialized candidate path failed validation: {err}"))?;
 
     Ok(full_path)
+}
+
+fn search_segment(
+    source: &DynMatrix,
+    target: &DynMatrix,
+    max_dim: usize,
+    max_entry: u32,
+    max_lag: usize,
+) -> Result<SearchRunResult, String> {
+    let request = SearchRequest {
+        source: source.clone(),
+        target: target.clone(),
+        config: SearchConfig {
+            max_lag,
+            max_intermediate_dim: max_dim,
+            max_entry,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+        },
+        stage: SearchStage::EndpointSearch,
+        guide_artifacts: Vec::new(),
+        guided_refinement: GuidedRefinementConfig::default(),
+        shortcut_search: ShortcutSearchConfig::default(),
+    };
+
+    let (result, _telemetry) = execute_search_request(&request).map_err(|err| {
+        format!(
+            "segment {}x{} -> {}x{} search (max_lag={max_lag}) failed: {err}",
+            source.rows, source.cols, target.rows, target.cols
+        )
+    })?;
+    Ok(result)
 }
 
 fn build_artifact_from_candidate(candidate: &PathCandidate, path: DynSsePath) -> GuideArtifact {
