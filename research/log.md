@@ -267,3 +267,6 @@
 
 - `loop10-hard-budget-cliff` Swept hard dim5 shortcut attempts under `max_entry=5` and compared against `max_entry=6` at the stable attempt budget.
   Kept as evidence only. Under a 180s cap, `max_entry=5` still timed out at attempts `36+` and only attempts `32` completed (lag 7, one local improvement). The `max_entry=6` attempts-32 comparison also stayed at lag 7 with one improvement, so this bound retune reduces work but does not move the plateau. Details are in `research/notes/2026-04-14-k3-shortcut-hard-budget-cliff.md`.
+
+- `loop11-trace-cube-invariant` Tested and reverted a dynamic `trace(M^3)` prefilter in endpoint search.
+  Failed (neutral/negative). Targeted dim4 and hard dim5 shortcut probes were unchanged on lag/work where completed, and the first hard probe at the prior 180s outer cap timed out with no artifact. The patch was reverted to avoid stacking complexity without bottleneck movement. Details are in `research/notes/2026-04-14-k3-shortcut-trace-cube-invariant-reverted.md`.
