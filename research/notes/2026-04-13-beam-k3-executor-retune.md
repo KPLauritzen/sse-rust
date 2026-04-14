@@ -84,3 +84,50 @@ Interpretation:
 - despite that, the retuned executor still never reaches a canonical
   cross-frontier meet on the bounded known `k=3` control, so the remaining gap
   is still ranking quality rather than basic executor throughput.
+
+## Higher-Lag Positive Result
+
+2026-04-14 follow-up: relax the lag bound to test whether beam search can find
+any `k=3` witness at all, even if it does not yet meet the lag-7 control.
+
+Probe:
+
+```bash
+timeout 60s cargo run --bin search -- 1,3,2,1 1,6,1,1 \
+  --max-lag 16 \
+  --max-intermediate-dim 4 \
+  --max-entry 10 \
+  --frontier-mode beam \
+  --beam-width WIDTH \
+  --json --telemetry
+```
+
+Results:
+
+- width `50`: `unknown`
+  - `frontier_nodes_expanded = 1502`
+  - `total_visited_nodes = 12962`
+  - `approximate_other_side_hits = 108`
+  - `collisions_with_other_frontier = 0`
+  - `layers = 32`
+- width `200`: `equivalent` with `15` elementary SSE steps
+  - `frontier_nodes_expanded = 4965`
+  - `total_visited_nodes = 34004`
+  - `approximate_other_side_hits = 489`
+  - `collisions_with_other_frontier = 1`
+  - `layers = 27`
+- width `1000`: `unknown`
+  - `frontier_nodes_expanded = 29384`
+  - `total_visited_nodes = 319813`
+  - `approximate_other_side_hits = 1657`
+  - `collisions_with_other_frontier = 0`
+  - `layers = 32`
+
+Interpretation:
+
+- this is the first positive endpoint-search beam result on the hard Brix-Ruiz
+  `k=3` pair in the current main solver surface;
+- the found witness is still far from the best-known lag (`3`) and does not
+  clear the lag-7 exact-meet gate, so `fl1.8` stays open;
+- but the result is enough to say the beam executor is no longer purely
+  negative on `k=3`: under a relaxed lag bound, it can find a valid SSE path.
