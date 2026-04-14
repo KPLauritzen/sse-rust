@@ -601,6 +601,37 @@ fn print_pretty(
 }
 
 fn print_telemetry(telemetry: &SearchTelemetry) {
+    let total_layer_nanos: u64 = telemetry
+        .layers
+        .iter()
+        .map(|layer| layer.timing.total_nanos)
+        .sum();
+    let expand_compute_nanos: u64 = telemetry
+        .layers
+        .iter()
+        .map(|layer| layer.timing.expand_compute_nanos)
+        .sum();
+    let expand_accumulate_nanos: u64 = telemetry
+        .layers
+        .iter()
+        .map(|layer| layer.timing.expand_accumulate_nanos)
+        .sum();
+    let dedup_nanos: u64 = telemetry
+        .layers
+        .iter()
+        .map(|layer| layer.timing.dedup_nanos)
+        .sum();
+    let merge_nanos: u64 = telemetry
+        .layers
+        .iter()
+        .map(|layer| layer.timing.merge_nanos)
+        .sum();
+    let finalize_nanos: u64 = telemetry
+        .layers
+        .iter()
+        .map(|layer| layer.timing.finalize_nanos)
+        .sum();
+
     println!();
     println!("Telemetry:");
     println!("  layers: {}", telemetry.layers.len());
@@ -619,6 +650,18 @@ fn print_telemetry(telemetry: &SearchTelemetry) {
     println!("  discovered nodes: {}", telemetry.discovered_nodes);
     println!("  total visited nodes: {}", telemetry.total_visited_nodes);
     println!("  max frontier size: {}", telemetry.max_frontier_size);
+    println!(
+        "  layer timing total: {:.3} ms",
+        total_layer_nanos as f64 / 1_000_000.0
+    );
+    println!(
+        "  layer timing split: compute={:.3} ms, accumulate={:.3} ms, dedup={:.3} ms, merge={:.3} ms, finalize={:.3} ms",
+        expand_compute_nanos as f64 / 1_000_000.0,
+        expand_accumulate_nanos as f64 / 1_000_000.0,
+        dedup_nanos as f64 / 1_000_000.0,
+        merge_nanos as f64 / 1_000_000.0,
+        finalize_nanos as f64 / 1_000_000.0,
+    );
     println!(
         "  guide artifacts considered: {}",
         telemetry.guide_artifacts_considered

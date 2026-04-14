@@ -21,8 +21,8 @@ use crate::types::{
     DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact, GuideArtifactCompatibility,
     GuideArtifactEndpoints, GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
     GuideArtifactValidation, GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig,
-    SearchDirection, SearchLayerTelemetry, SearchMoveFamilyTelemetry, SearchRequest,
-    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
+    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
+    SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig,
     ShortcutSearchRoundTelemetry, ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 
@@ -49,6 +49,13 @@ struct FrontierExpansionStats {
     pruned_by_spectrum: usize,
     same_future_past_collisions: usize,
     move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FrontierExpansionTiming {
+    expand_compute_nanos: u64,
+    expand_accumulate_nanos: u64,
+    dedup_nanos: u64,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -83,6 +90,27 @@ const TIMED_SEARCH_FRONTIER_CHUNK_SIZE: usize = 256;
 struct FrontierOverlapSignal {
     frontier_nodes: usize,
     approximate_other_side_hits: usize,
+}
+
+fn elapsed_nanos(started: Instant) -> u64 {
+    let nanos = started.elapsed().as_nanos();
+    nanos.min(u128::from(u64::MAX)) as u64
+}
+
+fn layer_timing(
+    started: Instant,
+    expansion_timing: FrontierExpansionTiming,
+    merge_nanos: u64,
+    finalize_nanos: u64,
+) -> SearchLayerTimingTelemetry {
+    SearchLayerTimingTelemetry {
+        total_nanos: elapsed_nanos(started),
+        expand_compute_nanos: expansion_timing.expand_compute_nanos,
+        expand_accumulate_nanos: expansion_timing.expand_accumulate_nanos,
+        dedup_nanos: expansion_timing.dedup_nanos,
+        merge_nanos,
+        finalize_nanos,
+    }
 }
 
 impl FrontierOverlapSignal {
@@ -1457,7 +1485,8 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
 
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
-        let (expansions, expansion_stats, timed_out) = expand_frontier_layer_dyn(
+        let layer_started = Instant::now();
+        let (expansions, expansion_stats, expansion_timing, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
             config.max_intermediate_dim,
@@ -1493,6 +1522,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         let mut enqueued_nodes = 0usize;
         let mut layer_move_family_telemetry = expansion_stats.move_family_telemetry.clone();
         let next_depth = layer_depth + 1;
+        let merge_started = Instant::now();
 
         for expansion in &expansions {
             if parent.contains_key(&expansion.next_canon) {
@@ -1531,6 +1561,8 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 if path_depth > config.max_lag {
                     continue;
                 }
+                let merge_nanos = elapsed_nanos(merge_started);
+                let finalize_started = Instant::now();
                 telemetry.collisions_with_seen += collisions_with_seen;
                 telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
                 telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -1547,6 +1579,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     &mut telemetry.move_family_telemetry,
                     &layer_move_family_telemetry,
                 );
+                let finalize_nanos = elapsed_nanos(finalize_started);
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
                     direction: Some(direction),
@@ -1566,6 +1599,12 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     enqueued_nodes,
                     next_frontier_nodes: next_frontier.len(),
                     total_visited_nodes: telemetry.total_visited_nodes,
+                    timing: layer_timing(
+                        layer_started,
+                        expansion_timing,
+                        merge_nanos,
+                        finalize_nanos,
+                    ),
                     move_family_telemetry: layer_move_family_telemetry,
                 });
                 return finish_search_dyn(
@@ -1603,6 +1642,8 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             }
         }
 
+        let merge_nanos = elapsed_nanos(merge_started);
+        let finalize_started = Instant::now();
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -1627,6 +1668,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
         );
+        let finalize_nanos = elapsed_nanos(finalize_started);
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
             direction: Some(direction),
@@ -1646,6 +1688,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             enqueued_nodes,
             next_frontier_nodes: next_frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
+            timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: layer_move_family_telemetry,
         });
 
@@ -1861,7 +1904,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
 
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
-        let (expansions, expansion_stats) = expand_frontier_layer(
+        let layer_started = Instant::now();
+        let (expansions, expansion_stats, expansion_timing) = expand_frontier_layer(
             &current_frontier,
             orig,
             config.max_intermediate_dim,
@@ -1899,6 +1943,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             .as_ref()
             .map(|_| Vec::with_capacity(expansions.len()));
         let next_depth = layer_depth + 1;
+        let merge_started = Instant::now();
 
         for expansion in &expansions {
             let parent_orig = orig
@@ -1934,10 +1979,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             );
             depths.insert(expansion.next_canon.clone(), next_depth);
             orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
-            signatures.insert(approx_signature(&expansion.next_canon));
-
-            let approximate_hit =
-                other_signatures.contains(&approx_signature(&expansion.next_canon));
+            let next_signature = approx_signature(&expansion.next_canon);
+            let approximate_hit = other_signatures.contains(&next_signature);
+            signatures.insert(next_signature);
             let enqueued =
                 expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry;
             let mut record_status = SearchEdgeStatus::Discovered;
@@ -1978,6 +2022,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     }
                     continue;
                 }
+                let merge_nanos = elapsed_nanos(merge_started);
+                let finalize_started = Instant::now();
                 telemetry.collisions_with_seen += collisions_with_seen;
                 telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
                 telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -2014,6 +2060,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 if let Some(records) = layer_records.as_ref() {
                     emit_layer(&mut observer, records);
                 }
+                let finalize_nanos = elapsed_nanos(finalize_started);
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
                     direction: Some(direction.clone()),
@@ -2033,6 +2080,12 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     enqueued_nodes,
                     next_frontier_nodes: next_frontier.len(),
                     total_visited_nodes: telemetry.total_visited_nodes,
+                    timing: layer_timing(
+                        layer_started,
+                        expansion_timing,
+                        merge_nanos,
+                        finalize_nanos,
+                    ),
                     move_family_telemetry: layer_move_family_telemetry,
                 });
                 return finish_search_2x2(
@@ -2090,6 +2143,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             }
         }
 
+        let merge_nanos = elapsed_nanos(merge_started);
+        let finalize_started = Instant::now();
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -2117,6 +2172,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         if let Some(records) = layer_records.as_ref() {
             emit_layer(&mut observer, records);
         }
+        let finalize_nanos = elapsed_nanos(finalize_started);
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
             direction: Some(direction),
@@ -2136,6 +2192,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             enqueued_nodes,
             next_frontier_nodes: next_frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
+            timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: layer_move_family_telemetry,
         });
 
@@ -2384,7 +2441,8 @@ fn search_beam_2x2_with_telemetry_and_observer(
             .iter()
             .map(|entry| entry.canonical.clone())
             .collect::<Vec<_>>();
-        let (expansions, expansion_stats) = expand_frontier_layer(
+        let layer_started = Instant::now();
+        let (expansions, expansion_stats, expansion_timing) = expand_frontier_layer(
             &current_frontier,
             orig,
             config.max_intermediate_dim,
@@ -2411,6 +2469,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
             .as_ref()
             .map(|_| Vec::with_capacity(expansions.len()));
         let next_depth = current_depth + 1;
+        let merge_started = Instant::now();
 
         for expansion in &expansions {
             let parent_orig = orig
@@ -2490,6 +2549,8 @@ fn search_beam_2x2_with_telemetry_and_observer(
                     continue;
                 }
 
+                let merge_nanos = elapsed_nanos(merge_started);
+                let finalize_started = Instant::now();
                 telemetry.collisions_with_seen += collisions_with_seen;
                 telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
                 telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -2509,6 +2570,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                 if let Some(records) = layer_records.as_ref() {
                     emit_layer(&mut observer, records);
                 }
+                let finalize_nanos = elapsed_nanos(finalize_started);
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
                     direction: Some(direction),
@@ -2528,6 +2590,12 @@ fn search_beam_2x2_with_telemetry_and_observer(
                     enqueued_nodes,
                     next_frontier_nodes: frontier.len(),
                     total_visited_nodes: telemetry.total_visited_nodes,
+                    timing: layer_timing(
+                        layer_started,
+                        expansion_timing,
+                        merge_nanos,
+                        finalize_nanos,
+                    ),
                     move_family_telemetry: layer_move_family_telemetry,
                 });
                 return finish_search_2x2(
@@ -2589,6 +2657,8 @@ fn search_beam_2x2_with_telemetry_and_observer(
             }
         }
 
+        let merge_nanos = elapsed_nanos(merge_started);
+        let finalize_started = Instant::now();
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -2607,6 +2677,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
         if let Some(records) = layer_records.as_ref() {
             emit_layer(&mut observer, records);
         }
+        let finalize_nanos = elapsed_nanos(finalize_started);
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
             direction: Some(direction),
@@ -2626,6 +2697,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
             enqueued_nodes,
             next_frontier_nodes: frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
+            timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: layer_move_family_telemetry,
         });
         telemetry.max_frontier_size = telemetry
@@ -2789,7 +2861,8 @@ fn search_beam_dyn_with_telemetry(
             .iter()
             .map(|entry| entry.canonical.clone())
             .collect::<Vec<_>>();
-        let (expansions, expansion_stats, timed_out) = expand_frontier_layer_dyn(
+        let layer_started = Instant::now();
+        let (expansions, expansion_stats, expansion_timing, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
             config.max_intermediate_dim,
@@ -2817,6 +2890,7 @@ fn search_beam_dyn_with_telemetry(
             .as_ref()
             .map(|_| Vec::with_capacity(expansions.len()));
         let next_depth = current_depth + 1;
+        let merge_started = Instant::now();
 
         for expansion in &expansions {
             let parent_orig = orig
@@ -2896,6 +2970,8 @@ fn search_beam_dyn_with_telemetry(
                     continue;
                 }
 
+                let merge_nanos = elapsed_nanos(merge_started);
+                let finalize_started = Instant::now();
                 telemetry.collisions_with_seen += collisions_with_seen;
                 telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
                 telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -2915,6 +2991,7 @@ fn search_beam_dyn_with_telemetry(
                 if let Some(records) = layer_records.as_ref() {
                     emit_layer(&mut observer, records);
                 }
+                let finalize_nanos = elapsed_nanos(finalize_started);
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
                     direction: Some(direction),
@@ -2934,6 +3011,12 @@ fn search_beam_dyn_with_telemetry(
                     enqueued_nodes,
                     next_frontier_nodes: frontier.len(),
                     total_visited_nodes: telemetry.total_visited_nodes,
+                    timing: layer_timing(
+                        layer_started,
+                        expansion_timing,
+                        merge_nanos,
+                        finalize_nanos,
+                    ),
                     move_family_telemetry: layer_move_family_telemetry,
                 });
                 return finish_search_dyn(
@@ -2995,6 +3078,8 @@ fn search_beam_dyn_with_telemetry(
             }
         }
 
+        let merge_nanos = elapsed_nanos(merge_started);
+        let finalize_started = Instant::now();
         telemetry.collisions_with_seen += collisions_with_seen;
         telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
         telemetry.approximate_other_side_hits += approximate_other_side_hits;
@@ -3013,6 +3098,7 @@ fn search_beam_dyn_with_telemetry(
         if let Some(records) = layer_records.as_ref() {
             emit_layer(&mut observer, records);
         }
+        let finalize_nanos = elapsed_nanos(finalize_started);
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
             direction: Some(direction),
@@ -3032,6 +3118,7 @@ fn search_beam_dyn_with_telemetry(
             enqueued_nodes,
             next_frontier_nodes: frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
+            timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: layer_move_family_telemetry,
         });
         telemetry.max_frontier_size = telemetry
@@ -3636,7 +3723,12 @@ fn expand_frontier_layer_dyn(
     max_entry: u32,
     move_family_policy: MoveFamilyPolicy,
     deadline: Option<Instant>,
-) -> (Vec<FrontierExpansion>, FrontierExpansionStats, bool) {
+) -> (
+    Vec<FrontierExpansion>,
+    FrontierExpansionStats,
+    FrontierExpansionTiming,
+    bool,
+) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
@@ -3712,6 +3804,7 @@ fn expand_frontier_layer_dyn(
 
     let mut expansions = Vec::new();
     let mut stats = FrontierExpansionStats::default();
+    let mut timing = FrontierExpansionTiming::default();
     let mut timed_out = false;
     for chunk in current_frontier.chunks(frontier_chunk_size(current_frontier.len(), deadline)) {
         if deadline_reached(deadline) {
@@ -3719,6 +3812,7 @@ fn expand_frontier_layer_dyn(
             break;
         }
 
+        let compute_started = Instant::now();
         #[cfg(not(target_arch = "wasm32"))]
         let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
             chunk.par_iter().map(expand_node).collect();
@@ -3726,20 +3820,25 @@ fn expand_frontier_layer_dyn(
         #[cfg(target_arch = "wasm32")]
         let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
             chunk.iter().map(expand_node).collect();
+        timing.expand_compute_nanos += elapsed_nanos(compute_started);
 
+        let accumulate_started = Instant::now();
         for (node_expansions, node_stats) in per_node {
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
+        timing.expand_accumulate_nanos += elapsed_nanos(accumulate_started);
     }
 
+    let dedup_started = Instant::now();
     let (deduped, same_future_past_collisions) = deduplicate_expansions(
         expansions,
         current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
     );
+    timing.dedup_nanos = elapsed_nanos(dedup_started);
     stats.same_future_past_collisions = same_future_past_collisions;
     record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-    (deduped, stats, timed_out)
+    (deduped, stats, timing, timed_out)
 }
 
 fn deduplicate_expansions(
@@ -3862,7 +3961,11 @@ fn expand_frontier_layer(
     max_intermediate_dim: usize,
     max_entry: u32,
     move_family_policy: MoveFamilyPolicy,
-) -> (Vec<FrontierExpansion>, FrontierExpansionStats) {
+) -> (
+    Vec<FrontierExpansion>,
+    FrontierExpansionStats,
+    FrontierExpansionTiming,
+) {
     let expand_node = |current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
@@ -3939,38 +4042,64 @@ fn expand_frontier_layer(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let compute_started = Instant::now();
         let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
             current_frontier.par_iter().map(expand_node).collect();
+        let expand_compute_nanos = elapsed_nanos(compute_started);
         let mut expansions = Vec::new();
         let mut stats = FrontierExpansionStats::default();
+        let accumulate_started = Instant::now();
         for (node_expansions, node_stats) in per_node {
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
+        let expand_accumulate_nanos = elapsed_nanos(accumulate_started);
+        let dedup_started = Instant::now();
         let (deduped, same_future_past_collisions) = deduplicate_expansions(
             expansions,
             current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
         );
+        let dedup_nanos = elapsed_nanos(dedup_started);
         stats.same_future_past_collisions = same_future_past_collisions;
         record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (deduped, stats)
+        (
+            deduped,
+            stats,
+            FrontierExpansionTiming {
+                expand_compute_nanos,
+                expand_accumulate_nanos,
+                dedup_nanos,
+            },
+        )
     }
 
     #[cfg(target_arch = "wasm32")]
     {
         let mut expansions = Vec::new();
         let mut stats = FrontierExpansionStats::default();
+        let compute_started = Instant::now();
         for (node_expansions, node_stats) in current_frontier.iter().map(expand_node) {
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
+        let expand_compute_nanos = elapsed_nanos(compute_started);
+        let dedup_started = Instant::now();
         let (deduped, same_future_past_collisions) = deduplicate_expansions(
             expansions,
             current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
         );
+        let dedup_nanos = elapsed_nanos(dedup_started);
         stats.same_future_past_collisions = same_future_past_collisions;
         record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (deduped, stats)
+        (
+            deduped,
+            stats,
+            FrontierExpansionTiming {
+                expand_compute_nanos,
+                expand_accumulate_nanos: 0,
+                dedup_nanos,
+            },
+        )
     }
 }
 
@@ -5393,6 +5522,16 @@ mod tests {
         assert!(!telemetry.layers.is_empty());
         assert!(telemetry.frontier_nodes_expanded >= 1);
         assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
+        assert!(telemetry.layers.iter().all(|layer| {
+            let timing = layer.timing;
+            let phased_total = timing
+                .expand_compute_nanos
+                .saturating_add(timing.expand_accumulate_nanos)
+                .saturating_add(timing.dedup_nanos)
+                .saturating_add(timing.merge_nanos)
+                .saturating_add(timing.finalize_nanos);
+            timing.total_nanos >= phased_total && timing.total_nanos > 0
+        }));
     }
 
     #[test]
@@ -5403,7 +5542,7 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (expansions, stats) =
+        let (expansions, stats, _timing) =
             expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::Mixed);
 
         assert!(!expansions.is_empty());
@@ -5418,7 +5557,7 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (_expansions, stats) =
+        let (_expansions, stats, _timing) =
             expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::GraphOnly);
 
         assert_eq!(stats.factorisations_enumerated, 0);
@@ -5432,14 +5571,14 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (single_expansions, _) = expand_frontier_layer(
+        let (single_expansions, _, _) = expand_frontier_layer(
             std::slice::from_ref(&a_canon),
             &orig,
             2,
             10,
             MoveFamilyPolicy::Mixed,
         );
-        let (duplicate_frontier_expansions, _) = expand_frontier_layer(
+        let (duplicate_frontier_expansions, _, _) = expand_frontier_layer(
             &[a_canon.clone(), a_canon],
             &orig,
             2,
