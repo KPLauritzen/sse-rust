@@ -229,3 +229,11 @@
 
 - `2026-04-13-1505-sq3-symmetry-break` Tried symmetry breaking in the square `3x3` enumerator for sources with equal rows or columns.
   Failed. It reduced raw `square_factorisation_3x3` counts on the hard mixed probes, but runtime regressed badly (`12411 ms` total, with all three mixed telemetry-focus probes slower), so the added ordering checks were not worth it.
+
+## 2026-04-14
+
+- `worktree` Added `assemble_k3_guide_pool` and materialized a normalized k=3 guide envelope from fixture + sqlite + in-repo Lind-Marcus/Baker witness sources.
+  Kept as workflow support. `research/guide_artifacts/k3_normalized_guide_pool.json` now contains 12 validated full-path guides with best lag 7, suitable for repeatable generic `shortcut_search` runs.
+
+- `worktree` Ran iterative generic `shortcut_search` over the normalized k=3 pool with staged bound increases.
+  Kept as evidence. Completed runs at 48 and 128 segment-attempt caps both held best lag at 7 and converged to the same witness signature as the Lind-Marcus/Baker guide; a 256-attempt run timed out at 420s. Details are in `research/notes/2026-04-14-k3-normalized-guide-pool-shortcutting.md`.
