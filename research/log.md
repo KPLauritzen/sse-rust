@@ -282,3 +282,6 @@
 
 - `process-hygiene-caveat` Added post-hoc caveat notes to April 14 shortcut experiment writeups after discovering lingering `search` processes from earlier `timeout cargo run ...` probes.
   Kept as documentation correction. Timing/throughput comparisons in affected notes are now marked provisional unless rerun under strict `timeout -k ... target/dist/search` execution; lag/outcome classifications remain the primary correctness signal.
+
+- `loop15-dim4-feeder-diversity-ab` Tested whether adding a dim4-feeder lag-7 artifact changes hard dim5 lag-cap-5 shortcut behavior.
+  Failed (neutral). In a controlled dim5 stage-2 A/B (`attempts=64`, `guided_segment_timeout=5`), adding the feeder artifact increased loaded guides (`12 -> 13`) but not unique guides (`12 -> 12`), and lag/work outcomes remained effectively unchanged (still lag 7, same guided improvements/promotions). Details are in `research/notes/2026-04-14-k3-shortcut-diversity-feed-stage2-ab.md`.
