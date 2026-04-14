@@ -65,14 +65,18 @@
 # mode: session
 
 # Custom tmux pane layout (mutually exclusive with 'windows').
-# Warm the main CLI build in one pane while the agent starts immediately in the
-# other. This keeps worktree creation non-blocking and avoids copying target/
-# across paths.
+# Three-pane layout:
+# - Left top: neovim
+# - Left bottom: shell
+# - Right: agent
 panes:
-  - command: cargo build --quiet --bin search
+  - command: nvim
   - command: <agent>
     split: horizontal
     focus: true
+  - command: bash
+    split: vertical
+    target: 0
 
 # Multiple windows per session (session mode only, mutually exclusive with 'panes').
 # Each window can have its own pane layout. Unnamed windows get tmux's
