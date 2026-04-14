@@ -161,11 +161,20 @@ fn run() -> Result<(), String> {
 
     let mut by_path_key: HashMap<String, GuideArtifact> = HashMap::new();
     let reference = build_lind_marcus_reference_guide()?;
-    let reference_key = path_key(match &reference.payload {
-        GuideArtifactPayload::FullPath { path } => path,
-    });
-    by_path_key.insert(reference_key, reference);
-    reference_guides += 1;
+    if endpoint_pairs_match_up_to_permutation_and_orientation(
+        &endpoint_source,
+        &endpoint_target,
+        &reference.endpoints.source,
+        &reference.endpoints.target,
+    ) {
+        let reference_key = path_key(match &reference.payload {
+            GuideArtifactPayload::FullPath { path } => path,
+        });
+        by_path_key.insert(reference_key, reference);
+        reference_guides += 1;
+    } else {
+        println!("skipping Lind-Marcus/Baker reference guide for non-matching fixture endpoints");
+    }
 
     for candidate in candidates {
         let Some(reverse) =
@@ -640,6 +649,19 @@ fn candidate_endpoint_orientation(
     None
 }
 
+fn endpoint_pairs_match_up_to_permutation_and_orientation(
+    source_a: &DynMatrix,
+    target_a: &DynMatrix,
+    source_b: &DynMatrix,
+    target_b: &DynMatrix,
+) -> bool {
+    let source_a = source_a.canonical_perm();
+    let target_a = target_a.canonical_perm();
+    let source_b = source_b.canonical_perm();
+    let target_b = target_b.canonical_perm();
+    (source_a == source_b && target_a == target_b) || (source_a == target_b && target_a == source_b)
+}
+
 fn materialize_candidate(candidate: &PathCandidate) -> Result<DynSsePath, String> {
     if candidate.matrices.len() < 2 {
         return Err("candidate path has fewer than 2 matrices".to_string());
@@ -739,20 +761,20 @@ fn materialize_candidate(candidate: &PathCandidate) -> Result<DynSsePath, String
 
 fn build_artifact_from_candidate(candidate: &PathCandidate, path: DynSsePath) -> GuideArtifact {
     let lag = path.steps.len();
+    let source = path
+        .matrices
+        .first()
+        .expect("materialized path should have source")
+        .clone();
+    let target = path
+        .matrices
+        .last()
+        .expect("materialized path should have target")
+        .clone();
+    let endpoint_max_dim = source.rows.max(target.rows);
     GuideArtifact {
         artifact_id: Some(slugify(&format!("k3-{}", candidate.artifact_id_hint))),
-        endpoints: GuideArtifactEndpoints {
-            source: path
-                .matrices
-                .first()
-                .expect("materialized path should have source")
-                .clone(),
-            target: path
-                .matrices
-                .last()
-                .expect("materialized path should have target")
-                .clone(),
-        },
+        endpoints: GuideArtifactEndpoints { source, target },
         payload: GuideArtifactPayload::FullPath { path },
         provenance: GuideArtifactProvenance {
             source_kind: Some(candidate.source_kind.clone()),
@@ -762,14 +784,7 @@ fn build_artifact_from_candidate(candidate: &PathCandidate, path: DynSsePath) ->
         validation: GuideArtifactValidation::WitnessValidated,
         compatibility: GuideArtifactCompatibility {
             supported_stages: vec![SearchStage::GuidedRefinement, SearchStage::ShortcutSearch],
-            max_endpoint_dim: Some(
-                candidate
-                    .matrices
-                    .iter()
-                    .map(|matrix| matrix.rows)
-                    .max()
-                    .unwrap_or(0),
-            ),
+            max_endpoint_dim: Some(endpoint_max_dim),
         },
         quality: GuideArtifactQuality {
             lag: Some(lag),
@@ -843,7 +858,7 @@ fn build_lind_marcus_reference_guide() -> Result<GuideArtifact, String> {
         validation: GuideArtifactValidation::WitnessValidated,
         compatibility: GuideArtifactCompatibility {
             supported_stages: vec![SearchStage::GuidedRefinement, SearchStage::ShortcutSearch],
-            max_endpoint_dim: Some(4),
+            max_endpoint_dim: Some(2),
         },
         quality: GuideArtifactQuality {
             lag: Some(steps.len()),

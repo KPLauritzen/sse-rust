@@ -446,7 +446,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 7,
@@ -864,7 +864,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 7,
@@ -1314,7 +1314,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 8,
@@ -1796,7 +1796,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 9,
@@ -2382,7 +2382,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 10,
@@ -2947,7 +2947,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 10,
@@ -3497,7 +3497,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 10,
@@ -4139,7 +4139,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 11,
@@ -4736,7 +4736,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 11,
@@ -5333,7 +5333,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 4
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 11,
@@ -7621,7 +7621,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 5
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 30,
@@ -9941,7 +9941,7 @@
           "guided_refinement",
           "shortcut_search"
         ],
-        "max_endpoint_dim": 5
+        "max_endpoint_dim": 2
       },
       "quality": {
         "lag": 31,
