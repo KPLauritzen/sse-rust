@@ -55,3 +55,7 @@ This parameter-only retune does not move Goal 2. It provides a slightly cheaper 
 ## Next hypothesis
 
 Focus on segment admission quality (cheap prefilter/ranking) rather than global bound retuning, because the current hard surface behavior is dominated by a steep cost cliff.
+
+## Post-hoc process caveat (added 2026-04-14)
+
+Later on 2026-04-14, we identified lingering `search` processes from earlier `timeout cargo run ...` probes. Runtime/elapsed comparisons in this note may therefore include contention noise; treat timing deltas as provisional and revalidate critical runtime claims with `timeout -k ... target/dist/search`. Lag/outcome classifications are still the hard signal.

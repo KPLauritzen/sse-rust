@@ -90,3 +90,7 @@ Gap-window tuning can dramatically change runtime profile, and `max_gap=4` gives
 ## Next hypothesis
 
 Use the tractable `max_gap=4` campaign as a first pass, but add a targeted second-pass admission rule that selectively reintroduces expensive long-gap segments only for high-payoff candidates (rather than globally restoring `max_gap=6`).
+
+## Post-hoc process caveat (added 2026-04-14)
+
+Later on 2026-04-14, lingering `search` processes were discovered from earlier `timeout cargo run ...` probes. Treat runtime/elapsed and throughput comparisons in this note as potentially noisy under contention; rerun key timing claims using strict `timeout -k ... target/dist/search` execution. Witness/outcome and lag classifications remain the primary evidence.

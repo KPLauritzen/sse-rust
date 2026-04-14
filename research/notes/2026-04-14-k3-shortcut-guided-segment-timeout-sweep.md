@@ -85,3 +85,7 @@ Segment timeouts improve tractability at low attempt budgets, but in this sweep 
 ## Next hypothesis
 
 Use cheap admission/ranking before segment search (rather than only per-segment timeout) so attempt budget is spent on segments likely to shorten the path.
+
+## Post-hoc process caveat (added 2026-04-14)
+
+Later on 2026-04-14, we found lingering `search` processes from earlier `timeout cargo run ...` probes that were not always reaped promptly. Treat elapsed/runtime throughput comparisons in this note as provisional; rerun any critical timing deltas with strict `timeout -k ... target/dist/search` execution. Outcome classes and lag results remain the primary signal.

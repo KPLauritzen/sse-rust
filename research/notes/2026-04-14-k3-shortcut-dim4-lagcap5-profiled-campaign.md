@@ -68,3 +68,7 @@ Observation: dim4 gives much better tractability than dim5 at the same attempt c
 ## Next hypothesis
 
 Keep the cheap dim4 staging surface as a feeder, then apply a selective (not broad) dim5/full-gap follow-up on a *diverse promoted subset* rather than a single best guide or full-pool brute force. The current evidence suggests bottleneck is structural guide diversity/segment selection, not raw attempt budget alone.
+
+## Process hygiene note (added 2026-04-14)
+
+This note was generated after cleaning up lingering `search`/`cargo run` processes and switching long probes to `timeout -k ... target/dist/search`. Earlier failed setup attempts from this loop were discarded and are not part of the reported metrics above.
