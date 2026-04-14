@@ -243,3 +243,6 @@
 
 - `worktree` Ran a gap-focus A/B for k=3 shortcut search (`min_gap=2,max_gap=6` control vs `min_gap=3,max_gap=7` focused).
   Failed. The focused policy did not improve lag (still 7), timed out at 128 attempts, and at 64 attempts increased search work despite slightly higher local improvement counts (`frontier_nodes_expanded 10882 -> 16592`, `total_visited_nodes 712040 -> 1135613`). Details are in `research/notes/2026-04-14-k3-shortcut-gap-focus-ab.md`.
+
+- `loop3-segment-cache` Added per-run segment-query memoization for `shortcut_search` guided segments with cache hit/miss telemetry.
+  Kept. Profiling still shows factorisation-dominated segment cost, and memoization produced concrete reuse on hard `k=3` runs (`22` hits at control-128, `38` hits at focused-128). Control-128 kept lag 7 but reduced work (`frontier_nodes_expanded 20088 -> 17918`, `total_visited_nodes 1263782 -> 1121478`), and the previously timeout-prone focused-128 run completed under the same 300s cap (still lag 7). Details are in `research/notes/2026-04-14-k3-shortcut-segment-cache.md`.

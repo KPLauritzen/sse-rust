@@ -704,6 +704,14 @@ fn print_telemetry(telemetry: &SearchTelemetry) {
         telemetry.shortcut_search.segment_attempts
     );
     println!(
+        "  shortcut segment cache hits: {}",
+        telemetry.shortcut_search.segment_cache_hits
+    );
+    println!(
+        "  shortcut segment cache misses: {}",
+        telemetry.shortcut_search.segment_cache_misses
+    );
+    println!(
         "  shortcut segment improvements: {}",
         telemetry.shortcut_search.segment_improvements
     );

@@ -153,6 +153,15 @@ struct ShortcutGuidePoolEntry {
     processed: bool,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct GuidedSegmentCacheKey {
+    source: DynMatrix,
+    target: DynMatrix,
+    max_lag: usize,
+}
+
+type GuidedSegmentCache = HashMap<GuidedSegmentCacheKey, DynSseResult>;
+
 #[derive(Default)]
 struct ShortcutGuidePool {
     guides: HashMap<Vec<DynMatrix>, ShortcutGuidePoolEntry>,
@@ -530,6 +539,7 @@ fn search_shortcut_search_with_observer(
     };
     let mut guide_pool = ShortcutGuidePool::new(prepared.guides);
     let mut remaining_segment_attempts = request.shortcut_search.max_total_segment_attempts;
+    let mut segment_cache: GuidedSegmentCache = HashMap::default();
     let mut promoted_serial = 0usize;
     let mut stop_reason = ShortcutSearchStopReason::MaxRoundsReached;
 
@@ -561,6 +571,7 @@ fn search_shortcut_search_with_observer(
                 &guide.path,
                 &mut telemetry,
                 &mut remaining_segment_attempts,
+                &mut segment_cache,
             );
             round.segment_attempts += telemetry.guided_segments_considered - attempts_before;
             round.segment_improvements += telemetry.guided_segments_improved - improvements_before;
@@ -1118,7 +1129,14 @@ fn refine_guide_path(
     telemetry: &mut SearchTelemetry,
 ) -> DynSsePath {
     let mut remaining_segment_attempts = usize::MAX;
-    refine_guide_path_with_budget(request, initial, telemetry, &mut remaining_segment_attempts)
+    let mut segment_cache: GuidedSegmentCache = HashMap::default();
+    refine_guide_path_with_budget(
+        request,
+        initial,
+        telemetry,
+        &mut remaining_segment_attempts,
+        &mut segment_cache,
+    )
 }
 
 fn refine_guide_path_with_budget(
@@ -1126,6 +1144,7 @@ fn refine_guide_path_with_budget(
     initial: &DynSsePath,
     telemetry: &mut SearchTelemetry,
     remaining_segment_attempts: &mut usize,
+    segment_cache: &mut GuidedSegmentCache,
 ) -> DynSsePath {
     let mut current = initial.clone();
     for _ in 0..request.guided_refinement.rounds {
@@ -1139,6 +1158,7 @@ fn refine_guide_path_with_budget(
             &request.guided_refinement,
             telemetry,
             remaining_segment_attempts,
+            segment_cache,
         );
         if next.steps.len() >= current.steps.len() {
             break;
@@ -1154,6 +1174,7 @@ fn refine_guide_path_once(
     guided_config: &GuidedRefinementConfig,
     telemetry: &mut SearchTelemetry,
     remaining_segment_attempts: &mut usize,
+    segment_cache: &mut GuidedSegmentCache,
 ) -> DynSsePath {
     if guide.steps.is_empty() {
         return guide.clone();
@@ -1191,19 +1212,35 @@ fn refine_guide_path_once(
 
             *remaining_segment_attempts -= 1;
             telemetry.guided_segments_considered += 1;
-            let mut config = base_config.clone();
-            config.max_lag = lag_cap;
-            let deadline = guided_config
-                .segment_timeout_secs
-                .map(Duration::from_secs)
-                .map(|timeout| Instant::now() + timeout);
-            let (result, segment_telemetry) = search_sse_with_telemetry_dyn_with_deadline(
-                &guide.matrices[start],
-                &guide.matrices[end],
-                &config,
-                deadline,
-            );
-            merge_search_telemetry(telemetry, &segment_telemetry);
+            let cache_key = GuidedSegmentCacheKey {
+                source: guide.matrices[start].clone(),
+                target: guide.matrices[end].clone(),
+                max_lag: lag_cap,
+            };
+            let result = if let Some(cached_result) = segment_cache.get(&cache_key) {
+                telemetry.shortcut_search.segment_cache_hits += 1;
+                cached_result.clone()
+            } else {
+                telemetry.shortcut_search.segment_cache_misses += 1;
+                let mut config = base_config.clone();
+                config.max_lag = lag_cap;
+                let deadline = guided_config
+                    .segment_timeout_secs
+                    .map(Duration::from_secs)
+                    .map(|timeout| Instant::now() + timeout);
+                let (result, segment_telemetry) = search_sse_with_telemetry_dyn_with_deadline(
+                    &guide.matrices[start],
+                    &guide.matrices[end],
+                    &config,
+                    deadline,
+                );
+                merge_search_telemetry(telemetry, &segment_telemetry);
+                let can_cache_unknown = guided_config.segment_timeout_secs.is_none();
+                if !matches!(result, DynSseResult::Unknown) || can_cache_unknown {
+                    segment_cache.insert(cache_key, result.clone());
+                }
+                result
+            };
             if let DynSseResult::Equivalent(path) = result {
                 if path.steps.len() < gap {
                     telemetry.guided_segments_improved += 1;
@@ -6199,6 +6236,71 @@ mod tests {
         }
         assert_eq!(telemetry.guided_segments_considered, 1);
         assert_eq!(telemetry.guided_segments_improved, 0);
+    }
+
+    #[test]
+    fn test_refine_guide_path_once_reuses_cached_segment_result() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid).unwrap(),
+                permutation_step_between(&mid, &b).unwrap(),
+            ],
+        };
+        let cached = DynSsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![permutation_step_between(&a, &b).unwrap()],
+        };
+
+        let config = SearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+        };
+        let guided = GuidedRefinementConfig {
+            max_shortcut_lag: 1,
+            min_gap: 2,
+            max_gap: Some(2),
+            rounds: 1,
+            segment_timeout_secs: None,
+        };
+
+        let mut telemetry = SearchTelemetry::default();
+        let mut remaining_segment_attempts = 4usize;
+        let mut segment_cache: GuidedSegmentCache = HashMap::default();
+        segment_cache.insert(
+            GuidedSegmentCacheKey {
+                source: a.clone(),
+                target: b.clone(),
+                max_lag: 1,
+            },
+            DynSseResult::Equivalent(cached),
+        );
+
+        let refined = refine_guide_path_once(
+            &guide,
+            &config,
+            &guided,
+            &mut telemetry,
+            &mut remaining_segment_attempts,
+            &mut segment_cache,
+        );
+
+        assert_eq!(refined.steps.len(), 1);
+        validate_sse_path_dyn(&a, &b, &refined).unwrap();
+        assert_eq!(remaining_segment_attempts, 3);
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(telemetry.guided_segments_improved, 1);
+        assert_eq!(telemetry.shortcut_search.segment_cache_hits, 1);
+        assert_eq!(telemetry.shortcut_search.segment_cache_misses, 0);
+        assert_eq!(telemetry.frontier_nodes_expanded, 0);
     }
 
     #[test]

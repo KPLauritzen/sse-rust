@@ -465,6 +465,10 @@ pub struct ShortcutSearchTelemetry {
     pub unique_guides: usize,
     pub initial_working_set_guides: usize,
     pub segment_attempts: usize,
+    #[serde(default)]
+    pub segment_cache_hits: usize,
+    #[serde(default)]
+    pub segment_cache_misses: usize,
     pub segment_improvements: usize,
     pub promoted_guides: usize,
     pub emitted_guide_artifacts: usize,
