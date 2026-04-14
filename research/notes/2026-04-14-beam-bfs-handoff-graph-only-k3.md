@@ -15,8 +15,8 @@ explicit `beam_bfs_handoff` frontier mode. In that mode:
 - parent/depth/orig tracking remains discovery-time, so reconstruction is
   unchanged
 - insertion order is deterministic via `(depth, serial)` in the deferred queue
-- beam seeding is capped at depth `4`, after which newly discovered states go
-  directly to the BFS queue
+- beam seeding is capped at depth `4` inclusive; depth-`5` and later
+  discoveries go directly to the BFS queue
 
 This probe is intentionally **graph-only**.
 
@@ -52,7 +52,7 @@ The plain-beam run completed directly. The handoff run was bounded with
 ### Plain Beam
 
 - outcome: `unknown`
-- wall time: `0.52s`
+- wall time: `0.61s`
 - `frontier_nodes_expanded = 182`
 - `candidates_generated = 8334`
 - `total_visited_nodes = 5372`
@@ -64,6 +64,10 @@ The plain-beam run completed directly. The handoff run was bounded with
 - did not emit final JSON before the cap
 - same control also timed out under the same `20s` cap for widths `1`, `2`,
   `4`, and `10`
+
+These numbers were rechecked after fixing the handoff boundary to make depth
+`4` inclusive and after deferring beam-phase exact-meet returns until the BFS
+phase can recover shorter deferred paths.
 
 ## Interpretation
 

@@ -311,6 +311,12 @@ struct BeamBfsHandoffFrontier {
     deferred: VecDeque<BeamFrontierEntry>,
 }
 
+#[derive(Clone, Debug)]
+struct BeamBfsHandoffExactMeet {
+    canonical: DynMatrix,
+    path_depth: usize,
+}
+
 const DEFAULT_BEAM_BFS_HANDOFF_DEPTH: usize = 4;
 
 impl BeamBfsHandoffFrontier {
@@ -2440,6 +2446,31 @@ fn choose_next_beam_bfs_handoff_direction(
     .map(|(expand_forward, _)| expand_forward)
 }
 
+fn should_use_beam_bfs_handoff_phase(
+    beam_phase: bool,
+    next_depth: usize,
+    beam_handoff_depth: usize,
+) -> bool {
+    beam_phase && next_depth <= beam_handoff_depth
+}
+
+fn record_best_beam_bfs_handoff_exact_meet(
+    best_exact_meet: &mut Option<BeamBfsHandoffExactMeet>,
+    canonical: &DynMatrix,
+    path_depth: usize,
+) {
+    let should_replace = match best_exact_meet {
+        Some(best) => path_depth < best.path_depth,
+        None => true,
+    };
+    if should_replace {
+        *best_exact_meet = Some(BeamBfsHandoffExactMeet {
+            canonical: canonical.clone(),
+            path_depth,
+        });
+    }
+}
+
 fn beam_candidate_score(
     matrix: &DynMatrix,
     other_signatures: &HashSet<ApproxSignature>,
@@ -2999,6 +3030,7 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
     );
 
     let mut beam_phase = true;
+    let mut best_exact_meet: Option<BeamBfsHandoffExactMeet> = None;
     let beam_handoff_depth = DEFAULT_BEAM_BFS_HANDOFF_DEPTH.min(config.max_lag);
     let mut layer_index = 0usize;
     loop {
@@ -3169,6 +3201,14 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
                 if path_depth > config.max_lag {
                     continue;
                 }
+                record_best_beam_bfs_handoff_exact_meet(
+                    &mut best_exact_meet,
+                    &expansion.next_canon,
+                    path_depth,
+                );
+                if beam_phase {
+                    continue;
+                }
 
                 let merge_nanos = elapsed_nanos(merge_started);
                 let finalize_started = Instant::now();
@@ -3219,13 +3259,16 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
                     ),
                     move_family_telemetry: layer_move_family_telemetry,
                 });
+                let best_exact_meet = best_exact_meet
+                    .as_ref()
+                    .expect("exact meet should be recorded before returning");
                 return finish_search_2x2(
                     observer,
                     request,
                     SseResult::Equivalent(reconstruct_bidirectional_path(
                         a,
                         b,
-                        &expansion.next_canon,
+                        &best_exact_meet.canonical,
                         &fwd_parent,
                         &fwd_orig,
                         &bwd_parent,
@@ -3249,7 +3292,8 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
                 .discovered_nodes += 1;
 
             if enqueued {
-                let use_beam_phase = beam_phase && next_depth < beam_handoff_depth;
+                let use_beam_phase =
+                    should_use_beam_bfs_handoff_phase(beam_phase, next_depth, beam_handoff_depth);
                 push_beam_bfs_handoff_entry(
                     frontier,
                     &expansion.next_canon,
@@ -3330,6 +3374,22 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+    if let Some(best_exact_meet) = best_exact_meet.as_ref() {
+        return finish_search_2x2(
+            observer,
+            request,
+            SseResult::Equivalent(reconstruct_bidirectional_path(
+                a,
+                b,
+                &best_exact_meet.canonical,
+                &fwd_parent,
+                &fwd_orig,
+                &bwd_parent,
+                &bwd_orig,
+            )),
+            telemetry,
+        );
+    }
     if config.move_family_policy == MoveFamilyPolicy::Mixed
         && should_try_concrete_shift_fallback(a, b, config)
     {
@@ -3833,6 +3893,7 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
     );
 
     let mut beam_phase = true;
+    let mut best_exact_meet: Option<BeamBfsHandoffExactMeet> = None;
     let beam_handoff_depth = DEFAULT_BEAM_BFS_HANDOFF_DEPTH.min(config.max_lag);
     let mut layer_index = 0usize;
     loop {
@@ -4007,6 +4068,14 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
                 if path_depth > config.max_lag {
                     continue;
                 }
+                record_best_beam_bfs_handoff_exact_meet(
+                    &mut best_exact_meet,
+                    &expansion.next_canon,
+                    path_depth,
+                );
+                if beam_phase {
+                    continue;
+                }
 
                 let merge_nanos = elapsed_nanos(merge_started);
                 let finalize_started = Instant::now();
@@ -4057,13 +4126,16 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
                     ),
                     move_family_telemetry: layer_move_family_telemetry,
                 });
+                let best_exact_meet = best_exact_meet
+                    .as_ref()
+                    .expect("exact meet should be recorded before returning");
                 return finish_search_dyn(
                     observer,
                     request,
                     DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
                         a,
                         b,
-                        &expansion.next_canon,
+                        &best_exact_meet.canonical,
                         &fwd_parent,
                         &fwd_orig,
                         &bwd_parent,
@@ -4087,7 +4159,8 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
                 .discovered_nodes += 1;
 
             if enqueued {
-                let use_beam_phase = beam_phase && next_depth < beam_handoff_depth;
+                let use_beam_phase =
+                    should_use_beam_bfs_handoff_phase(beam_phase, next_depth, beam_handoff_depth);
                 push_beam_bfs_handoff_entry(
                     frontier,
                     &expansion.next_canon,
@@ -4169,6 +4242,23 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
         if timed_out {
             break;
         }
+    }
+
+    if let Some(best_exact_meet) = best_exact_meet.as_ref() {
+        return finish_search_dyn(
+            observer,
+            request,
+            DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
+                a,
+                b,
+                &best_exact_meet.canonical,
+                &fwd_parent,
+                &fwd_orig,
+                &bwd_parent,
+                &bwd_orig,
+            )),
+            telemetry,
+        );
     }
 
     finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
@@ -5921,6 +6011,34 @@ mod tests {
         assert_eq!(bfs_batch.len(), 1);
         assert_eq!(bfs_batch[0].score, 3);
         assert_eq!(bfs_batch[0].depth, 1);
+    }
+
+    #[test]
+    fn test_beam_bfs_handoff_depth_boundary_is_inclusive() {
+        assert!(should_use_beam_bfs_handoff_phase(true, 4, 4));
+        assert!(!should_use_beam_bfs_handoff_phase(true, 5, 4));
+        assert!(!should_use_beam_bfs_handoff_phase(false, 4, 4));
+    }
+
+    #[test]
+    fn test_beam_bfs_handoff_recovers_shorter_deferred_path_than_beam_phase_meet() {
+        let a = SqMatrix::new([[0, 2], [0, 1]]);
+        let b = SqMatrix::new([[1, 1], [0, 0]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+            frontier_mode: FrontierMode::BeamBfsHandoff,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: Some(1),
+        };
+
+        let result = search_sse_2x2(&a, &b, &config);
+        let SseResult::Equivalent(path) = result else {
+            panic!("expected Equivalent path from beam_bfs_handoff");
+        };
+        assert_valid_path(&path);
+        assert_eq!(path.steps.len(), 1);
     }
 
     #[test]
