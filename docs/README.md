@@ -25,6 +25,9 @@ This repo now uses three documentation layers with different jobs:
 - [`rfcs/rfc-002-shortcut-search-stage.md`](rfcs/rfc-002-shortcut-search-stage.md)
   proposes the missing generic `shortcut_search` stage as an artifact-driven
   outer loop built on top of `guided_refinement`.
+- [`research-harness-benchmark-policy.md`](research-harness-benchmark-policy.md)
+  defines how benchmark-style measurement probes should be represented through
+  `research_harness` without weakening required-case correctness gates.
 
 ## Rules Of Thumb
 
