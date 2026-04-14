@@ -261,3 +261,6 @@
 
 - `loop8-round-budget-split` Tried splitting `shortcut_search` segment attempts across rounds to force promoted-guide follow-up.
   Failed and reverted. The patch preserved required-case correctness but on targeted `dim4/entry5` probes reduced local shortcut-improvement throughput without improving lag, and it still timed out on the hard `dim5/entry6` attempts-64 probe. Details are in `research/notes/2026-04-14-k3-shortcut-round-budget-split-reverted.md`.
+
+- `loop9-guided-segment-timeout-sweep` Swept `guided_segment_timeout_secs` on the hard `dim5/entry6` shortcut surface.
+  Kept as evidence only. Attempts-64 still timed out for timeout values `1/2/3/5` (no completed JSON). At lower budgets (`8/16/32`), segment timeouts improved tractability and reduced work but yielded zero segment improvements and no lag gain (stayed at 7). Details are in `research/notes/2026-04-14-k3-shortcut-guided-segment-timeout-sweep.md`.
