@@ -270,3 +270,9 @@
 
 - `loop11-trace-cube-invariant` Tested and reverted a dynamic `trace(M^3)` prefilter in endpoint search.
   Failed (neutral/negative). Targeted dim4 and hard dim5 shortcut probes were unchanged on lag/work where completed, and the first hard probe at the prior 180s outer cap timed out with no artifact. The patch was reverted to avoid stacking complexity without bottleneck movement. Details are in `research/notes/2026-04-14-k3-shortcut-trace-cube-invariant-reverted.md`.
+
+- `loop12-gap-window-campaign` Measured hard dim5 shortcut behavior under alternative gap windows and pushed a high-budget narrow-gap campaign.
+  Kept as evidence only. Narrowing to `max_gap=4` massively improved tractability and enabled attempts up to `512` with low work growth, but all runs still converged to lag `7`. Widening to `min_gap=4` raised local improvements but was far more expensive at the same budget. Details are in `research/notes/2026-04-14-k3-shortcut-gap-window-campaign.md`.
+
+- `loop13-staged-refinement-followup` Tested whether a `max_gap=4` stage-1 best path can be compressed further by a stage-2 full-gap pass.
+  Failed. The stage-2 run on the exported lag-7 stage-1 best guide (`max_gap=6`, lag-cap 4) produced no improvements before pool exhaustion, and raising lag-cap to 5 timed out under 240s for attempts 32 and 64. Logged in `research/notes/2026-04-14-k3-shortcut-gap-window-campaign.md`.
