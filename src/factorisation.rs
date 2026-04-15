@@ -1183,42 +1183,21 @@ where
                         ],
                     ];
 
-                    // Quick determinant check via cofactor expansion.
-                    let m00 = det3x3(&[
-                        [u_top[1][1], u_top[1][2], u_top[1][3]],
-                        [u_top[2][1], u_top[2][2], u_top[2][3]],
-                        [u_top[3][1], u_top[3][2], u_top[3][3]],
-                    ]);
-                    let m01 = det3x3(&[
-                        [u_top[1][0], u_top[1][2], u_top[1][3]],
-                        [u_top[2][0], u_top[2][2], u_top[2][3]],
-                        [u_top[3][0], u_top[3][2], u_top[3][3]],
-                    ]);
-                    let m02 = det3x3(&[
-                        [u_top[1][0], u_top[1][1], u_top[1][3]],
-                        [u_top[2][0], u_top[2][1], u_top[2][3]],
-                        [u_top[3][0], u_top[3][1], u_top[3][3]],
-                    ]);
-                    let m03 = det3x3(&[
-                        [u_top[1][0], u_top[1][1], u_top[1][2]],
-                        [u_top[2][0], u_top[2][1], u_top[2][2]],
-                        [u_top[3][0], u_top[3][1], u_top[3][2]],
-                    ]);
-                    let det = u_top[0][0] * m00 - u_top[0][1] * m01 + u_top[0][2] * m02
-                        - u_top[0][3] * m03;
+                    let (u_top_cofactors, det) = cofactor_matrix_and_det_4x4(&u_top);
                     if det == 0 {
                         continue;
                     }
 
-                    let mut v_cols = Vec::with_capacity(5);
+                    let mut v_cols = [[0u32; 4]; 5];
                     let mut ok = true;
-                    for col in &a_cols {
-                        let solutions = solve_nonneg_4x4(&u_top, col, max_entry);
-                        if solutions.len() != 1 {
+                    for (idx, col) in a_cols.iter().enumerate() {
+                        let Some(solution) =
+                            solve_nonneg_4x4_with_cofactors(&u_top_cofactors, det, col, max_entry)
+                        else {
                             ok = false;
                             break;
-                        }
-                        v_cols.push(solutions[0]);
+                        };
+                        v_cols[idx] = solution;
                     }
                     if !ok {
                         continue;
@@ -1404,43 +1383,24 @@ where
                                     ],
                                 ];
 
-                                // Quick det check.
-                                let m00 = det3x3(&[
-                                    [core[1][1], core[1][2], core[1][3]],
-                                    [core[2][1], core[2][2], core[2][3]],
-                                    [core[3][1], core[3][2], core[3][3]],
-                                ]);
-                                let m01 = det3x3(&[
-                                    [core[1][0], core[1][2], core[1][3]],
-                                    [core[2][0], core[2][2], core[2][3]],
-                                    [core[3][0], core[3][2], core[3][3]],
-                                ]);
-                                let m02 = det3x3(&[
-                                    [core[1][0], core[1][1], core[1][3]],
-                                    [core[2][0], core[2][1], core[2][3]],
-                                    [core[3][0], core[3][1], core[3][3]],
-                                ]);
-                                let m03 = det3x3(&[
-                                    [core[1][0], core[1][1], core[1][2]],
-                                    [core[2][0], core[2][1], core[2][2]],
-                                    [core[3][0], core[3][1], core[3][2]],
-                                ]);
-                                let det = core[0][0] * m00 - core[0][1] * m01 + core[0][2] * m02
-                                    - core[0][3] * m03;
+                                let (core_cofactors, det) = cofactor_matrix_and_det_4x4(&core);
                                 if det == 0 {
                                     continue;
                                 }
 
-                                let mut core_row_cols = Vec::with_capacity(4);
+                                let mut core_row_cols = [[0u32; 4]; 4];
                                 let mut core_valid = true;
-                                for residual_col in &residual_cols {
-                                    let solutions =
-                                        solve_nonneg_4x4(&core, residual_col, max_entry);
-                                    if solutions.len() != 1 {
+                                for (idx, residual_col) in residual_cols.iter().enumerate() {
+                                    let Some(solution) = solve_nonneg_4x4_with_cofactors(
+                                        &core_cofactors,
+                                        det,
+                                        residual_col,
+                                        max_entry,
+                                    ) else {
                                         core_valid = false;
                                         break;
-                                    }
-                                    core_row_cols.push(solutions[0]);
+                                    };
+                                    core_row_cols[idx] = solution;
                                 }
                                 if !core_valid {
                                     continue;
@@ -1947,28 +1907,20 @@ fn det3x3(m: &[[i64; 3]; 3]) -> i64 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
-/// Solve U·x = b where U is 4×4 (given as rows), b is 4-vector.
-/// Returns all nonneg integer 4-vectors x with entries ≤ max_entry.
-///
-/// Algorithm: cofactor expansion for the determinant and adjugate.
-/// Falls back to rank-3 reduction via `solve_nonneg_3x3` when singular.
-fn solve_nonneg_4x4(a: &[[i64; 4]; 4], b: &[i64; 4], max_entry: u32) -> Vec<[u32; 4]> {
-    let me = max_entry as i64;
-
-    // 3×3 minor: delete row r and column c from the 4×4 matrix.
+fn cofactor_matrix_and_det_4x4(a: &[[i64; 4]; 4]) -> ([[i64; 4]; 4], i64) {
     let minor = |r: usize, c: usize| -> [[i64; 3]; 3] {
         let mut m = [[0i64; 3]; 3];
         let mut mi = 0;
-        for i in 0..4 {
+        for (i, row) in a.iter().enumerate() {
             if i == r {
                 continue;
             }
             let mut mj = 0;
-            for j in 0..4 {
+            for (j, &value) in row.iter().enumerate() {
                 if j == c {
                     continue;
                 }
-                m[mi][mj] = a[i][j];
+                m[mi][mj] = value;
                 mj += 1;
             }
             mi += 1;
@@ -1976,53 +1928,80 @@ fn solve_nonneg_4x4(a: &[[i64; 4]; 4], b: &[i64; 4], max_entry: u32) -> Vec<[u32
         m
     };
 
-    // Determinant via cofactor expansion along row 0.
-    let c00 = det3x3(&minor(0, 0));
-    let c01 = -det3x3(&minor(0, 1));
-    let c02 = det3x3(&minor(0, 2));
-    let c03 = -det3x3(&minor(0, 3));
-    let det = a[0][0] * c00 + a[0][1] * c01 + a[0][2] * c02 + a[0][3] * c03;
+    let cofactors = [
+        [
+            det3x3(&minor(0, 0)),
+            -det3x3(&minor(0, 1)),
+            det3x3(&minor(0, 2)),
+            -det3x3(&minor(0, 3)),
+        ],
+        [
+            -det3x3(&minor(1, 0)),
+            det3x3(&minor(1, 1)),
+            -det3x3(&minor(1, 2)),
+            det3x3(&minor(1, 3)),
+        ],
+        [
+            det3x3(&minor(2, 0)),
+            -det3x3(&minor(2, 1)),
+            det3x3(&minor(2, 2)),
+            -det3x3(&minor(2, 3)),
+        ],
+        [
+            -det3x3(&minor(3, 0)),
+            det3x3(&minor(3, 1)),
+            -det3x3(&minor(3, 2)),
+            det3x3(&minor(3, 3)),
+        ],
+    ];
+    let det = a[0][0] * cofactors[0][0]
+        + a[0][1] * cofactors[0][1]
+        + a[0][2] * cofactors[0][2]
+        + a[0][3] * cofactors[0][3];
+    (cofactors, det)
+}
+
+fn solve_nonneg_4x4_with_cofactors(
+    cofactors: &[[i64; 4]; 4],
+    det: i64,
+    b: &[i64; 4],
+    max_entry: u32,
+) -> Option<[u32; 4]> {
+    if det == 0 {
+        return None;
+    }
+
+    let me = max_entry as i64;
+    let mut x = [0u32; 4];
+    for i in 0..4 {
+        let num = cofactors[0][i] * b[0]
+            + cofactors[1][i] * b[1]
+            + cofactors[2][i] * b[2]
+            + cofactors[3][i] * b[3];
+        if num % det != 0 {
+            return None;
+        }
+        let value = num / det;
+        if value < 0 || value > me {
+            return None;
+        }
+        x[i] = value as u32;
+    }
+
+    Some(x)
+}
+
+/// Solve U·x = b where U is 4×4 (given as rows), b is 4-vector.
+/// Returns all nonneg integer 4-vectors x with entries ≤ max_entry.
+///
+/// Algorithm: cofactor expansion for the determinant and adjugate.
+/// Falls back to rank-3 reduction via `solve_nonneg_3x3` when singular.
+fn solve_nonneg_4x4(a: &[[i64; 4]; 4], b: &[i64; 4], max_entry: u32) -> Vec<[u32; 4]> {
+    let (cofactors, det) = cofactor_matrix_and_det_4x4(a);
 
     if det != 0 {
-        // Compute full adjugate (transpose of cofactor matrix).
-        let cofactors: [[i64; 4]; 4] = [
-            [c00, c01, c02, c03],
-            [
-                -det3x3(&minor(1, 0)),
-                det3x3(&minor(1, 1)),
-                -det3x3(&minor(1, 2)),
-                det3x3(&minor(1, 3)),
-            ],
-            [
-                det3x3(&minor(2, 0)),
-                -det3x3(&minor(2, 1)),
-                det3x3(&minor(2, 2)),
-                -det3x3(&minor(2, 3)),
-            ],
-            [
-                -det3x3(&minor(3, 0)),
-                det3x3(&minor(3, 1)),
-                -det3x3(&minor(3, 2)),
-                det3x3(&minor(3, 3)),
-            ],
-        ];
-
-        // x = adj(A)·b / det, where adj = cofactors^T.
-        let mut x = [0i64; 4];
-        for i in 0..4 {
-            let num = cofactors[0][i] * b[0]
-                + cofactors[1][i] * b[1]
-                + cofactors[2][i] * b[2]
-                + cofactors[3][i] * b[3];
-            if num % det != 0 {
-                return vec![];
-            }
-            x[i] = num / det;
-            if x[i] < 0 || x[i] > me {
-                return vec![];
-            }
-        }
-        return vec![[x[0] as u32, x[1] as u32, x[2] as u32, x[3] as u32]];
+        return solve_nonneg_4x4_with_cofactors(&cofactors, det, b, max_entry)
+            .map_or_else(Vec::new, |x| vec![x]);
     }
 
     // det = 0: find a rank-3 triple of rows and reduce to solve_nonneg_3x3.

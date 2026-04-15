@@ -330,3 +330,6 @@
 
 - `loop30-k4-graph-only-deep` Ran deep graph-only beam sweeps for Goal 3 on the k4 endpoint.
   Kept as evidence only. Graph-only scales to high lag quickly (including lag100 with beam256 in 78s and ~3.98M visited nodes), but every run remained unknown with no witness. This branch appears low-yield for Goal 3 compared with mixed-beam envelopes.
+
+- `loop31-cofactor-reuse-4x4` Added reusable 4x4 cofactor/determinant solving path and removed repeated solve allocations in structured `4x4<->5x5` sparse-factorisation loops.
+  Kept. Correctness and score gates were unchanged (`24/24` required, hits `21`, points `3645`, telemetry-focus `45,802,619`), while harness elapsed improved (`16046 -> 13581 ms`). Hard k=3 plateau stayed at lag `7`, but attempts-176 now completed under a relaxed `260s` cap (still timed out under strict `240s`). Goal-3 k4 mixed-beam lag16 remained timeout at `120s`.
