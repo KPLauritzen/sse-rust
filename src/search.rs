@@ -5843,6 +5843,49 @@ mod tests {
         }
     }
 
+    fn literature_row_split_fixture_2x2_to_5x5() -> (DynMatrix, DynMatrix, DynSsePath) {
+        // Instantiates the generic elementary row-splitting template recorded in
+        // research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md with
+        // a = 1 + 1 + 1, b = 1 + 1 + 0, c = 1 + 1, d = 1 + 0.
+        let source = DynMatrix::new(2, 2, vec![3, 2, 2, 1]);
+        let target = DynMatrix::new(
+            5,
+            5,
+            vec![
+                1, 1, 1, 1, 1, //
+                1, 1, 1, 1, 1, //
+                1, 1, 1, 0, 0, //
+                1, 1, 1, 1, 1, //
+                1, 1, 1, 0, 0,
+            ],
+        );
+        let path = DynSsePath {
+            matrices: vec![source.clone(), target.clone()],
+            steps: vec![EsseStep {
+                u: DynMatrix::new(
+                    2,
+                    5,
+                    vec![
+                        1, 1, 1, 0, 0, //
+                        0, 0, 0, 1, 1,
+                    ],
+                ),
+                v: DynMatrix::new(
+                    5,
+                    2,
+                    vec![
+                        1, 1, //
+                        1, 1, //
+                        1, 0, //
+                        1, 1, //
+                        1, 0,
+                    ],
+                ),
+            }],
+        };
+        (source, target, path)
+    }
+
     #[test]
     fn test_build_full_path_guide_artifact_populates_metadata() {
         let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
@@ -5880,6 +5923,16 @@ mod tests {
 
         let err = build_full_path_guide_artifact(&source, &target, &invalid).unwrap_err();
         assert!(err.contains("does not end"));
+    }
+
+    #[test]
+    fn test_validate_sse_path_dyn_accepts_literature_row_split_2x2_to_5x5_fixture() {
+        let (source, target, path) = literature_row_split_fixture_2x2_to_5x5();
+        let step = &path.steps[0];
+
+        assert_eq!(step.u.mul(&step.v), source);
+        assert_eq!(step.v.mul(&step.u), target);
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
     }
 
     #[test]
