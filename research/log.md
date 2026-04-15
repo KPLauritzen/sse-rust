@@ -336,3 +336,6 @@
 
 - `loop32-dedup-signature-move` Removed `SameFuturePastSignature` clone churn in `deduplicate_expansions` by moving signatures into the representative set (`take()`), leaving behavior unchanged.
   Kept as a micro-optimization. Gates/score were unchanged (`24/24` required, hits `21`, points `3645`, telemetry-focus `45,802,619`), harness elapsed improved slightly (`13581 -> 13535 ms`), and the hard k=3 attempts-168 surface stayed effectively neutral on lag/work.
+
+- `loop33-overdet-fastpath` Tested and reverted a `solve_overdetermined_5x4` nonsingular fast path that bypassed `solve_nonneg_4x4` allocations via precomputed cofactors.
+  Reverted. Required correctness and score gates stayed unchanged, but runtime regressed slightly on both the hard dim5 attempts-168 probe (`228.88s -> 230.78s`) and harness aggregate (`13535 -> 13563 ms`).
