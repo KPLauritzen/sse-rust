@@ -198,7 +198,7 @@
         "max_lag": 2,
         "max_intermediate_dim": 3,
         "max_entry": 2,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "guided_refinement",
         "guided_refinement": {
           "max_shortcut_lag": 1,
@@ -233,7 +233,7 @@
         "max_lag": 2,
         "max_intermediate_dim": 3,
         "max_entry": 2,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "shortcut_search",
         "guided_refinement": {
           "max_shortcut_lag": 1,
@@ -273,7 +273,7 @@
         "max_lag": 2,
         "max_intermediate_dim": 3,
         "max_entry": 2,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "shortcut_search",
         "guided_refinement": {
           "max_shortcut_lag": 1,
@@ -313,7 +313,7 @@
         "max_lag": 2,
         "max_intermediate_dim": 3,
         "max_entry": 2,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "shortcut_search",
         "guided_refinement": {
           "max_shortcut_lag": 1,
@@ -353,7 +353,7 @@
         "max_lag": 2,
         "max_intermediate_dim": 3,
         "max_entry": 2,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "shortcut_search",
         "guided_refinement": {
           "max_shortcut_lag": 1,
@@ -419,7 +419,7 @@
         "max_lag": 2,
         "max_intermediate_dim": 4,
         "max_entry": 2,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "guided_refinement",
         "guided_refinement": {
           "max_shortcut_lag": 1,
@@ -588,7 +588,7 @@
         "max_lag": 6,
         "max_intermediate_dim": 5,
         "max_entry": 6,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "stage": "guided_refinement",
         "guided_refinement": {
           "max_shortcut_lag": 3,
@@ -623,7 +623,7 @@
         "max_lag": 6,
         "max_intermediate_dim": 4,
         "max_entry": 5,
-        "search_mode": "mixed",
+        "move_family_policy": "mixed",
         "stage": "shortcut_search",
         "guided_refinement": {
           "max_shortcut_lag": 6,
@@ -662,7 +662,7 @@
         "max_lag": 22,
         "max_intermediate_dim": 5,
         "max_entry": 6,
-        "search_mode": "graph-only"
+        "move_family_policy": "graph-only"
       },
       "timeout_ms": 15000,
       "allowed_outcomes": ["equivalent"],
@@ -690,7 +690,7 @@
         "max_lag": 10,
         "max_intermediate_dim": 5,
         "max_entry": 6,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "frontier_mode": "beam",
         "beam_width": 10
       },
@@ -720,7 +720,7 @@
         "max_lag": 10,
         "max_intermediate_dim": 5,
         "max_entry": 6,
-        "search_mode": "graph-only",
+        "move_family_policy": "graph-only",
         "frontier_mode": "beam_bfs_handoff",
         "beam_width": 10
       },
@@ -751,7 +751,7 @@
         "max_lag": 6,
         "max_intermediate_dim": 4,
         "max_entry": 5,
-        "search_mode": "mixed",
+        "move_family_policy": "mixed",
         "stage": "shortcut_search",
         "guided_refinement": {
           "max_shortcut_lag": 3,

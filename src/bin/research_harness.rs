@@ -83,8 +83,12 @@ struct JsonSearchConfig {
     frontier_mode: FrontierMode,
     #[serde(default)]
     beam_width: Option<usize>,
-    #[serde(default = "default_search_mode", alias = "move_policy")]
-    search_mode: MoveFamilyPolicy,
+    #[serde(
+        default = "default_move_family_policy",
+        alias = "search_mode",
+        alias = "move_policy"
+    )]
+    move_family_policy: MoveFamilyPolicy,
     #[serde(default)]
     stage: SearchStage,
     #[serde(default)]
@@ -147,7 +151,7 @@ fn default_case_required() -> bool {
     true
 }
 
-fn default_search_mode() -> MoveFamilyPolicy {
+fn default_move_family_policy() -> MoveFamilyPolicy {
     MoveFamilyPolicy::Mixed
 }
 
@@ -954,7 +958,7 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
             max_intermediate_dim: case.config.max_intermediate_dim,
             max_entry: case.config.max_entry,
             frontier_mode: case.config.frontier_mode,
-            move_family_policy: case.config.search_mode,
+            move_family_policy: case.config.move_family_policy,
             beam_width: normalized_beam_width,
         },
         stage: case.config.stage,
@@ -1234,14 +1238,14 @@ fn not_equivalent_result_model(
 fn stage_combination_label(config: &JsonSearchConfig) -> String {
     match config.stage {
         SearchStage::EndpointSearch => format!(
-            "endpoint_search/frontier={:?}/beam_width={:?}/move_policy={:?}",
-            config.frontier_mode, config.beam_width, config.search_mode
+            "endpoint_search/frontier={:?}/beam_width={:?}/move_family_policy={:?}",
+            config.frontier_mode, config.beam_width, config.move_family_policy
         ),
         SearchStage::GuidedRefinement => format!(
-            "guided_refinement/frontier={:?}/beam_width={:?}/move_policy={:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}/segment_timeout_secs={:?}",
+            "guided_refinement/frontier={:?}/beam_width={:?}/move_family_policy={:?}/shortcut_lag={}/min_gap={}/max_gap={:?}/rounds={}/segment_timeout_secs={:?}",
             config.frontier_mode,
             config.beam_width,
-            config.search_mode,
+            config.move_family_policy,
             config.guided_refinement.max_shortcut_lag,
             config.guided_refinement.min_gap,
             config.guided_refinement.max_gap,
@@ -1249,10 +1253,10 @@ fn stage_combination_label(config: &JsonSearchConfig) -> String {
             config.guided_refinement.segment_timeout_secs,
         ),
         SearchStage::ShortcutSearch => format!(
-            "shortcut_search/frontier={:?}/beam_width={:?}/move_policy={:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}/guided_shortcut_lag={}/guided_min_gap={}/guided_max_gap={:?}/guided_rounds={}/guided_segment_timeout_secs={:?}",
+            "shortcut_search/frontier={:?}/beam_width={:?}/move_family_policy={:?}/max_guides={}/rounds={}/max_total_segment_attempts={}/emit_promoted_guides={}/guided_shortcut_lag={}/guided_min_gap={}/guided_max_gap={:?}/guided_rounds={}/guided_segment_timeout_secs={:?}",
             config.frontier_mode,
             config.beam_width,
-            config.search_mode,
+            config.move_family_policy,
             config.shortcut_search.max_guides,
             config.shortcut_search.rounds,
             config.shortcut_search.max_total_segment_attempts,
@@ -2058,7 +2062,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
             for variant in &comparison.variants {
                 out.push_str(&format!(
-                "  {}: strategy={} stage_combo={} frontier={:?} beam_width={:?} move_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
+                "  {}: strategy={} stage_combo={} frontier={:?} beam_width={:?} move_family_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
                 variant.case_id,
                 variant
                     .campaign
@@ -2068,7 +2072,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
                 variant.stage_combination,
                 variant.config.frontier_mode,
                 variant.config.beam_width,
-                variant.config.search_mode,
+                variant.config.move_family_policy,
                 variant.config.stage,
                 variant.config.max_lag,
                     variant.config.max_intermediate_dim,
@@ -2148,12 +2152,12 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             case.elapsed_ms
         ));
         out.push_str(&format!(
-            "  endpoints: {}x{} config: frontier={:?} beam_width={:?} move_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
+            "  endpoints: {}x{} config: frontier={:?} beam_width={:?} move_family_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
             case.endpoint.source_dim,
             case.endpoint.target_dim,
             case.config.frontier_mode,
             case.config.beam_width,
-            case.config.search_mode,
+            case.config.move_family_policy,
             case.config.stage,
             case.config.max_lag,
             case.config.max_intermediate_dim,
@@ -2285,7 +2289,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::Mixed,
+                move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2334,7 +2338,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::Mixed,
+                move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2387,7 +2391,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: Some(4),
-                search_mode: MoveFamilyPolicy::Mixed,
+                move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2466,7 +2470,7 @@ mod tests {
                 max_entry: 2,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::GraphOnly,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
                     max_shortcut_lag: 1,
@@ -2521,7 +2525,7 @@ mod tests {
                 max_entry: 2,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::GraphOnly,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
                     max_shortcut_lag: 1,
@@ -2574,7 +2578,7 @@ mod tests {
                 max_entry: 2,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::GraphOnly,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::ShortcutSearch,
                 guided_refinement: GuidedRefinementConfig {
                     max_shortcut_lag: 1,
@@ -2653,7 +2657,7 @@ mod tests {
                     max_entry: 1,
                     frontier_mode: FrontierMode::Bfs,
                     beam_width: None,
-                    search_mode: MoveFamilyPolicy::Mixed,
+                    move_family_policy: MoveFamilyPolicy::Mixed,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
                     shortcut_search: ShortcutSearchConfig::default(),
@@ -2702,7 +2706,7 @@ mod tests {
                     max_entry: 2,
                     frontier_mode: FrontierMode::Bfs,
                     beam_width: None,
-                    search_mode: MoveFamilyPolicy::GraphOnly,
+                    move_family_policy: MoveFamilyPolicy::GraphOnly,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
                     shortcut_search: ShortcutSearchConfig::default(),
@@ -2759,6 +2763,107 @@ mod tests {
         assert!(groups.values().any(|(source_dim, target_dim, count)| {
             *source_dim == *target_dim && *source_dim > 2 && *count > 1
         }));
+    }
+
+    #[test]
+    fn json_search_config_serializes_public_move_family_policy_field() {
+        let config = JsonSearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+            frontier_mode: FrontierMode::Beam,
+            beam_width: Some(16),
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            stage: SearchStage::GuidedRefinement,
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        };
+
+        let encoded = serde_json::to_value(&config).expect("config should serialize to JSON value");
+        let object = encoded
+            .as_object()
+            .expect("serialized config should be a JSON object");
+        assert_eq!(
+            object
+                .get("move_family_policy")
+                .and_then(serde_json::Value::as_str),
+            Some("graph_only")
+        );
+        assert!(!object.contains_key("search_mode"));
+        assert!(!object.contains_key("move_policy"));
+    }
+
+    #[test]
+    fn load_corpus_accepts_legacy_search_mode_alias() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!(
+            "research-harness-legacy-corpus-{}-{}",
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&temp_dir).expect("temporary legacy corpus directory should exist");
+        let corpus_path = temp_dir.join("cases.json");
+        fs::write(
+            &corpus_path,
+            r#"{
+  "schema_version": 4,
+  "cases": [
+    {
+      "id": "legacy-search-mode",
+      "description": "legacy search_mode alias still loads",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 2,
+        "max_entry": 1,
+        "search_mode": "graph-only"
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 1,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      }
+    }
+  ]
+}"#,
+        )
+        .expect("legacy corpus file should be written");
+
+        let corpus = load_corpus(&corpus_path).expect("legacy corpus should load");
+        assert_eq!(corpus.cases.len(), 1);
+        assert_eq!(
+            corpus.cases[0].config.move_family_policy,
+            MoveFamilyPolicy::GraphOnly
+        );
+
+        fs::remove_dir_all(temp_dir).expect("temporary legacy corpus directory should be removed");
+    }
+
+    #[test]
+    fn stage_combination_label_uses_move_family_policy_terminology() {
+        let label = stage_combination_label(&JsonSearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+            frontier_mode: FrontierMode::BeamBfsHandoff,
+            beam_width: Some(8),
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            stage: SearchStage::ShortcutSearch,
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        });
+
+        assert!(label.contains("move_family_policy=GraphOnly"));
+        assert!(!label.contains("move_policy="));
     }
 
     #[test]
@@ -2874,7 +2979,7 @@ mod tests {
                 max_entry: 6,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::Mixed,
+                move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
@@ -2951,7 +3056,7 @@ mod tests {
                 max_entry: 4,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
-                search_mode: MoveFamilyPolicy::Mixed,
+                move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
                 shortcut_search: ShortcutSearchConfig::default(),
