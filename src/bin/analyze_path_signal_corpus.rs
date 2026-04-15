@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[cfg(not(target_arch = "wasm32"))]
 use rusqlite::Connection;
 use serde::Deserialize;
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
@@ -414,7 +413,6 @@ fn load_paths_from_guide_artifacts(path: &Path) -> Result<Vec<SourcePath>, Strin
     Ok(paths)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn load_paths_from_sqlite(path: &Path) -> Result<Vec<SourcePath>, String> {
     let conn = Connection::open(path)
         .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
@@ -474,13 +472,6 @@ fn load_paths_from_sqlite(path: &Path) -> Result<Vec<SourcePath>, String> {
     Ok(paths)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn load_paths_from_sqlite(path: &Path) -> Result<Vec<SourcePath>, String> {
-    let _ = path;
-    Err("sqlite path loading is not supported on wasm32".to_string())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn sqlite_value_err(err: rusqlite::Error) -> String {
     err.to_string()
 }

@@ -102,14 +102,12 @@ Long-lived project context currently sits in a few places:
 - [`docs/aligned-shift-equivalence.md`](docs/aligned-shift-equivalence.md)
   records the aligned/balanced/compatible witness surface and its terminology
   caveats.
-- The WASM bindings already power the
-  [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend.
 - Small-case cataloguing and path visualisation remain useful long-horizon
   directions, but they are not maintained here as a checklist.
 
 Native builds expand each BFS frontier layer in parallel with `rayon`, using a
 collect-then-merge pass so collision detection and parent-map updates stay
-deterministic. The `wasm32` build keeps the same serial expansion path.
+deterministic.
 
 ## Documentation Map
 
@@ -124,7 +122,8 @@ deterministic. The `wasm32` build keeps the same serial expansion path.
 
 ## Implementation
 
-Rust library crate (`sse-core`) with WASM bindings. Native builds use `rayon` for frontier-level BFS parallelism; browser-targeted `wasm32` builds fall back to the serial search path.
+Rust library crate plus native CLI entry points. Native builds use `rayon` for
+frontier-level BFS parallelism.
 
 **What it can do:**
 
@@ -134,7 +133,6 @@ Rust library crate (`sse-core`) with WASM bindings. Native builds use `rayon` fo
 - Search for bounded aligned concrete-shift witnesses for small `2x2` cases.
 - Use an aligned concrete-shift witness as a bounded fallback proof path from
   `search_sse_2x2` on finite essential pairs.
-- Compile to WASM for in-browser use.
 
 **Key source files:**
 
@@ -146,18 +144,6 @@ Rust library crate (`sse-core`) with WASM bindings. Native builds use `rayon` fo
 - [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).
 - [`src/factorisation.rs`](src/factorisation.rs) — Exhaustive enumeration of nonneg integer factorisations A = UV (square and rectangular).
 - [`src/matrix.rs`](src/matrix.rs) — Fixed-size `SqMatrix<N>` and dynamic `DynMatrix` types.
-- [`src/wasm.rs`](src/wasm.rs) — Optional WASM bindings, enabled with the
-  `wasm-bindings` feature, exposing `search_sse`,
-  `search_aligned_shift`, and the compatibility alias
-  `search_aligned_module` as JSON-returning functions.
-
-**Building WASM:**
-
-```sh
-wasm-pack build --target web -- --features wasm-bindings
-```
-
-This produces a `pkg/` directory with `sse_core.js` and `sse_core_bg.wasm`.
 
 **Native build targets:**
 
@@ -266,15 +252,6 @@ Concrete-shift-only witnesses, `not_equivalent`, and `unknown` results are not
 serializable as `full_path` guide artifacts. The written JSON matches the
 generic guide-artifact schema in `src/types.rs` and can be fed back into later
 guided searches with `--guide-artifacts`.
-
-**Deployment:**
-
-The WASM output is used by the [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend, hosted on [kplauritzen.github.io](https://github.com/KPLauritzen/kplauritzen.github.io). The built WASM files (`sse_core.js` and `sse_core_bg.wasm`) are committed directly into that repo under `docs/wasm/`. After rebuilding, copy the files manually:
-
-```sh
-wasm-pack build --target web -- --features wasm-bindings
-cp pkg/sse_core.js pkg/sse_core_bg.wasm ../kplauritzen.github.io/docs/wasm/
-```
 
 ---
 

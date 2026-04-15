@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::MoveFamilyPolicy;
 
-#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 const VALID_2X3_U_ROW_CACHE_LIMIT: usize = 1024;
@@ -420,29 +419,15 @@ where
     let valid_row0s = valid_2x3_u_rows_for_target_row(a.data[0], max_entry);
     let valid_row1s = valid_2x3_u_rows_for_target_row(a.data[1], max_entry);
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
-            .par_iter()
-            .map(|&row0| {
-                enumerate_rect_factorisations_2x3_from_row0(row0, &a_cols, &valid_row1s, max_entry)
-            })
-            .collect();
-        for row_results in per_row0 {
-            for (u, v) in row_results {
-                visit(u, v);
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        for row0 in valid_row0s {
-            for (u, v) in
-                enumerate_rect_factorisations_2x3_from_row0(row0, &a_cols, &valid_row1s, max_entry)
-            {
-                visit(u, v);
-            }
+    let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
+        .par_iter()
+        .map(|&row0| {
+            enumerate_rect_factorisations_2x3_from_row0(row0, &a_cols, &valid_row1s, max_entry)
+        })
+        .collect();
+    for row_results in per_row0 {
+        for (u, v) in row_results {
+            visit(u, v);
         }
     }
 }
@@ -546,34 +531,10 @@ where
     let valid_row2s =
         valid_3x2_u_rows_for_target_row([c.get(2, 0), c.get(2, 1), c.get(2, 2)], max_entry);
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
-            .par_iter()
-            .map(|&row0| {
-                enumerate_factorisations_3x3_to_2_from_row0(
-                    row0,
-                    &c_cols,
-                    &c_row2,
-                    &valid_row1s,
-                    &valid_row2s,
-                    max_entry,
-                    me_i64,
-                    min_row_sum,
-                )
-            })
-            .collect();
-        for row_results in per_row0 {
-            for (u, v) in row_results {
-                visit(u, v);
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        for row0 in valid_row0s {
-            for (u, v) in enumerate_factorisations_3x3_to_2_from_row0(
+    let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
+        .par_iter()
+        .map(|&row0| {
+            enumerate_factorisations_3x3_to_2_from_row0(
                 row0,
                 &c_cols,
                 &c_row2,
@@ -582,9 +543,12 @@ where
                 max_entry,
                 me_i64,
                 min_row_sum,
-            ) {
-                visit(u, v);
-            }
+            )
+        })
+        .collect();
+    for row_results in per_row0 {
+        for (u, v) in row_results {
+            visit(u, v);
         }
     }
 }
@@ -2160,25 +2124,13 @@ where
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
-            .par_iter()
-            .map(|&row0| enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum))
-            .collect();
-        for row_results in per_row0 {
-            for (u, v) in row_results {
-                visit(u, v);
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        for row0 in valid_row0s {
-            for (u, v) in enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum) {
-                visit(u, v);
-            }
+    let per_row0: Vec<Vec<(DynMatrix, DynMatrix)>> = valid_row0s
+        .par_iter()
+        .map(|&row0| enumerate_sq3_from_row0(row0, &c_cols, &c_row2, max_entry, &min_row_sum))
+        .collect();
+    for row_results in per_row0 {
+        for (u, v) in row_results {
+            visit(u, v);
         }
     }
 }

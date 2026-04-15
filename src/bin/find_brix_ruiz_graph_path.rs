@@ -2,15 +2,12 @@
 // Kept in-tree as a historical reference for older research notes.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rayon::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use rusqlite::{params, Connection};
 use sse_core::graph_moves::{enumerate_graph_move_successors, GraphMoveSuccessors};
 use sse_core::matrix::{DynMatrix, SqMatrix};
@@ -127,18 +124,12 @@ fn main() {
     println!("States are canonicalized up to vertex permutation.");
     println!();
 
-    #[cfg(not(target_arch = "wasm32"))]
     let mut recorder = visited_db
         .as_deref()
         .map(GraphPathSqliteRecorder::new)
         .transpose()
         .unwrap_or_else(|err| panic!("{err}"));
-    #[cfg(target_arch = "wasm32")]
-    if visited_db.is_some() {
-        panic!("--visited-db is not supported on wasm32 targets");
-    }
 
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(recorder) = recorder.as_mut() {
         let config = GraphSearchRunConfig {
             k,
@@ -171,7 +162,6 @@ fn main() {
         continue_through_found_layer,
     );
 
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(recorder) = recorder.as_mut() {
         recorder
             .finish_run(&result)
@@ -938,7 +928,6 @@ fn print_path(path: &[PathStep]) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 struct GraphSearchRunConfig {
     k: u32,
@@ -953,14 +942,12 @@ struct GraphSearchRunConfig {
     continue_through_found_layer: bool,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 struct GraphPathSqliteRecorder {
     conn: Connection,
     run_id: i64,
     matrix_ids: HashMap<String, i64>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl GraphPathSqliteRecorder {
     fn new(path: impl AsRef<Path>) -> Result<Self, String> {
         let conn = Connection::open(path.as_ref())
@@ -1223,7 +1210,6 @@ impl GraphPathSqliteRecorder {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn initialise_sqlite_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS matrices (
@@ -1326,7 +1312,6 @@ fn path_signature(path: &[PathStep]) -> String {
     signature
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

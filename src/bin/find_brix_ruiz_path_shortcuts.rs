@@ -2,10 +2,8 @@
 // Kept in-tree as a historical reference for older research notes.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::time::{Duration, Instant};
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sse_core::factorisation::visit_factorisations_with_family_for_policy;
@@ -13,9 +11,7 @@ use sse_core::graph_moves::enumerate_graph_move_successors;
 use sse_core::matrix::DynMatrix;
 use sse_core::types::{EsseStep, MoveFamilyPolicy};
 
-#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use rusqlite::{params, Connection};
 
 fn main() {
@@ -126,26 +122,19 @@ fn main() {
         source_path_signature: matrix_path_signature(&endpoint_16_path()),
         matrices: endpoint_16_path(),
     }];
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(db_path) = paths_db.as_deref() {
         let loaded = load_guides_from_sqlite(db_path).unwrap_or_else(|err| panic!("{err}"));
         guides.extend(loaded);
-    }
-    #[cfg(target_arch = "wasm32")]
-    if paths_db.is_some() {
-        panic!("--paths-db is not supported on wasm32 targets");
     }
     guides = deduplicate_guides(guides);
 
     println!("loaded guide paths = {}", guides.len());
 
-    #[cfg(not(target_arch = "wasm32"))]
     let mut recorder = paths_db
         .as_deref()
         .map(ShortcutPathSqliteRecorder::new)
         .transpose()
         .unwrap_or_else(|err| panic!("{err}"));
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(recorder) = recorder.as_mut() {
         recorder
             .start_run(&ShortcutRunConfig {
@@ -209,7 +198,6 @@ fn main() {
             improved: final_lag < initial_lag,
             final_route: best_route,
         };
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(recorder) = recorder.as_mut() {
             recorder
                 .record_result(&result)
@@ -218,7 +206,6 @@ fn main() {
         results.push(result);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(recorder) = recorder.as_mut() {
         recorder
             .finish_run(&results)
@@ -680,16 +667,8 @@ fn expand_frontier(
         expansions
     };
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let per_node: Vec<Vec<FrontierExpansion>> = frontier.par_iter().map(expand_node).collect();
-        deduplicate_expansions(per_node.into_iter().flatten().collect())
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        deduplicate_expansions(frontier.iter().flat_map(expand_node).collect())
-    }
+    let per_node: Vec<Vec<FrontierExpansion>> = frontier.par_iter().map(expand_node).collect();
+    deduplicate_expansions(per_node.into_iter().flatten().collect())
 }
 
 fn deduplicate_expansions(expansions: Vec<FrontierExpansion>) -> Vec<FrontierExpansion> {
@@ -1000,7 +979,6 @@ fn deduplicate_guides(guides: Vec<GuidePath>) -> Vec<GuidePath> {
     deduped
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn load_guides_from_sqlite(path: impl AsRef<Path>) -> Result<Vec<GuidePath>, String> {
     let conn = Connection::open(path.as_ref())
         .map_err(|err| format!("failed to open {}: {err}", path.as_ref().display()))?;
@@ -1009,7 +987,6 @@ fn load_guides_from_sqlite(path: impl AsRef<Path>) -> Result<Vec<GuidePath>, Str
     Ok(guides)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn load_graph_guides(conn: &Connection) -> Result<Vec<GuidePath>, String> {
     let mut stmt = conn
         .prepare(
@@ -1091,7 +1068,6 @@ fn load_graph_guides(conn: &Connection) -> Result<Vec<GuidePath>, String> {
     Ok(guides)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn load_shortcut_guides(conn: &Connection) -> Result<Vec<GuidePath>, String> {
     let table_exists: i64 = conn
         .query_row(
@@ -1174,7 +1150,6 @@ fn load_shortcut_guides(conn: &Connection) -> Result<Vec<GuidePath>, String> {
     Ok(guides)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn parse_matrix_json(raw: &str) -> Result<DynMatrix, String> {
     let rows: Vec<Vec<u32>> =
         serde_json::from_str(raw).map_err(|err| format!("failed to parse matrix json: {err}"))?;
@@ -1189,7 +1164,6 @@ fn parse_matrix_json(raw: &str) -> Result<DynMatrix, String> {
     Ok(DynMatrix::new(dim, dim, data))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 struct ShortcutRunConfig {
     k: u32,
@@ -1203,7 +1177,6 @@ struct ShortcutRunConfig {
     guide_count: usize,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 struct ShortcutPathSqliteRecorder {
     conn: Connection,
     run_id: i64,
@@ -1211,7 +1184,6 @@ struct ShortcutPathSqliteRecorder {
     inserted_results: usize,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl ShortcutPathSqliteRecorder {
     fn new(path: impl AsRef<Path>) -> Result<Self, String> {
         let conn = Connection::open(path.as_ref())
@@ -1392,7 +1364,6 @@ impl ShortcutPathSqliteRecorder {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn initialise_shortcut_sqlite_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS matrices (
@@ -1460,12 +1431,10 @@ fn matrix_json(matrix: &DynMatrix) -> Result<String, String> {
     serde_json::to_string(&rows).map_err(|err| format!("failed to serialise matrix: {err}"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn search_mode_label(search_mode: MoveFamilyPolicy) -> &'static str {
     search_mode.snake_case_label()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -42,16 +42,7 @@ Several public names still reflect the older local vocabulary:
 
 - `ModuleShiftWitness2x2`,
 - `search_aligned_module_shift_equivalence_*`,
-- [`search_aligned_module`](../src/wasm.rs) as a compatibility alias for older
-  frontend code.
-
-The current WASM surface in [`src/wasm.rs`](../src/wasm.rs) exposes:
-
-- `search_sse`, which can return equivalence via an aligned concrete-shift
-  witness,
-- `search_aligned_shift`, the experimental bounded aligned-concrete-shift
-  search entry point,
-- `search_aligned_module`, the backwards-compatible alias.
+- and several comments that still mention the older module-level viewpoint.
 
 ## What Changed
 

@@ -10,7 +10,6 @@ use crate::graph_moves::{
 use crate::matrix::DynMatrix;
 use crate::types::{EsseStep, MoveFamilyPolicy, SearchMoveFamilyTelemetry};
 
-#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 use super::{
@@ -133,18 +132,8 @@ pub(super) fn expand_frontier_layer_dyn(
         let frontier_offset = chunk_index * chunk_size;
 
         let compute_started = Instant::now();
-        #[cfg(not(target_arch = "wasm32"))]
         let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = chunk
             .par_iter()
-            .enumerate()
-            .map(|(node_index, current_canon)| {
-                expand_frontier_node(frontier_offset + node_index, current_canon, orig, settings)
-            })
-            .collect();
-
-        #[cfg(target_arch = "wasm32")]
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = chunk
-            .iter()
             .enumerate()
             .map(|(node_index, current_canon)| {
                 expand_frontier_node(frontier_offset + node_index, current_canon, orig, settings)
@@ -180,74 +169,40 @@ pub(super) fn expand_frontier_layer(
     FrontierExpansionStats,
     FrontierExpansionTiming,
 ) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let compute_started = Instant::now();
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = current_frontier
-            .par_iter()
-            .enumerate()
-            .map(|(frontier_index, current_canon)| {
-                expand_frontier_node(frontier_index, current_canon, orig, settings)
-            })
-            .collect();
-        let expand_compute_nanos = elapsed_nanos(compute_started);
-        let mut expansions = Vec::new();
-        let mut stats = FrontierExpansionStats::default();
-        let accumulate_started = Instant::now();
-        for (node_expansions, node_stats) in per_node {
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        let expand_accumulate_nanos = elapsed_nanos(accumulate_started);
-        let dedup_started = Instant::now();
-        let (deduped, same_future_past_collisions) = deduplicate_expansions(
-            expansions,
-            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-        );
-        let dedup_nanos = elapsed_nanos(dedup_started);
-        stats.same_future_past_collisions = same_future_past_collisions;
-        record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (
-            deduped,
-            stats,
-            FrontierExpansionTiming {
-                expand_compute_nanos,
-                expand_accumulate_nanos,
-                dedup_nanos,
-            },
-        )
+    let compute_started = Instant::now();
+    let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = current_frontier
+        .par_iter()
+        .enumerate()
+        .map(|(frontier_index, current_canon)| {
+            expand_frontier_node(frontier_index, current_canon, orig, settings)
+        })
+        .collect();
+    let expand_compute_nanos = elapsed_nanos(compute_started);
+    let mut expansions = Vec::new();
+    let mut stats = FrontierExpansionStats::default();
+    let accumulate_started = Instant::now();
+    for (node_expansions, node_stats) in per_node {
+        expansions.extend(node_expansions);
+        accumulate_frontier_stats(&mut stats, &node_stats);
     }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut expansions = Vec::new();
-        let mut stats = FrontierExpansionStats::default();
-        let compute_started = Instant::now();
-        for (frontier_index, current_canon) in current_frontier.iter().enumerate() {
-            let (node_expansions, node_stats) =
-                expand_frontier_node(frontier_index, current_canon, orig, settings);
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        let expand_compute_nanos = elapsed_nanos(compute_started);
-        let dedup_started = Instant::now();
-        let (deduped, same_future_past_collisions) = deduplicate_expansions(
-            expansions,
-            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-        );
-        let dedup_nanos = elapsed_nanos(dedup_started);
-        stats.same_future_past_collisions = same_future_past_collisions;
-        record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (
-            deduped,
-            stats,
-            FrontierExpansionTiming {
-                expand_compute_nanos,
-                expand_accumulate_nanos: 0,
-                dedup_nanos,
-            },
-        )
-    }
+    let expand_accumulate_nanos = elapsed_nanos(accumulate_started);
+    let dedup_started = Instant::now();
+    let (deduped, same_future_past_collisions) = deduplicate_expansions(
+        expansions,
+        current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
+    );
+    let dedup_nanos = elapsed_nanos(dedup_started);
+    stats.same_future_past_collisions = same_future_past_collisions;
+    record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
+    (
+        deduped,
+        stats,
+        FrontierExpansionTiming {
+            expand_compute_nanos,
+            expand_accumulate_nanos,
+            dedup_nanos,
+        },
+    )
 }
 
 pub(super) fn deduplicate_expansions(

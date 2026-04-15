@@ -10,8 +10,5 @@ pub mod path_scoring;
 pub mod quadratic;
 pub mod search;
 pub mod search_observer;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod sqlite_graph;
 pub mod types;
-#[cfg(feature = "wasm-bindings")]
-pub mod wasm;

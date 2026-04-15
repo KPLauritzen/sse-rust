@@ -10,7 +10,6 @@ use sse_core::matrix::DynMatrix;
 use sse_core::search::{
     build_full_path_guide_artifact, execute_search_request, execute_search_request_and_observer,
 };
-#[cfg(not(target_arch = "wasm32"))]
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
     FrontierMode, GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig,
@@ -93,20 +92,12 @@ where
     let _heap_profile = start_heap_profile(cli.dhat)?;
 
     let (result, telemetry) = if let Some(path) = cli.visited_db.as_deref() {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut recorder = SqliteGraphRecorder::new(path)?;
-            let profiled_result =
-                execute_search_request_and_observer(&request, Some(&mut recorder))?;
-            if let Some(err) = recorder.error() {
-                return Err(format!("failed to persist visited graph to {path}: {err}"));
-            }
-            profiled_result
+        let mut recorder = SqliteGraphRecorder::new(path)?;
+        let profiled_result = execute_search_request_and_observer(&request, Some(&mut recorder))?;
+        if let Some(err) = recorder.error() {
+            return Err(format!("failed to persist visited graph to {path}: {err}"));
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            return Err("--visited-db is not supported on wasm32 targets".to_string());
-        }
+        profiled_result
     } else {
         execute_search_request(&request)?
     };

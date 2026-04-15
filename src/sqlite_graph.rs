@@ -1,11 +1,7 @@
-#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(not(target_arch = "wasm32"))]
 use rusqlite::{params, Connection, Transaction};
 use serde_json::json;
 
@@ -19,7 +15,6 @@ use crate::types::{
     SearchTelemetry,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct SqliteGraphRecorder {
     conn: Connection,
     run_id: i64,
@@ -28,7 +23,6 @@ pub struct SqliteGraphRecorder {
     error: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl SqliteGraphRecorder {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, String> {
         let conn = Connection::open(path.as_ref())
@@ -373,7 +367,6 @@ impl SqliteGraphRecorder {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl SearchObserver for SqliteGraphRecorder {
     fn on_event(&mut self, event: &SearchEvent) {
         match event {
@@ -400,7 +393,6 @@ impl SearchObserver for SqliteGraphRecorder {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 struct PendingEdgeRow<'a> {
     layer_index: i64,
     direction: &'a str,
@@ -419,7 +411,6 @@ struct PendingEdgeRow<'a> {
     edge_direction: SearchDirection,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn initialise_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS matrices (
@@ -605,7 +596,6 @@ fn dyn_matrix_rows(matrix: &DynMatrix) -> Vec<Vec<u32>> {
         .collect()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -657,7 +647,6 @@ fn edge_status_label(status: SearchEdgeStatus) -> &'static str {
 }
 
 #[cfg(test)]
-#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use std::fs;

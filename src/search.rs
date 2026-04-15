@@ -28,7 +28,6 @@ use crate::types::{
     ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 mod beam;

@@ -35,9 +35,3 @@ build-dist:
 
 build-tools:
     cargo build --release --features research-tools --bins
-
-wasm:
-    wasm-pack build --target web -- --features wasm-bindings
-
-deploy-wasm: wasm
-    cp pkg/sse_core.js pkg/sse_core_bg.wasm ../kplauritzen.github.io/docs/wasm/
