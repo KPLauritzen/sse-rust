@@ -14,11 +14,11 @@ and `research/notes/` for longer evolving dossiers.
 - The repo now has matrix-level concrete-shift validators and bounded search
   machinery in [`src/aligned.rs`](../src/aligned.rs), even though some public
   names still preserve the older local `module` terminology.
-- Bilich-Dor-On-Ruiz 2024 defines matrix-level aligned, balanced, and
-  compatible shift equivalence for finite essential matrices and proves that
-  they coincide with each other and with SSE.
-- So aligned/balanced/compatible search is no longer a speculative sidecar. It
-  is a legitimate search substrate for the main problem.
+- Bilich-Dor-On-Ruiz 2024 defines matrix-level aligned concrete shift,
+  balanced concrete shift, and compatible concrete shift for finite essential
+  matrices and proves that they coincide with each other and with SSE.
+- So the concrete-shift family is no longer a speculative sidecar. It is a
+  legitimate search substrate for the main problem.
 - The remaining gap is not source acquisition. It is search-space reduction,
   clearer naming, and better integration into the main solver.
 - Carlsen-Dor-On-Eilers 2024 and the Matsumoto line of papers make the operator-algebraic witness spaces much less "remote" than they first looked. In several finite-essential settings they are exactly the same equivalence relation seen through better-structured data.
@@ -28,9 +28,9 @@ and `research/notes/` for longer evolving dossiers.
 - Bounded bidirectional integer SSE search in [`src/search.rs`](../src/search.rs).
 - Factorization enumeration in [`src/factorisation.rs`](../src/factorisation.rs).
 - `2x2` invariants in [`src/invariants.rs`](../src/invariants.rs), including Bowen-Franks, generalized Bowen-Franks, and an Eilers-Kiming ideal-class test.
-- Concrete-shift validation and bounded aligned search in [`src/aligned.rs`](../src/aligned.rs).
-- Balanced one-step search in [`src/balanced.rs`](../src/balanced.rs).
-- Positive-conjugacy search in [`src/conjugacy.rs`](../src/conjugacy.rs).
+- Concrete-shift validation and bounded search in [`src/aligned.rs`](../src/aligned.rs).
+- Balanced elementary-equivalence one-step search in [`src/balanced.rs`](../src/balanced.rs).
+- Sampled positive-conjugacy proposal search in [`src/conjugacy.rs`](../src/conjugacy.rs).
 - Graph-move search experiments in [`src/graph_moves.rs`](../src/graph_moves.rs).
 
 That means the durable takeaways are mostly about structured moves, proposal
@@ -45,10 +45,10 @@ tries to rank near-term bets; active prioritization and ownership belong in
   row/column splits, diagonal refactorizations, graph refinements, and related
   move vocabularies as the productive search substrate.
 
-- Aligned / balanced / compatible witnesses are first-class formulations, not
-  side curiosities. Bilich-Dor-On-Ruiz and Carlsen-Dor-On-Eilers justify using
-  those relations both as direct bounded search surfaces and as proposal
-  sources for the main solver.
+- Concrete-shift witnesses are first-class formulations, not side curiosities.
+  Bilich-Dor-On-Ruiz and Carlsen-Dor-On-Eilers justify using aligned concrete
+  shift, balanced concrete shift, and compatible concrete shift as direct
+  bounded search surfaces for the main solver.
 
 - The Brix-Ruiz family should stay the main hard regression surface.
   `A_k = [[1, k], [k-1, 1]]` and `B_k = [[1, k(k-1)], [1, 1]]` remain useful
@@ -76,8 +76,8 @@ tries to rank near-term bets; active prioritization and ownership belong in
 - Expecting one more cheap invariant to settle the hard cases.
   Why: Boyle-Schmieding and Kim-Roush both point the other way. Over rings, the SE/SSE gap is genuinely subtle; over `Z_+`, deep obstructions already exist. Better guidance and better structured witness spaces look more promising than hoping for one last easy obstruction.
 
-- Same-size balanced-elementary search as a standalone solver.
-  Why: the Brix-Ruiz sidecar evidence makes this look too rigid. Balanced search becomes more interesting once it is allowed to form short zig-zags or to propose moves for the main search.
+- Same-size balanced elementary-equivalence search as a standalone solver.
+  Why: the Brix-Ruiz sidecar evidence makes this look too rigid. Balanced elementary-equivalence search becomes more interesting once it is allowed to form short zig-zags or to propose moves for the main search.
 
 ## How The Papers Change The Search Strategy
 
@@ -87,7 +87,7 @@ tries to rank near-term bets; active prioritization and ownership belong in
   - diagonal refactorizations,
   - positive-conjugacy paths.
 
-- Bilich-Dor-On-Ruiz 2024 upgrades aligned, balanced, and compatible shift equivalence from side ideas to direct SSE formulations.
+- Bilich-Dor-On-Ruiz 2024 upgrades aligned concrete shift, balanced concrete shift, and compatible concrete shift from side ideas to direct SSE formulations.
 
 - Carlsen-Dor-On-Eilers 2024 says compatible and representable shift equivalence are not merely suggestive analogies. In the finite-essential setting they are equivalent to SSE.
 
@@ -109,9 +109,9 @@ sequencing in `bd`. The main repo surfaces implicated by the literature are:
 - [`src/graph_moves.rs`](../src/graph_moves.rs) for explicit move-family work
   such as splits, refinements, and canonical probes.
 - [`src/aligned.rs`](../src/aligned.rs) and [`src/balanced.rs`](../src/balanced.rs)
-  for concrete-shift or balanced witness formulations.
+  for concrete-shift or balanced elementary-equivalence witness formulations.
 - [`src/conjugacy.rs`](../src/conjugacy.rs) for proposal-generation ideas
-  driven by positive conjugacy data.
+  driven by sampled positive-conjugacy data.
 - [`src/invariants.rs`](../src/invariants.rs) for stronger arithmetic or other
   pre-search screens.
 
@@ -119,7 +119,7 @@ sequencing in `bd`. The main repo surfaces implicated by the literature are:
 
 - Boyle-Kim-Roush 2013: constructive SSE arguments like row splits, column splits, diagonal refactorizations, and positive-conjugacy paths should become actual move families.
 - Boyle-Schmieding 2019: the SE/SSE gap is structurally real; do not expect one cheap invariant to close it.
-- Bilich-Dor-On-Ruiz 2024: matrix-level aligned, balanced, and compatible shift equivalence are defined and are equivalent to SSE for finite essential matrices.
+- Bilich-Dor-On-Ruiz 2024: matrix-level aligned concrete shift, balanced concrete shift, and compatible concrete shift are defined and are equivalent to SSE for finite essential matrices.
 - Brix 2022: balanced SSE and refined split moves are central, especially through the block-map and eventual-conjugacy viewpoints.
 - Brix-Dor-On-Hazrat-Ruiz 2025: module-aligned search still has heuristic value, but matrix-level aligned search is now the more relevant target.
 - Brix-Mundey-Rennie 2024: iterated in-splits can often be compressed through higher-power constructions; complete in-splits are natural canonical probes.

@@ -1,7 +1,9 @@
-# Aligned Shift Equivalence
+# Concrete Shift Surface
 
-This note records the current aligned, balanced, and compatible concrete-shift
-status in this repo.
+This note lives at `aligned-shift-equivalence.md` for historical reasons. It
+records the current concrete-shift surface in this repo: aligned concrete
+shift, balanced concrete shift, and compatible concrete shift, all currently
+implemented in [`src/aligned.rs`](../src/aligned.rs).
 
 ## Current Repo Status
 
@@ -15,14 +17,15 @@ AR = RB
 BS = SA
 ```
 
-This is the algebraic substrate that aligned, balanced, and compatible
-concrete-shift relations refine.
+This is the algebraic substrate that aligned concrete shift, balanced concrete
+shift, and compatible concrete shift refine.
 
 The project now has a dedicated Rust module, [`src/aligned.rs`](../src/aligned.rs), for:
 
 - verifying a proposed fixed-lag `2x2` shift-equivalence witness,
-- verifying concrete-shift witnesses for the aligned, balanced, and compatible
-  matrix-level relations from Bilich, Dor-On & Ruiz (2024),
+- verifying concrete-shift witnesses for the aligned concrete shift, balanced
+  concrete shift, and compatible concrete shift relations from Bilich, Dor-On
+  & Ruiz (2024),
 - bounded search for such witnesses on small `2x2` cases,
 - backwards-compatible wrappers that preserve the older local `module`
   terminology where the public API has not been renamed yet.
@@ -44,6 +47,9 @@ Several public names still reflect the older local vocabulary:
 - `search_aligned_module_shift_equivalence_*`,
 - and several comments that still mention the older module-level viewpoint.
 
+Repo-facing docs should still describe this file as the **concrete-shift
+surface** even before any mechanical rename lands.
+
 ## What Changed
 
 Earlier local notes treated aligned shift equivalence as blocked on a missing
@@ -51,8 +57,8 @@ primary source. That is no longer the right status:
 
 - the repo now contains
   [`references/bilich-dor-on-ruiz-2024-2411.05598/paper.pdf`](../references/bilich-dor-on-ruiz-2024-2411.05598/paper.pdf),
-  which defines matrix-level aligned, balanced, and compatible concrete shift
-  equivalence for finite essential matrices,
+  which defines matrix-level aligned concrete shift, balanced concrete shift,
+  and compatible concrete shift for finite essential matrices,
 - [`references/carlsen-doron-eilers-2024-2011.10320.pdf`](../references/carlsen-doron-eilers-2024-2011.10320.pdf)
   remains useful background for the intermediary relations and the
   operator-algebraic framing,
@@ -73,9 +79,9 @@ current surface and terminology; implementation sequencing belongs in `bd`.
 - The top-level docs were written at different times, so `README.md`,
   `docs/TODO.md`, and this note need to stay consistent about what the code
   actually does.
-- The main solver can use aligned, balanced, or compatible search as a direct
-  proof path, a fallback, or a proposal generator. Which role to emphasize
-  next is active roadmap work and should be tracked in `bd`.
+- The main solver's structured proof/fallback surface here is **concrete
+  shift**. Sampled positive conjugacy is a separate proposal/evidence surface
+  in [`src/conjugacy.rs`](../src/conjugacy.rs), not part of this proof note.
 - Today the shipped `2x2` endpoint search uses bounded concrete-shift search as
   a late fallback after either mixed or graph-only frontier search exhausts on
   an essential pair within the small witness bounds.
@@ -91,9 +97,9 @@ current surface and terminology; implementation sequencing belongs in `bd`.
 
 ## Benchmark Note
 
-Any numeric comparison between BFS and aligned-concrete-shift search should be
-rerun from [`benches/search.rs`](../benches/search.rs) before citing it. The
-qualitative status is simpler: the current aligned code is useful as an
-experimental search substrate, but the next gains are more likely to come from
-better witness-space guidance than from pushing the current brute-force search
-much harder.
+Any numeric comparison between BFS and the current concrete-shift search
+surface should be rerun from [`benches/search.rs`](../benches/search.rs)
+before citing it. The qualitative status is simpler: the current
+`src/aligned.rs` code is useful as an experimental search substrate, but the
+next gains are more likely to come from better witness-space guidance than from
+pushing the current brute-force search much harder.

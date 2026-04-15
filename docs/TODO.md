@@ -21,8 +21,8 @@ The current solver stack is:
 - invariant filtering in [`src/invariants.rs`](../src/invariants.rs),
 - graph-move search in [`src/graph_moves.rs`](../src/graph_moves.rs),
 - concrete-shift witness search in [`src/aligned.rs`](../src/aligned.rs),
-- balanced-elementary sidecar search in [`src/balanced.rs`](../src/balanced.rs),
-- positive-conjugacy sidecar search in [`src/conjugacy.rs`](../src/conjugacy.rs),
+- balanced elementary-equivalence witness search in [`src/balanced.rs`](../src/balanced.rs),
+- sampled positive-conjugacy proposal sidecar search in [`src/conjugacy.rs`](../src/conjugacy.rs),
 - research harness and telemetry in [`src/bin/research_harness.rs`](../src/bin/research_harness.rs).
 
 

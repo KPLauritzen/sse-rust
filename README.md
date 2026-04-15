@@ -100,8 +100,8 @@ Long-lived project context currently sits in a few places:
 - [`docs/TODO.md`](docs/TODO.md) keeps durable solver/search context and the
   current stack shape without trying to be a task list.
 - [`docs/aligned-shift-equivalence.md`](docs/aligned-shift-equivalence.md)
-  records the aligned/balanced/compatible witness surface and its terminology
-  caveats.
+  records the current concrete-shift surface in [`src/aligned.rs`](src/aligned.rs)
+  and the terminology caveats around the historical `aligned` module name.
 - Small-case cataloguing and path visualisation remain useful long-horizon
   directions, but they are not maintained here as a checklist.
 
@@ -130,15 +130,17 @@ frontier-level BFS parallelism.
 - BFS search for SSE paths between 2×2 matrices, including through 3×3 intermediate matrices (rectangular factorisations).
 - Run the main solver in either `mixed` or `graph-only` mode.
 - Disprove SSE via a chain of invariants: trace, determinant, Bowen-Franks group, generalised Bowen-Franks groups (18 polynomials from Eilers & Kiming 2008), and the Eilers-Kiming ideal class invariant.
-- Search for bounded aligned concrete-shift witnesses for small `2x2` cases.
-- Use an aligned concrete-shift witness as a bounded fallback proof path from
+- Search for bounded concrete-shift witnesses for small `2x2` cases.
+- Use a concrete-shift witness as a bounded fallback proof path from
   `search_sse_2x2` on finite essential pairs.
 
 **Key source files:**
 
 - [`src/aligned.rs`](src/aligned.rs) — Fixed-lag SE witnesses, concrete-shift
-  witness verification, and bounded aligned concrete-shift search. Some public
-  names still preserve the older local `module` terminology for compatibility.
+  witness verification, and bounded concrete-shift search. Despite the
+  historical file name, this is the current concrete-shift surface for
+  aligned concrete shift, balanced concrete shift, and compatible
+  concrete-shift witnesses.
 - [`src/search.rs`](src/search.rs) — BFS search engine. Entry point: `search_sse_2x2`.
 - [`src/invariants.rs`](src/invariants.rs) — All invariant checks, called as pre-filters before search. Entry point: `check_invariants_2x2`.
 - [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).

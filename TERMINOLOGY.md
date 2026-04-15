@@ -211,7 +211,18 @@ essential matrices, SSE = CSE = RSE = SMSE.
 
 ---
 
-## Balanced and aligned equivalences
+## Structured witness families near SSE
+
+RFC 003 fixes three separate repo-facing surfaces that sit near one another in
+the literature but do different jobs in this codebase:
+
+- **Concrete shift** means the aligned concrete shift / balanced concrete shift
+  / compatible concrete shift family implemented today in
+  `src/aligned.rs`.
+- **Balanced elementary equivalence** means the separate `S, R_A, R_B` witness
+  surface implemented in `src/balanced.rs`.
+- **Sampled positive conjugacy** means the proposal/evidence surface in
+  `src/conjugacy.rs`; it is not an exact proof path for SSE over `Z_+`.
 
 ### Balanced elementary equivalence
 
@@ -222,6 +233,9 @@ nonneg matrices R_A, S, R_B such that
 
 Note the asymmetry versus ESSE (A = UV, B = VU): here the left factor S is
 shared but the right factors R_A, R_B differ.
+
+In repo vocabulary, this is a different family from **balanced concrete
+shift**.
 
 **Balanced strong shift equivalence** is the transitive closure.
 
@@ -236,11 +250,12 @@ This is the relation currently implemented in `src/aligned.rs` for the
 module-level search. At the module level it is *not known* whether aligned
 module shift equivalence implies SSE (Remark 5.5 in Brix-Dor-On-Hazrat-Ruiz
 2025). However, at the matrix level the question is settled: see "Concrete
-shift" below.
+shift" below. Repo-facing docs should still describe `src/aligned.rs` as the
+current **concrete-shift surface**, even before any module rename lands.
 
 **Source:** Brix, Dor-On, Hazrat & Ruiz (2025, Definitions 5.1 and 5.2).
 
-### Concrete shift / aligned, balanced, compatible shift equivalence (matrix-level)
+### Concrete shift (aligned concrete shift, balanced concrete shift, compatible concrete shift)
 
 A *concrete shift* between matrices A and B with lag m is a tuple
 (R, S, varphi_R, varphi_S, psi_A, psi_B) where R and S are the SE
@@ -253,15 +268,16 @@ matrices and the four maps are *path isomorphisms*:
 
 A concrete shift is called:
 
-- **Aligned** if varphi and psi satisfy two "associator" equations
-  (one step of varphi_R then varphi_S reassembles via psi_A).
-- **Balanced** if the iterated maps varphi^(m) decompose via psi^{-1}
-  x psi.
-- **Compatible** if varphi^(m) decomposes via psi and psi^{-1} (the
-  Carlsen-Dor-On-Eilers formulation).
+- **Aligned concrete shift** if varphi and psi satisfy two "associator"
+  equations (one step of varphi_R then varphi_S reassembles via psi_A).
+- **Balanced concrete shift** if the iterated maps varphi^(m) decompose via
+  psi^{-1} x psi.
+- **Compatible concrete shift** if varphi^(m) decomposes via psi and psi^{-1}
+  (the Carlsen-Dor-On-Eilers formulation).
 
 For essential matrices over N, the implication chain is:
-compatible => aligned => balanced, and all three coincide with SSE.
+compatible concrete shift => aligned concrete shift => balanced concrete
+shift, and all three coincide with SSE.
 
 **Source:** Bilich, Dor-On & Ruiz (2024, arXiv:2411.05598, Definition 3.3
 and Corollary following Theorem 3.11). The paper is in
@@ -269,7 +285,17 @@ and Corollary following Theorem 3.11). The paper is in
 
 The codebase's `ConcreteShiftRelation2x2` enum (`Aligned`, `Balanced`,
 `Compatible`) refers to fixed-lag matrix-level witness verification for
-these three relations, specialised to 2x2 matrices.
+these three concrete-shift relations, specialised to 2x2 matrices.
+
+### Sampled positive conjugacy
+
+The repo's sampled positive-conjugacy surface records bounded witness and
+proposal data extracted from sampled positive paths inside a conjugacy class.
+In current repo usage, this is a **proposal/evidence surface**, not a
+certified SSE proof path and not an exact positive-conjugacy proof surface.
+
+This terminology maps to `src/conjugacy.rs`, whose outputs are used to rank or
+suggest promising matrices and structured moves for follow-up search.
 
 ---
 
@@ -328,8 +354,10 @@ architecture.
   telemetry and selective search.
 - **Spectral pruning:** Filtering candidate matrices by trace/determinant
   consistency before full canonicalization.
-- **Sidecar search:** An auxiliary search substrate (balanced, conjugacy,
-  aligned) that runs alongside or as a fallback to the main BFS.
+- **Sidecar search:** An auxiliary search substrate such as balanced
+  elementary equivalence or sampled positive conjugacy that runs alongside the
+  main BFS. In some configs, bounded concrete-shift search also appears as a
+  late fallback.
 
 ### Path metrics
 
@@ -364,9 +392,11 @@ waypoints, the resulting witness lag may be larger or smaller than `16`.
 | Is an amalgamation the reverse of a split? | Yes. Out-amalgamation reverses out-split; in-amalgamation reverses in-split. |
 | Is a conjugation a graph move? | No. It is a dimension-preserving factorisation, not a split or amalgamation. |
 | Are SE and SSE the same? | No. SE is necessary but not sufficient for SSE (Kim & Roush 1999). |
-| Is balanced elementary equivalence the same as ESSE? | No. ESSE: A = UV, B = VU. Balanced: A = SR_A, B = SR_B, R_A S = R_B S. Different shape. |
+| Is balanced concrete shift the same as balanced elementary equivalence? | No. Balanced concrete shift belongs to the concrete-shift family in `src/aligned.rs`; balanced elementary equivalence is the separate `S, R_A, R_B` witness surface in `src/balanced.rs`. |
+| Is balanced elementary equivalence the same as ESSE? | No. ESSE: A = UV, B = VU. Balanced elementary equivalence: A = SR_A, B = SR_B, R_A S = R_B S. Different shape. |
 | Is "graph-only mode" the same as "only splits"? | Not quite. It uses splits *and* amalgamations, which are both graph moves. |
-| Does aligned module SE imply SSE? | At the module level, open (Brix-Dor-On-Hazrat-Ruiz 2025 Remark 5.5). At the matrix level, yes: aligned = balanced = compatible = SSE for essential matrices (Bilich-Dor-On-Ruiz 2024). |
+| Is sampled positive conjugacy the same as a proof of SSE? | No. In this repo it is a proposal/evidence surface, not an exact certified SSE proof path. |
+| Does aligned module SE imply SSE? | At the module level, open (Brix-Dor-On-Hazrat-Ruiz 2025 Remark 5.5). At the matrix level, yes: aligned concrete shift = balanced concrete shift = compatible concrete shift = SSE for essential matrices (Bilich-Dor-On-Ruiz 2024). |
 
 ---
 

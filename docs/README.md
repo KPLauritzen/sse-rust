@@ -15,8 +15,10 @@ This repo now uses three documentation layers with different jobs:
   RFCs and topic notes should update it when they intentionally change or
   sharpen shared language.
 - [`aligned-shift-equivalence.md`](aligned-shift-equivalence.md) records the
-  current aligned / balanced / compatible concrete-shift surface and the
-  terminology caveats around it. It is not a rollout checklist.
+  current concrete-shift surface in `src/aligned.rs`, including aligned,
+  balanced concrete shift, and compatible concrete-shift witnesses, plus the
+  terminology caveats around the historical module name. It is not a rollout
+  checklist.
 - [`search-parallelism-5b8.md`](search-parallelism-5b8.md) records the measured
   layer-timing breakdown for endpoint search and why dedup, not merge/commit,
   is the first plausible deeper-parallelism target.
@@ -36,10 +38,9 @@ This repo now uses three documentation layers with different jobs:
   proposes the missing generic `shortcut_search` stage as an artifact-driven
   outer loop built on top of `guided_refinement`.
 - [`rfcs/rfc-003-structured-witness-vocabulary.md`](rfcs/rfc-003-structured-witness-vocabulary.md)
-  proposes a shared vocabulary for the repo's concrete-shift,
-  balanced-elementary, and sampled positive-conjugacy surfaces while keeping
-  their proof semantics distinct and making `TERMINOLOGY.md` part of the
-  rollout if adopted.
+  records the accepted shared vocabulary for the repo's concrete-shift,
+  balanced elementary equivalence, and sampled positive-conjugacy surfaces
+  while keeping their proof semantics distinct.
 - [`research-harness-benchmark-policy.md`](research-harness-benchmark-policy.md)
   defines how benchmark-style measurement probes should be represented through
   `research_harness` without weakening required-case correctness gates.

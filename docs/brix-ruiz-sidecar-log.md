@@ -4,7 +4,7 @@ This file holds the detailed experiment log for the Brix-Ruiz family. It keeps
 family-specific evidence and local hypotheses; live follow-up work belongs in
 `bd`.
 
-## Positive conjugacy paths for similar matrices
+## Sampled positive-conjugacy paths for similar matrices
 
 The Brix-Ruiz family in [references/brix-ruiz-2025-2504.09889.pdf](../references/brix-ruiz-2025-2504.09889.pdf) is not just shift equivalent: Example 3.8 states that
 
@@ -16,39 +16,39 @@ That makes `brix_ruiz_k3` a good candidate for a different attack than bounded E
 
 Concrete experiment:
 
-- build an experimental search for short positive conjugacy paths `G_t^-1 A G_t` between similar `2x2` matrices, seeded by the explicit `P_k`
+- build an experimental search for short sampled positive-conjugacy paths `G_t^-1 A G_t` between similar `2x2` matrices, seeded by the explicit `P_k`
 - parameterize candidate conjugacies by short products of elementary shears or diagonal scalings instead of ESSE factorizations
 - test first on `k = 3`, where SSE is known, before spending effort on `k = 4`
 
 Outcome:
 
-- the experimental positive-conjugacy search finds a much simpler witness than the generic `P_k` similarity for the Brix-Ruiz family
+- the experimental sampled positive-conjugacy search finds a much simpler witness than the generic `P_k` similarity for the Brix-Ruiz family
 - for `k = 3`, `diag(1, 2)^-1 A diag(1, 2) = B`
 - for `k = 4`, `diag(1, 3)^-1 A diag(1, 3) = B`
 - the sampled affine paths `((1-t)I + tD)^-1 A ((1-t)I + tD)` stay strictly positive for both cases
 
-This does not prove SSE over `Z_+`, and therefore should not be wired into `search_sse` as a correctness shortcut. It does, however, suggest constructive searches built from diagonal refactorizations or balanced witnesses rather than generic BFS expansion.
+This does not prove SSE over `Z_+`, and therefore should not be wired into `search_sse` as a correctness shortcut. It does, however, suggest constructive searches built from diagonal refactorizations or balanced elementary-equivalence witnesses rather than generic BFS expansion.
 
 ## Balanced elementary search
 
 Follow-up experiment:
 
 - implement a bounded search for balanced elementary equivalence witnesses `(R_A, S, R_B)` from Brix (2022), Definition 5.4
-- test whether `brix_ruiz_k3` is reachable by a short balanced chain, and whether the same bounded witness family sees useful structure on `k = 4`
+- test whether `brix_ruiz_k3` is reachable by a short balanced elementary-equivalence chain, and whether the same bounded witness family sees useful structure on `k = 4`
 
 Outcome:
 
-- a bounded `2x2` balanced-elementary search exists locally and is validated on a nontrivial toy example
+- a bounded `2x2` balanced elementary-equivalence search exists locally and is validated on a nontrivial toy example
 - it exhausts on both `brix_ruiz_k3` and `brix_ruiz_k4` for `max_common_dim = 2`, `max_entry = 8`
-- this is consistent with the matrix-size bound in Brix (2022): for `2x2` matrices, a direct balanced elementary witness can only factor through a common graph of size at most `2`
-- since the Brix-Ruiz matrices are invertible and distinct, a direct same-size balanced elementary witness is structurally unlikely to be the right attack
+- this is consistent with the matrix-size bound in Brix (2022): for `2x2` matrices, a direct balanced elementary-equivalence witness can only factor through a common graph of size at most `2`
+- since the Brix-Ruiz matrices are invertible and distinct, a direct same-size balanced elementary-equivalence witness is structurally unlikely to be the right attack
 
 ## One-step out-split refinements
 
 Next move:
 
 - implement explicit small graph moves, starting with `2x2 -> 3x3` out-splits via division matrices and edge-matrix factorizations
-- search whether out-splits of the Brix-Ruiz `2x2` pair admit a short balanced chain or another highly structured common refinement in size `3`
+- search whether out-splits of the Brix-Ruiz `2x2` pair admit a short balanced elementary-equivalence chain or another highly structured common refinement in size `3`
 
 Outcome:
 
@@ -141,7 +141,7 @@ Outcome:
 
 The sidecar evidence is now consistent across every small structured move family tried so far:
 
-- direct balanced witnesses fail
+- direct balanced elementary-equivalence witnesses fail
 - one-step out-split refinements fail
 - two-step out-split refinements fail
 - bounded `3x3 -> 2x2 -> 3x3` zig-zag components stay isolated
