@@ -427,8 +427,11 @@ fn derive_same_diagonal_determinant_controls(
     }
 
     let mut controls = Vec::new();
+    let max_divisor_checks = (limit.max(1) as u64).saturating_mul(8_192);
+    let mut divisor_checks = 0u64;
     let mut upper_right = 1u64;
-    while upper_right * upper_right <= product {
+    while upper_right * upper_right <= product && divisor_checks < max_divisor_checks {
+        divisor_checks += 1;
         if product % upper_right != 0 {
             upper_right += 1;
             continue;
@@ -471,15 +474,15 @@ fn compare_control_priority(
         .then_with(|| left.data[1][0].cmp(&right.data[1][0]))
 }
 
-fn endpoint_l1_distance(matrix: &SqMatrix<2>, source: &SqMatrix<2>, target: &SqMatrix<2>) -> u32 {
+fn endpoint_l1_distance(matrix: &SqMatrix<2>, source: &SqMatrix<2>, target: &SqMatrix<2>) -> u64 {
     l1_distance(matrix, source).min(l1_distance(matrix, target))
 }
 
-fn l1_distance(left: &SqMatrix<2>, right: &SqMatrix<2>) -> u32 {
-    let mut total = 0u32;
+fn l1_distance(left: &SqMatrix<2>, right: &SqMatrix<2>) -> u64 {
+    let mut total = 0u64;
     for row in 0..2 {
         for col in 0..2 {
-            total += left.data[row][col].abs_diff(right.data[row][col]);
+            total += u64::from(left.data[row][col].abs_diff(right.data[row][col]));
         }
     }
     total
