@@ -11,6 +11,9 @@ This repo now uses three documentation layers with different jobs:
 
 ## Topic Notes
 
+- [`../TERMINOLOGY.md`](../TERMINOLOGY.md) is the repo-wide vocabulary file.
+  RFCs and topic notes should update it when they intentionally change or
+  sharpen shared language.
 - [`aligned-shift-equivalence.md`](aligned-shift-equivalence.md) records the
   current aligned / balanced / compatible concrete-shift surface and the
   terminology caveats around it. It is not a rollout checklist.
@@ -32,6 +35,10 @@ This repo now uses three documentation layers with different jobs:
 - [`rfcs/rfc-002-shortcut-search-stage.md`](rfcs/rfc-002-shortcut-search-stage.md)
   proposes the missing generic `shortcut_search` stage as an artifact-driven
   outer loop built on top of `guided_refinement`.
+- [`rfcs/rfc-003-structured-witness-vocabulary.md`](rfcs/rfc-003-structured-witness-vocabulary.md)
+  proposes a shared vocabulary for the repo's concrete-shift, balanced-elementary,
+  and positive-conjugacy surfaces without forcing them into one fake proof
+  interface.
 - [`research-harness-benchmark-policy.md`](research-harness-benchmark-policy.md)
   defines how benchmark-style measurement probes should be represented through
   `research_harness` without weakening required-case correctness gates.
