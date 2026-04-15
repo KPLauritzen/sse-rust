@@ -327,3 +327,6 @@
 
 - `loop29-k4-entry-ramp` Extended Goal-3 k4 beam-envelope sweeps with higher entry bounds and wider beam checks.
   Kept as evidence only. On `mixed + beam64 + dim5 + lag14`, entry 11/12 both remained unknown near the 120s cap (no witness). Beam width 96 was not tractable on dim5 entry12 (timed out at lag14 and lag12). The practical bounded envelope remains beam64 with lag up to about 14.
+
+- `loop30-k4-graph-only-deep` Ran deep graph-only beam sweeps for Goal 3 on the k4 endpoint.
+  Kept as evidence only. Graph-only scales to high lag quickly (including lag100 with beam256 in 78s and ~3.98M visited nodes), but every run remained unknown with no witness. This branch appears low-yield for Goal 3 compared with mixed-beam envelopes.
