@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rusqlite::Connection;
+use serde::Deserialize;
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::path_scoring::{candidate_score_specs, new_summaries, rank_target, ScoreSummary};
@@ -16,13 +18,17 @@ use sse_core::types::{
 fn main() -> Result<(), String> {
     let cli = parse_cli(std::env::args().skip(1))?;
     let source_paths = load_source_paths(&cli)?;
-    if source_paths.is_empty() {
-        return Err("no full paths were loaded; pass --guide-artifacts or --path-db".to_string());
-    }
-
-    let cases = derive_cases(&source_paths, &cli);
+    let path_cases = derive_path_cases(&source_paths, &cli);
+    let path_case_count = path_cases.len();
+    let endpoint_cases = load_research_cases(&cli)?;
+    let endpoint_case_count = endpoint_cases.len();
+    let mut cases = path_cases;
+    cases.extend(endpoint_cases);
     if cases.is_empty() {
-        return Err("no segment cases were derived from the loaded paths".to_string());
+        return Err(
+            "no analysis cases were loaded; pass --guide-artifacts, --path-db, or --cases"
+                .to_string(),
+        );
     }
 
     let specs = candidate_score_specs();
@@ -34,7 +40,7 @@ fn main() -> Result<(), String> {
     let mut total_ranked_nodes = 0usize;
 
     for case in cases {
-        match analyze_case(&case, &cli, &specs, &mut summaries)? {
+        match analyze_case(&case, &specs, &mut summaries)? {
             Some(analysis) => {
                 solved_cases += 1;
                 total_solution_nodes += analysis.solution_nodes;
@@ -46,13 +52,20 @@ fn main() -> Result<(), String> {
             }
         }
     }
+    let unranked_solved_cases = analyzed_cases
+        .iter()
+        .filter(|analysis| analysis.solution_nodes > 0 && analysis.ranked_nodes == 0)
+        .count();
 
     println!("Signal corpus analysis");
     println!(
-        "  source_paths={} solved_cases={} unsolved_cases={} ranked_solution_nodes={}/{}",
+        "  source_paths={} path_segment_cases={} endpoint_cases={} solved_cases={} unsolved_cases={} unranked_solved_cases={} ranked_solution_nodes={}/{}",
         source_paths.len(),
+        path_case_count,
+        endpoint_case_count,
         solved_cases,
         unmatched_cases,
+        unranked_solved_cases,
         total_ranked_nodes,
         total_solution_nodes
     );
@@ -83,9 +96,9 @@ fn main() -> Result<(), String> {
     println!("  cases:");
     for analysis in analyzed_cases.iter().take(12) {
         println!(
-            "    {} gap={} solved_lag={} ranked={}/{} layers={}",
+            "    {} budget_lag={} solved_lag={} ranked={}/{} layers={}",
             analysis.label,
-            analysis.gap,
+            analysis.budget_lag,
             analysis.solved_lag,
             analysis.ranked_nodes,
             analysis.solution_nodes,
@@ -103,6 +116,9 @@ fn main() -> Result<(), String> {
 struct Cli {
     guide_artifact_paths: Vec<PathBuf>,
     path_dbs: Vec<PathBuf>,
+    cases_paths: Vec<PathBuf>,
+    case_ids: Vec<String>,
+    campaign_ids: Vec<String>,
     min_gap: usize,
     max_gap: usize,
     max_cases: usize,
@@ -121,18 +137,67 @@ struct SourcePath {
 #[derive(Clone)]
 struct SegmentCase {
     label: String,
-    gap: usize,
+    budget_lag: usize,
     source: DynMatrix,
     target: DynMatrix,
+    config: SearchConfig,
+    stage: SearchStage,
+    guided_refinement: GuidedRefinementConfig,
+    shortcut_search: ShortcutSearchConfig,
 }
 
 struct CaseAnalysis {
     label: String,
-    gap: usize,
+    budget_lag: usize,
     solved_lag: usize,
     solution_nodes: usize,
     ranked_nodes: usize,
     layer_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResearchCaseCorpus {
+    cases: Vec<ResearchCase>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ResearchCase {
+    id: String,
+    #[serde(default)]
+    a: Vec<Vec<u32>>,
+    #[serde(default)]
+    b: Vec<Vec<u32>>,
+    config: JsonSearchConfig,
+    #[serde(default)]
+    campaign: Option<CampaignConfig>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct CampaignConfig {
+    id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct JsonSearchConfig {
+    max_lag: usize,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    #[serde(default)]
+    frontier_mode: FrontierMode,
+    #[serde(default)]
+    beam_width: Option<usize>,
+    #[serde(
+        default = "default_move_family_policy",
+        alias = "search_mode",
+        alias = "move_policy"
+    )]
+    move_family_policy: MoveFamilyPolicy,
+    #[serde(default)]
+    stage: SearchStage,
+    #[serde(default)]
+    guided_refinement: GuidedRefinementConfig,
+    #[serde(default)]
+    shortcut_search: ShortcutSearchConfig,
 }
 
 #[derive(Default)]
@@ -177,6 +242,10 @@ impl SearchObserver for LayerCollector {
     }
 }
 
+fn default_move_family_policy() -> MoveFamilyPolicy {
+    MoveFamilyPolicy::Mixed
+}
+
 fn parse_cli<I>(mut args: I) -> Result<Cli, String>
 where
     I: Iterator<Item = String>,
@@ -184,6 +253,9 @@ where
     let mut cli = Cli {
         guide_artifact_paths: Vec::new(),
         path_dbs: Vec::new(),
+        cases_paths: Vec::new(),
+        case_ids: Vec::new(),
+        campaign_ids: Vec::new(),
         min_gap: 2,
         max_gap: 4,
         max_cases: 48,
@@ -204,6 +276,18 @@ where
                 cli.path_dbs.push(PathBuf::from(
                     args.next().ok_or("--path-db requires a path")?,
                 ));
+            }
+            "--cases" => {
+                cli.cases_paths
+                    .push(PathBuf::from(args.next().ok_or("--cases requires a path")?));
+            }
+            "--case-id" => {
+                cli.case_ids
+                    .push(args.next().ok_or("--case-id requires a value")?);
+            }
+            "--campaign-id" => {
+                cli.campaign_ids
+                    .push(args.next().ok_or("--campaign-id requires a value")?);
             }
             "--min-gap" => {
                 cli.min_gap = args
@@ -264,6 +348,9 @@ where
                      Options:\n\
                        --guide-artifacts PATH   load full-path guide artifacts (repeatable)\n\
                        --path-db PATH           load shortcut paths from a legacy sqlite db (repeatable)\n\
+                       --cases PATH             load inline endpoint cases from a research cases json (repeatable)\n\
+                       --case-id ID            limit loaded research cases to this case id (repeatable)\n\
+                       --campaign-id ID        limit loaded research cases to this campaign id (repeatable)\n\
                        --min-gap N             minimum segment gap to analyze (default: 2)\n\
                        --max-gap N             maximum segment gap to analyze (default: 4)\n\
                        --max-cases N           cap derived segment cases (default: 48)\n\
@@ -286,7 +373,8 @@ where
         return Err("--max-gap must be >= --min-gap".to_string());
     }
 
-    if cli.guide_artifact_paths.is_empty() && cli.path_dbs.is_empty() {
+    if cli.guide_artifact_paths.is_empty() && cli.path_dbs.is_empty() && cli.cases_paths.is_empty()
+    {
         let default_db = PathBuf::from("research/k3-graph-paths.sqlite");
         if default_db.exists() {
             cli.path_dbs.push(default_db);
@@ -401,7 +489,72 @@ fn canonicalize_path(path: &[DynMatrix]) -> Vec<DynMatrix> {
     path.iter().map(DynMatrix::canonical_perm).collect()
 }
 
-fn derive_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
+fn load_research_cases(cli: &Cli) -> Result<Vec<SegmentCase>, String> {
+    let mut loaded = Vec::new();
+    let requested_case_ids = cli.case_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let requested_campaign_ids = cli.campaign_ids.iter().cloned().collect::<BTreeSet<_>>();
+
+    for path in &cli.cases_paths {
+        let raw = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        let corpus: ResearchCaseCorpus = serde_json::from_str(&raw)
+            .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+
+        for case in corpus.cases {
+            if !matches_research_case_filters(&case, &requested_case_ids, &requested_campaign_ids) {
+                continue;
+            }
+            if case.a.is_empty() || case.b.is_empty() {
+                return Err(format!(
+                    "research case {} in {} must define inline square endpoints",
+                    case.id,
+                    path.display()
+                ));
+            }
+
+            let source = case_matrix(&case.a)?.canonical_perm();
+            let target = case_matrix(&case.b)?.canonical_perm();
+            loaded.push(SegmentCase {
+                label: case.id,
+                budget_lag: case.config.max_lag,
+                source,
+                target,
+                config: SearchConfig {
+                    max_lag: case.config.max_lag,
+                    max_intermediate_dim: case.config.max_intermediate_dim,
+                    max_entry: case.config.max_entry,
+                    frontier_mode: case.config.frontier_mode,
+                    move_family_policy: case.config.move_family_policy,
+                    beam_width: case.config.beam_width,
+                },
+                stage: case.config.stage,
+                guided_refinement: case.config.guided_refinement,
+                shortcut_search: case.config.shortcut_search,
+            });
+        }
+    }
+
+    Ok(loaded)
+}
+
+fn matches_research_case_filters(
+    case: &ResearchCase,
+    requested_case_ids: &BTreeSet<String>,
+    requested_campaign_ids: &BTreeSet<String>,
+) -> bool {
+    if !requested_case_ids.is_empty() && !requested_case_ids.contains(&case.id) {
+        return false;
+    }
+    if requested_campaign_ids.is_empty() {
+        return true;
+    }
+    case.campaign
+        .as_ref()
+        .map(|campaign| requested_campaign_ids.contains(&campaign.id))
+        .unwrap_or(false)
+}
+
+fn derive_path_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
     let mut cases = Vec::new();
     let mut seen = BTreeSet::new();
 
@@ -420,17 +573,28 @@ fn derive_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
                 }
                 cases.push(SegmentCase {
                     label: format!("{} [{}..{}]", path.label, start, end),
-                    gap: end - start,
+                    budget_lag: end - start,
                     source,
                     target,
+                    config: SearchConfig {
+                        max_lag: end - start,
+                        max_intermediate_dim: cli.max_intermediate_dim,
+                        max_entry: cli.max_entry,
+                        frontier_mode: FrontierMode::Bfs,
+                        move_family_policy: cli.search_mode,
+                        beam_width: None,
+                    },
+                    stage: SearchStage::EndpointSearch,
+                    guided_refinement: GuidedRefinementConfig::default(),
+                    shortcut_search: ShortcutSearchConfig::default(),
                 });
             }
         }
     }
 
     cases.sort_by(|left, right| {
-        left.gap
-            .cmp(&right.gap)
+        left.budget_lag
+            .cmp(&right.budget_lag)
             .then(left.source.rows.cmp(&right.source.rows))
             .then(left.target.rows.cmp(&right.target.rows))
             .then(left.label.cmp(&right.label))
@@ -442,25 +606,17 @@ fn derive_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
 
 fn analyze_case(
     case: &SegmentCase,
-    cli: &Cli,
     specs: &[sse_core::path_scoring::ScoreSpec],
     summaries: &mut BTreeMap<&'static str, ScoreSummary>,
 ) -> Result<Option<CaseAnalysis>, String> {
     let request = SearchRequest {
         source: case.source.clone(),
         target: case.target.clone(),
-        config: SearchConfig {
-            max_lag: case.gap,
-            max_intermediate_dim: cli.max_intermediate_dim,
-            max_entry: cli.max_entry,
-            frontier_mode: FrontierMode::Bfs,
-            move_family_policy: cli.search_mode,
-            beam_width: None,
-        },
-        stage: SearchStage::EndpointSearch,
+        config: case.config.clone(),
+        stage: case.stage.clone(),
         guide_artifacts: Vec::new(),
-        guided_refinement: GuidedRefinementConfig::default(),
-        shortcut_search: ShortcutSearchConfig::default(),
+        guided_refinement: case.guided_refinement.clone(),
+        shortcut_search: case.shortcut_search.clone(),
     };
 
     let mut observer = LayerCollector::default();
@@ -517,7 +673,7 @@ fn analyze_case(
 
     Ok(Some(CaseAnalysis {
         label: case.label.clone(),
-        gap: case.gap,
+        budget_lag: case.budget_lag,
         solved_lag: path.steps.len(),
         solution_nodes,
         ranked_nodes,
@@ -541,4 +697,84 @@ fn matrix_key(matrix: &DynMatrix) -> String {
             .collect::<Vec<_>>()
             .join(",")
     )
+}
+
+fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
+    if rows.is_empty() {
+        return Err("matrix must have at least one row".to_string());
+    }
+    let dim = rows.len();
+    if rows.iter().any(|row| row.len() != dim) {
+        return Err("matrix must be square".to_string());
+    }
+    Ok(DynMatrix::new(
+        dim,
+        dim,
+        rows.iter().flat_map(|row| row.iter().copied()).collect(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        case_matrix, matches_research_case_filters, CampaignConfig, JsonSearchConfig, ResearchCase,
+    };
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn case_matrix_rejects_non_square_input() {
+        let err = case_matrix(&[vec![1, 2], vec![3]]).expect_err("matrix should be rejected");
+        assert_eq!(err, "matrix must be square");
+    }
+
+    #[test]
+    fn research_case_filters_apply_case_and_campaign_ids() {
+        let requested_case_ids = BTreeSet::from(["keep_me".to_string()]);
+        let requested_campaign_ids = BTreeSet::from(["non_brix".to_string()]);
+        let matching = ResearchCase {
+            id: "keep_me".to_string(),
+            a: vec![vec![1]],
+            b: vec![vec![1]],
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 1,
+                max_entry: 1,
+                frontier_mode: Default::default(),
+                beam_width: None,
+                move_family_policy: super::default_move_family_policy(),
+                stage: Default::default(),
+                guided_refinement: Default::default(),
+                shortcut_search: Default::default(),
+            },
+            campaign: Some(CampaignConfig {
+                id: "non_brix".to_string(),
+            }),
+        };
+        let wrong_campaign = ResearchCase {
+            campaign: Some(CampaignConfig {
+                id: "other".to_string(),
+            }),
+            ..matching.clone()
+        };
+        let wrong_id = ResearchCase {
+            id: "skip_me".to_string(),
+            ..matching.clone()
+        };
+
+        assert!(matches_research_case_filters(
+            &matching,
+            &requested_case_ids,
+            &requested_campaign_ids,
+        ));
+        assert!(!matches_research_case_filters(
+            &wrong_campaign,
+            &requested_case_ids,
+            &requested_campaign_ids,
+        ));
+        assert!(!matches_research_case_filters(
+            &wrong_id,
+            &requested_case_ids,
+            &requested_campaign_ids,
+        ));
+    }
 }
