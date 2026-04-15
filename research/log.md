@@ -339,3 +339,6 @@
 
 - `loop33-overdet-fastpath` Tested and reverted a `solve_overdetermined_5x4` nonsingular fast path that bypassed `solve_nonneg_4x4` allocations via precomputed cofactors.
   Reverted. Required correctness and score gates stayed unchanged, but runtime regressed slightly on both the hard dim5 attempts-168 probe (`228.88s -> 230.78s`) and harness aggregate (`13535 -> 13563 ms`).
+
+- `loop34-singular-alloc-trim` Reduced singular-solver allocation churn by filtering `solve_nonneg_3x3` fallback candidates in place and replacing per-iteration 4x4 column-subset vector allocations with static arrays.
+  Kept. Required and objective metrics were unchanged (`24/24`, hits `21`, points `3645`, telemetry-focus `45,802,619`), while harness elapsed improved (`13535 -> 13461 ms`). Hard k=3 attempts-168 remained neutral on lag/work (`lag 7`, improvements/promoted `20/3`).

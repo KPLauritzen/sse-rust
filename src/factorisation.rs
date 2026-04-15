@@ -1883,17 +1883,15 @@ fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32
         }
 
         let b_sub = [b[r0], b[r1]];
-        let solutions = solve_nonneg_2x3(&rows, &b_sub, max_entry);
-        let mut results = Vec::new();
-        for x in solutions {
+        let mut filtered = Vec::new();
+        solve_nonneg_2x3_into(&rows, &b_sub, max_entry, &mut filtered);
+        filtered.retain(|x| {
             let check = a[r_check][0] * x[0] as i64
                 + a[r_check][1] * x[1] as i64
                 + a[r_check][2] * x[2] as i64;
-            if check == b[r_check] {
-                results.push(x);
-            }
-        }
-        return results;
+            check == b[r_check]
+        });
+        return filtered;
     }
 
     // Rank ≤ 1: skip (degenerate, rarely contributes useful factorisations).
@@ -2017,8 +2015,8 @@ fn solve_nonneg_4x4(a: &[[i64; 4]; 4], b: &[i64; 4], max_entry: u32) -> Vec<[u32
         let b_sub = [b[r0], b[r1], b[r2]];
 
         // Try each of the 4 possible 3×3 column subsets.
-        for free_col in 0..4 {
-            let cols: Vec<usize> = (0..4).filter(|&c| c != free_col).collect();
+        const COL_SUBSETS: [[usize; 3]; 4] = [[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]];
+        for (free_col, cols) in COL_SUBSETS.iter().enumerate() {
             let system = [
                 [sub[0][cols[0]], sub[0][cols[1]], sub[0][cols[2]]],
                 [sub[1][cols[0]], sub[1][cols[1]], sub[1][cols[2]]],
