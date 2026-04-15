@@ -400,7 +400,11 @@ fn derive_same_trace_determinant_controls(
     proposals: &[PositiveConjugacyProposal2x2],
     limit: usize,
 ) -> Vec<SqMatrix<2>> {
-    if limit == 0 || source.trace() != target.trace() || source.det() != target.det() {
+    if limit == 0 {
+        return Vec::new();
+    }
+
+    if source.trace() != target.trace() || source.det() != target.det() {
         return Vec::new();
     }
 
