@@ -345,3 +345,6 @@
 
 - `loop35-attempt176-boundary-retest` Rechecked hard-surface strict boundary after loop34 runtime trims.
   Evidence only. Attempts-176 still timed out under strict cap240 (`240.01s`) and completed only under cap260 (`240.87s`) with unchanged lag/work telemetry, so no Goal-2 boundary movement despite keeping loop34 for harness runtime gains.
+
+- `loop36-k4-mixed-boundary-recheck` Re-ran the refreshed k4 mixed-beam branch from the previously logged dim5 envelope and then rebuilt with `--release` to confirm the result.
+  Evidence only. On current `HEAD 8606fcd`, the historical `mixed + beam64 + dim5` k4 envelope did not reproduce: `lag14/13/12` at `entry10-12` timed out under `target/dist/search`, and `lag12` plus even `lag10` at `entry10` still timed out under `target/release/search` (`120.02s`, empty JSON, no witness). Treat the practical cliff on this worker as at or below `lag10` for `beam64 + dim5 + entry10`; no keepable Goal-3 signal. Details in `research/notes/2026-04-15-k4-mixed-beam-boundary-recheck.md`.
