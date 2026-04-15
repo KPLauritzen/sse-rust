@@ -11,7 +11,7 @@ Introduce one explicit vocabulary above the repo's three current structured
 
 - concrete-shift search and verification in [`src/aligned.rs`](../../src/aligned.rs),
 - balanced-elementary search in [`src/balanced.rs`](../../src/balanced.rs),
-- and positive-conjugacy witness/proposal search in
+- and sampled positive-conjugacy witness / proposal search in
   [`src/conjugacy.rs`](../../src/conjugacy.rs).
 
 This RFC does **not** propose forcing all three into one proof interface.
@@ -54,8 +54,8 @@ The repo currently has three nearby but semantically different modules:
   - searches for bounded balanced-elementary witnesses of the form
     `A = S R_A`, `B = S R_B`, `R_A S = R_B S`.
 - [`src/conjugacy.rs`](../../src/conjugacy.rs)
-  - searches for bounded positive-conjugacy witnesses,
-  - and derives ranked proposal matrices from those witnesses.
+  - searches for bounded sampled positive-conjugacy witnesses,
+  - and derives ranked proposal matrices from those sampled witnesses.
 
 Those modules sit close to one another in the literature and in the repo's
 idea bank, but they do not currently play the same role in the product.
@@ -105,6 +105,8 @@ Positive conjugacy adds a second source of confusion:
 - and it may be a useful proposal source,
 - but the repo's own notes already say it should not be treated as a proof of
   SSE over `Z_+`.
+- and its current witness object records a sampled affine path, not an exact
+  certified positive-conjugacy proof.
 
 That means the repo needs a shared vocabulary more than it needs one shared
 algorithm trait.
@@ -151,7 +153,7 @@ In practice, the main solver currently knows about concrete-shift proofs.
 It does **not** currently consume:
 
 - balanced-elementary witnesses,
-- or positive-conjugacy witnesses/proposals,
+- or sampled positive-conjugacy witnesses/proposals,
 
 as first-class solver stages.
 
@@ -216,7 +218,7 @@ The repo should use:
 - **concrete shift** only for aligned / balanced / compatible concrete-shift
   relations,
 - **balanced elementary** for the Brix-style `S, R_A, R_B` witness surface,
-- and **positive conjugacy** for the conjugacy-path / proposal surface.
+- and **positive conjugacy** for the sampled conjugacy-path / proposal surface.
 
 The repo should also prefer family-shaped names for modules and docs when a
 surface has already grown beyond one subtype.
@@ -353,9 +355,13 @@ This is the most important vocabulary cleanup in the proposal.
 
 `src/conjugacy.rs` should be described as:
 
-- a positive-conjugacy witness search,
+- a sampled positive-conjugacy witness search,
 - with proposal derivation,
-- currently used as a proposal/evidence source rather than as a proof path.
+- currently used as a proposal/evidence source rather than as an exact proof
+  path.
+
+The current implementation validates the affine path at fixed sample points,
+so "sampled positive-conjugacy witness" is the accurate repo-facing term today.
 
 That means its descriptor should be explicit:
 

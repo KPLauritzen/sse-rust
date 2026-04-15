@@ -36,9 +36,10 @@ This repo now uses three documentation layers with different jobs:
   proposes the missing generic `shortcut_search` stage as an artifact-driven
   outer loop built on top of `guided_refinement`.
 - [`rfcs/rfc-003-structured-witness-vocabulary.md`](rfcs/rfc-003-structured-witness-vocabulary.md)
-  proposes a shared vocabulary for the repo's concrete-shift, balanced-elementary,
-  and positive-conjugacy surfaces without forcing them into one fake proof
-  interface.
+  proposes a shared vocabulary for the repo's concrete-shift,
+  balanced-elementary, and sampled positive-conjugacy surfaces while keeping
+  their proof semantics distinct and making `TERMINOLOGY.md` part of the
+  rollout if adopted.
 - [`research-harness-benchmark-policy.md`](research-harness-benchmark-policy.md)
   defines how benchmark-style measurement probes should be represented through
   `research_harness` without weakening required-case correctness gates.
