@@ -1,0 +1,853 @@
+\begin{thebibliography}{100}
+
+\bibitem{Almkvist78}
+Gert Almkvist.
+\newblock {$K$}-theory of endomorphisms.
+\newblock {\em J. Algebra}, 55(2):308--340, 1978.
+
+\bibitem{AlmkvistErratum}
+Gert Almkvist.
+\newblock Erratum: ``{$K$}-theory of endomorphisms'' [{J}. {A}lgebra {\bf 55}
+  (1978), no. 2, 308--340; {MR} 80i:18018].
+\newblock {\em J. Algebra}, 68(2):520--521, 1981.
+
+\bibitem{MR1748178}
+L.~Badoian and J.~B. Wagoner.
+\newblock Simple connectivity of the {M}arkov partition space.
+\newblock {\em Pacific J. Math.}, 193(1):1--3, 2000.
+
+\bibitem{baker1983}
+Kirby~A. Baker.
+\newblock Strong shift equivalence of {$2\times 2$} matrices of nonnegative
+  integers.
+\newblock {\em Ergodic Theory Dynam. Systems}, 3(4):501--508, 1983.
+
+\bibitem{baker1987}
+Kirby~A. Baker.
+\newblock Strong shift equivalence and shear adjacency of nonnegative square
+  integer matrices.
+\newblock {\em Linear Algebra Appl.}, 93:131--147, 1987.
+
+\bibitem{BMS67}
+H.~Bass, J.~Milnor, and J.-P. Serre.
+\newblock Solution of the congruence subgroup problem for {${\rm
+  SL}\sb{n}\,(n\geq 3)$} and {${\rm Sp}\sb{2n}\,(n\geq 2)$}.
+\newblock {\em Inst. Hautes \'{E}tudes Sci. Publ. Math.}, (33):59--137, 1967.
+
+\bibitem{BassBook}
+Hyman Bass.
+\newblock {\em Algebraic {$K$}-theory}.
+\newblock W. A. Benjamin, Inc., New York-Amsterdam, 1968.
+
+\bibitem{bgmy}
+Louis Block, John Guckenheimer, Micha{\l} Misiurewicz, and Lai~Sang Young.
+\newblock Periodic points and topological entropy of one-dimensional maps.
+\newblock In {\em Global theory of dynamical systems ({P}roc. {I}nternat.
+  {C}onf., {N}orthwestern {U}niv., {E}vanston, {I}ll., 1979)}, volume 819 of
+  {\em Lecture Notes in Math.}, pages 18--34. Springer, Berlin, 1980.
+
+\bibitem{BowenFranks1977}
+Rufus Bowen and John Franks.
+\newblock Homology for zero-dimensional nonwandering sets.
+\newblock {\em Ann. of Math. (2)}, 106(1):73--92, 1977.
+
+\bibitem{BoyleNasu's}
+M.~Boyle.
+\newblock Nasu's simple automorphisms.
+\newblock In {\em Dynamical systems ({C}ollege {P}ark, {MD}, 1986--87)}, volume
+  1342 of {\em Lecture Notes in Math.}, pages 23--32. Springer, Berlin, 1988.
+
+\bibitem{bce:fei:corr}
+M.~Boyle, T.~M. Carlsen, and S.~Eilers.
+\newblock Corrigendum: ``{F}low equivalence and isotopy for subshifts'' [
+  {MR}3669803].
+\newblock {\em Dyn. Syst.}, 32(3):ii, 2017.
+
+\bibitem{BoSc2}
+M.~Boyle and S.~Schmieding.
+\newblock Finite group extensions of shifts of finite type: {$K$}-theory,
+  {P}arry and {L}iv\v sic.
+\newblock {\em Ergodic Theory Dynam. Systems}, 37(4):1026--1059, 2017.
+
+\bibitem{BW04}
+M.~Boyle and J.~B. Wagoner.
+\newblock Positive algebraic {$K$}-theory and shifts of finite type.
+\newblock In {\em Modern dynamical systems and applications}, pages 45--66.
+  Cambridge Univ. Press, Cambridge, 2004.
+
+\bibitem{BoyleJordanForm1984}
+Mike Boyle.
+\newblock Shift equivalence and the {J}ordan form away from zero.
+\newblock {\em Ergodic Theory Dynam. Systems}, 4(3):367--379, 1984.
+
+\bibitem{MR964880}
+Mike Boyle.
+\newblock Eventual extensions of finite codes.
+\newblock {\em Proc. Amer. Math. Soc.}, 104(3):965--972, 1988.
+
+\bibitem{Boyle91matrices}
+Mike Boyle.
+\newblock Symbolic dynamics and matrices.
+\newblock In {\em Combinatorial and graph-theoretical problems in linear
+  algebra ({M}inneapolis, {MN}, 1991)}, volume~50 of {\em IMA Vol. Math.
+  Appl.}, pages 1--38. Springer, New York, 1993.
+
+\bibitem{boyleTemuco2000}
+Mike Boyle.
+\newblock Algebraic aspects of symbolic dynamics.
+\newblock In {\em Topics in symbolic dynamics and applications ({T}emuco,
+  1997)}, volume 279 of {\em London Math. Soc. Lecture Note Ser.}, pages
+  57--88. Cambridge Univ. Press, Cambridge, 2000.
+
+\bibitem{B02posk}
+Mike Boyle.
+\newblock Positive {$K$}-theory and symbolic dynamics.
+\newblock In {\em Dynamics and randomness ({S}antiago, 2000)}, volume~7 of {\em
+  Nonlinear Phenom. Complex Systems}, pages 31--52. Kluwer Acad. Publ.,
+  Dordrecht, 2002.
+
+\bibitem{Bopen}
+Mike Boyle.
+\newblock Open problems in symbolic dynamics.
+\newblock In {\em Geometric and probabilistic structures in dynamics}, volume
+  469 of {\em Contemp. Math.}, pages 69--118. Amer. Math. Soc., Providence, RI,
+  2008.
+
+\bibitem{boylepfnotes}
+Mike Boyle.
+\newblock Notes on the {P}erron-{F}robenius theory of nonnegative matrices.
+\newblock website http://www.math.umd.edu/$\sim$mboyle, 2019.
+\newblock 7 pages.
+
+\bibitem{bce:fei}
+Mike Boyle, Toke~Meier Carlsen, and S{\o}ren Eilers.
+\newblock Flow equivalence and isotopy for subshifts.
+\newblock {\em Dyn. Syst.}, 32(3):305--325, 2017.
+\newblock Corrigendum: \cite{bce:fei:corr}.
+
+\bibitem{bce:gfe}
+Mike Boyle, Toke~Meier Carlsen, and S{\o}ren Eilers.
+\newblock Flow equivalence of {G}-{SFT}s.
+\newblock {\em Trans. Amer. Math. Soc.}, 373(4):2591--2657, 2020.
+
+\bibitem{BCmcg}
+Mike Boyle and Sompong Chuysurichay.
+\newblock The mapping class group of a shift of finite type.
+\newblock {\em J. Mod. Dyn.}, 13:115--145, 2018.
+
+\bibitem{MR1125880}
+Mike Boyle and Ulf-Rainer Fiebig.
+\newblock The action of inert finite-order automorphisms on finite subsystems
+  of the shift.
+\newblock {\em Ergodic Theory Dynam. Systems}, 11(3):413--425, 1991.
+
+\bibitem{BH91}
+Mike Boyle and David Handelman.
+\newblock The spectra of nonnegative matrices via symbolic dynamics (including
+  {A}ppendix 4 joint with {K}im and {R}oush).
+\newblock {\em Ann. of Math. (2)}, 133(2):249--316, 1991.
+
+\bibitem{BH93}
+Mike Boyle and David Handelman.
+\newblock Algebraic shift equivalence and primitive matrices.
+\newblock {\em Trans. Amer. Math. Soc.}, 336(1):121--149, 1993.
+
+\bibitem{BKR2013}
+Mike Boyle, K.~H. Kim, and F.~W. Roush.
+\newblock Path methods for strong shift equivalence of positive matrices.
+\newblock {\em Acta Appl. Math.}, 126:65--115, 2013.
+
+\bibitem{MR887501}
+Mike Boyle and Wolfgang Krieger.
+\newblock Periodic points and automorphisms of the shift.
+\newblock {\em Trans. Amer. Math. Soc.}, 302(1):125--149, 1987.
+
+\bibitem{BLR88}
+Mike Boyle, Douglas Lind, and Daniel Rudolph.
+\newblock The automorphism group of a shift of finite type.
+\newblock {\em Trans. Amer. Math. Soc.}, 306(1):71--114, 1988.
+
+\bibitem{BMT1987}
+Mike Boyle, Brian Marcus, and Paul Trow.
+\newblock Resolving maps and the dimension group for shifts of finite type.
+\newblock {\em Mem. Amer. Math. Soc.}, 70(377):vi+146, 1987.
+
+\bibitem{BoSc3}
+Mike Boyle and Scott Schmieding.
+\newblock Strong shift equivalence and the generalized spectral conjecture for
+  nonnegative matrices.
+\newblock {\em Linear Algebra Appl.}, 498:231--243, 2016.
+
+\bibitem{BoSc1}
+Mike Boyle and Scott Schmieding.
+\newblock Strong shift equivalence and algebraic {K}-theory.
+\newblock {\em J. Reine Angew. Math.}, 752:63--104, 2019.
+
+\bibitem{BS05}
+Mike Boyle and Michael~C. Sullivan.
+\newblock Equivariant flow equivalence for shifts of finite type, by matrix
+  equivalence over group rings.
+\newblock {\em Proc. London Math. Soc. (3)}, 91(1):184--214, 2005.
+
+\bibitem{CostaSteinberg}
+Alfredo Costa and Benjamin Steinberg.
+\newblock A categorical invariant of flow equivalence of shifts.
+\newblock {\em Ergodic Theory Dynam. Systems}, 36(2):470--513, 2016.
+
+\bibitem{Coven1971}
+Ethan~M. Coven.
+\newblock Endomorphisms of substitution minimal sets.
+\newblock {\em Z. Wahrscheinlichkeitstheorie und Verw. Gebiete}, 20:129--133,
+  1971/72.
+
+\bibitem{CuntzKriegerDicyclic}
+Joachim Cuntz and Wolfgang Krieger.
+\newblock Topological {M}arkov chains with dicyclic dimension groups.
+\newblock {\em J. Reine Angew. Math.}, 320:44--51, 1980.
+
+\bibitem{CyrKra2015}
+Van Cyr and Bryna Kra.
+\newblock The automorphism group of a shift of linear growth: beyond
+  transitivity.
+\newblock {\em Forum Math. Sigma}, 3:e5, 27, 2015.
+
+\bibitem{CyrKra2016strexp}
+Van Cyr and Bryna Kra.
+\newblock The automorphism group of a minimal shift of stretched exponential
+  growth.
+\newblock {\em J. Mod. Dyn.}, 10:483--495, 2016.
+
+\bibitem{CyrKra2016}
+Van Cyr and Bryna Kra.
+\newblock The automorphism group of a shift of subquadratic growth.
+\newblock {\em Proc. Amer. Math. Soc.}, 144(2):613--621, 2016.
+
+\bibitem{DDMP2016}
+Sebasti\'{a}n Donoso, Fabien Durand, Alejandro Maass, and Samuel Petite.
+\newblock On automorphism groups of low complexity subshifts.
+\newblock {\em Ergodic Theory Dynam. Systems}, 36(1):64--95, 2016.
+
+\bibitem{DurandPerrin2022}
+Fabien Durand and Dominique Perrin.
+\newblock {\em Dimension groups and dynamical systems---substitutions,
+  {B}ratteli diagrams and {C}antor systems}, volume 196 of {\em Cambridge
+  Studies in Advanced Mathematics}.
+\newblock Cambridge University Press, Cambridge, 2022.
+
+\bibitem{Effros1981}
+Edward~G. Effros.
+\newblock {\em Dimensions and {$C^{\ast} $}-algebras}, volume~46 of {\em CBMS
+  Regional Conference Series in Mathematics}.
+\newblock Conference Board of the Mathematical Sciences, Washington, D.C.,
+  1981.
+
+\bibitem{EHS1980}
+Edward~G. Effros, David~E. Handelman, and Chao~Liang Shen.
+\newblock Dimension groups and their affine representations.
+\newblock {\em Amer. J. Math.}, 102(2):385--407, 1980.
+
+\bibitem{errs:completeDuke2021}
+S\o~ren Eilers, Gunnar Restorff, Efren Ruiz, and Adam P.~W. S\o~rensen.
+\newblock The complete classification of unital graph {$C^*$}-algebras:
+  geometric and strong.
+\newblock {\em Duke Math. J.}, 170(11):2421--2517, 2021.
+
+\bibitem{Epperlein2019}
+Jeremias {Epperlein}.
+\newblock {Wagoner's Complexes Revisited}.
+\newblock {\em arXiv e-prints}, page arXiv:1911.06236, November 2019.
+
+\bibitem{Farrell}
+F.~T. Farrell.
+\newblock The nonfiniteness of {N}il.
+\newblock {\em Proc. Amer. Math. Soc.}, 65(2):215--216, 1977.
+
+\bibitem{FiebigThesis}
+Ulf Fiebig.
+\newblock 1987.
+\newblock Dissertation (Ph.D.)-- University of Gottingen, Germany.
+
+\bibitem{franksFlowEq1983}
+John Franks.
+\newblock Flow equivalence of subshifts of finite type.
+\newblock {\em Ergodic Theory Dynam. Systems}, 4(1):53--66, 1984.
+
+\bibitem{FST19}
+Joshua Frisch, Tomer Schlank, and Omer Tamuz.
+\newblock Normal amenable subgroups of the automorphism group of the full
+  shift.
+\newblock {\em Ergodic Theory Dynam. Systems}, 39(5):1290--1298, 2019.
+
+\bibitem{Gilmer1999}
+Patrick~M. Gilmer.
+\newblock Topological quantum field theory and strong shift equivalence.
+\newblock {\em Canad. Math. Bull.}, 42(2):190--197, 1999.
+
+\bibitem{GMPS10}
+Thierry Giordano, Hiroki Matui, Ian~F. Putnam, and Christian~F. Skau.
+\newblock Orbit equivalence for {C}antor minimal {$\mathbb Z^d$}-systems.
+\newblock {\em Invent. Math.}, 179(1):119--158, 2010.
+
+\bibitem{GPS95}
+Thierry Giordano, Ian~F. Putnam, and Christian~F. Skau.
+\newblock Topological orbit equivalence and {$C^*$}-crossed products.
+\newblock {\em J. Reine Angew. Math.}, 469:51--111, 1995.
+
+\bibitem{Goodearl1986book}
+K.~R. Goodearl.
+\newblock {\em Partially ordered abelian groups with interpolation}, volume~20
+  of {\em Mathematical Surveys and Monographs}.
+\newblock American Mathematical Society, Providence, RI, 1986.
+
+\bibitem{Grayson1977}
+Daniel~R. Grayson.
+\newblock The {$K$}-theory of endomorphisms.
+\newblock {\em J. Algebra}, 48(2):439--446, 1977.
+
+\bibitem{grunewaldSegalI}
+Fritz Grunewald and Daniel Segal.
+\newblock Some general algorithms. {I}. {A}rithmetic groups.
+\newblock {\em Ann. of Math. (2)}, 112(3):531--583, 1980.
+
+\bibitem{grunewaldZDecide}
+Fritz~J. Grunewald.
+\newblock Solution of the conjugacy problem in certain arithmetic groups.
+\newblock In {\em Word problems, {II} ({C}onf. on {D}ecision {P}roblems in
+  {A}lgebra, {O}xford, 1976)}, volume~95 of {\em Stud. Logic Foundations
+  Math.}, pages 101--139. North-Holland, Amsterdam-New York, 1980.
+
+\bibitem{HandelmanJOpTh1981}
+David Handelman.
+\newblock Positive matrices and dimension groups affiliated to {$C^{\ast}
+  $}-algebras and topological {M}arkov chains.
+\newblock {\em J. Operator Theory}, 6(1):55--74, 1981.
+
+\bibitem{HandelmanEvPosRational1987}
+David Handelman.
+\newblock Eventually positive matrices with rational eigenvectors.
+\newblock {\em Ergodic Theory Dynam. Systems}, 7(2):193--196, 1987.
+
+\bibitem{Harmon1987}
+Dennis~R. Harmon.
+\newblock {$NK\sb 1$} of finite groups.
+\newblock {\em Proc. Amer. Math. Soc.}, 100(2):229--232, 1987.
+
+\bibitem{HKS2022}
+Yair Hartman, Bryna Kra, and Scott Schmieding.
+\newblock The stabilized automorphism group of a subshift.
+\newblock {\em Int. Math. Res. Not. IMRN}, (21):17112--17186, 2022.
+
+\bibitem{HatcherBook}
+Allen Hatcher.
+\newblock {\em Algebraic topology}.
+\newblock Cambridge University Press, Cambridge, 2002.
+
+\bibitem{Hedlund69}
+G.~A. Hedlund.
+\newblock Endomorphisms and automorphisms of the shift dynamical system.
+\newblock {\em Math. Systems Theory}, 3:320--375, 1969.
+
+\bibitem{HP1989}
+B.~Host and F.~Parreau.
+\newblock Homomorphismes entre syst\`emes dynamiques d\'{e}finis par
+  substitutions.
+\newblock {\em Ergodic Theory Dynam. Systems}, 9(3):469--477, 1989.
+
+\bibitem{jeandel}
+Emmanuel Jeandel.
+\newblock Strong shift equivalence as a category notion.
+\newblock arXiv:2107.10734, 2021.
+
+\bibitem{Johnson1981}
+Charles~R. Johnson.
+\newblock Row stochastic matrices similar to doubly stochastic matrices.
+\newblock {\em Linear and Multilinear Algebra}, 10(2):113--130, 1981.
+
+\bibitem{JohnsonLaffeyLoewySymmetric1996}
+Charles~R. Johnson, Thomas~J. Laffey, and Raphael Loewy.
+\newblock The real and the symmetric nonnegative inverse eigenvalue problems
+  are different.
+\newblock {\em Proc. Amer. Math. Soc.}, 124(12):3647--3651, 1996.
+
+\bibitem{NIEP2018}
+Charles~R. Johnson, Carlos Mariju\'{a}n, Pietro Paparella, and Miriam Pisonero.
+\newblock The {NIEP}.
+\newblock In {\em Operator theory, operator algebras, and matrix theory},
+  volume 267 of {\em Oper. Theory Adv. Appl.}, pages 199--220.
+  Birkh\"{a}user/Springer, Cham, 2018.
+
+\bibitem{S27}
+K.~H. Kim and F.~W. Roush.
+\newblock On the automorphism groups of subshifts.
+\newblock {\em Pure Math. Appl. Ser. B}, 1(4):203--230 (1991), 1990.
+
+\bibitem{S23}
+K.~H. Kim and F.~W. Roush.
+\newblock On the structure of inert automorphisms of subshifts.
+\newblock {\em Pure Math. Appl. Ser. B}, 2(1):3--22, 1991.
+
+\bibitem{S25}
+K.~H. Kim and F.~W. Roush.
+\newblock Solution of two conjectures in symbolic dynamics.
+\newblock {\em Proc. Amer. Math. Soc.}, 112(4):1163--1168, 1991.
+
+\bibitem{S17}
+K.~H. Kim and F.~W. Roush.
+\newblock Topological classification of reducible subshifts.
+\newblock {\em Pure Math. Appl. Ser. B}, 3(2-4):87--102 (1993), 1992.
+
+\bibitem{S21}
+K.~H. Kim and F.~W. Roush.
+\newblock Williams's conjecture is false for reducible subshifts.
+\newblock {\em J. Amer. Math. Soc.}, 5(1):213--215, 1992.
+
+\bibitem{S13}
+K.~H. Kim and F.~W. Roush.
+\newblock The {W}illiams conjecture is false for irreducible subshifts.
+\newblock {\em Electron. Res. Announc. Amer. Math. Soc.}, 3:105--109
+  (electronic), 1997.
+
+\bibitem{S11}
+K.~H. Kim and F.~W. Roush.
+\newblock The {W}illiams conjecture is false for irreducible subshifts.
+\newblock {\em Ann. of Math. (2)}, 149(2):545--558, 1999.
+
+\bibitem{S19}
+K.~H. Kim, F.~W. Roush, and J.~B. Wagoner.
+\newblock Automorphisms of the dimension group and gyration numbers.
+\newblock {\em J. Amer. Math. Soc.}, 5(1):191--212, 1992.
+
+\bibitem{KRWForumI}
+K.~H. Kim, F.~W. Roush, and J.~B. Wagoner.
+\newblock Characterization of inert actions on periodic points. {I}.
+\newblock {\em Forum Math.}, 12(5):565--602, 2000.
+
+\bibitem{KRWForumII}
+K.~H. Kim, F.~W. Roush, and J.~B. Wagoner.
+\newblock Characterization of inert actions on periodic points. {II}.
+\newblock {\em Forum Math.}, 12(6):671--712, 2000.
+
+\bibitem{S8}
+Ki~Hang Kim, Nicholas~S. Ormes, and Fred~W. Roush.
+\newblock The spectra of nonnegative integer matrices via formal power series.
+\newblock {\em J. Amer. Math. Soc.}, 13(4):773--806 (electronic), 2000.
+
+\bibitem{S31}
+Ki~Hang Kim and Fred~W. Roush.
+\newblock Decidability of shift equivalence.
+\newblock In {\em Dynamical systems ({C}ollege {P}ark, {MD}, 1986--87)}, volume
+  1342 of {\em Lecture Notes in Math.}, pages 374--424. Springer, Berlin, 1988.
+
+\bibitem{Kitchens1998}
+Bruce~P. Kitchens.
+\newblock {\em Symbolic {D}ynamics}.
+\newblock Universitext. Springer-Verlag, Berlin, 1998.
+\newblock One-sided, two-sided and countable state Markov shifts.
+
+\bibitem{Kopra2020SFTgliders}
+Johan Kopra.
+\newblock Glider automorphisms and a finitary {R}yan's theorem for transitive
+  subshifts of finite type.
+\newblock {\em Nat. Comput.}, 19(4):773--786, 2020.
+
+\bibitem{KopraGlidersSofic2022}
+Johan Kopra.
+\newblock Glider automata on all transitive sofic shifts.
+\newblock {\em Ergodic Theory Dynam. Systems}, 42(12):3716--3744, 2022.
+
+\bibitem{KriegerDimMark1980}
+Wolfgang Krieger.
+\newblock On dimension functions and topological {M}arkov chains.
+\newblock {\em Invent. Math.}, 56(3):239--250, 1980.
+
+\bibitem{Laffey2012}
+Thomas~J. Laffey.
+\newblock A constructive version of the {B}oyle-{H}andelman theorem on the
+  spectra of nonnegative matrices.
+\newblock {\em Linear Algebra Appl.}, 436(6):1701--1709, 2012.
+
+\bibitem{LaffeyLoewySmigocPowerSeries2016}
+Thomas~J. Laffey, Raphael Loewy, and Helena \v{S}migoc.
+\newblock Power series with positive coefficients arising from the
+  characteristic polynomials of positive matrices.
+\newblock {\em Math. Ann.}, 364(1-2):687--707, 2016.
+
+\bibitem{laffeyMeehan1999}
+Thomas~J. Laffey and Eleanor Meehan.
+\newblock A characterization of trace zero nonnegative {$5\times 5$} matrices,
+  1999.
+\newblock Special issue dedicated to Hans Schneider (Madison, WI, 1998).
+
+\bibitem{latimerMacDuffee}
+Claiborne~G. Latimer and C.~C. MacDuffee.
+\newblock A correspondence between classes of ideals and classes of matrices.
+\newblock {\em Ann. of Math. (2)}, 34(2):313--316, 1933.
+
+\bibitem{LinRudolph}
+Chao-Hui Lin and Daniel Rudolph.
+\newblock Sections for semiflows and {K}akutani shift equivalence.
+\newblock In {\em Modern dynamical systems and applications}, pages 145--161.
+  Cambridge Univ. Press, Cambridge, 2004.
+
+\bibitem{Lind84}
+D.~A. Lind.
+\newblock The entropies of topological {M}arkov shifts and a related class of
+  algebraic integers.
+\newblock {\em Ergodic Theory Dynam. Systems}, 4(2):283--300, 1984.
+
+\bibitem{LindMarcus2021}
+Douglas Lind and Brian Marcus.
+\newblock {\em An {I}ntroduction to {S}ymbolic {D}ynamics and {C}oding}.
+\newblock Cambridge University Press, Cambridge, second edition, 1995.
+
+\bibitem{LindMarcus1995}
+Douglas Lind and Brian Marcus.
+\newblock {\em An {I}ntroduction to {S}ymbolic {D}ynamics and {C}oding}.
+\newblock Cambridge University Press, Cambridge, 1995.
+
+\bibitem{LoewyLondon}
+Raphael Loewy and David London.
+\newblock A note on an inverse problem for nonnegative matrices.
+\newblock {\em Linear and Multilinear Algebra}, 6(1):83--90, 1978/79.
+
+\bibitem{Long2013}
+Nicholas Long.
+\newblock Mixing shifts of finite type with non-elementary surjective dimension
+  representations.
+\newblock {\em Acta Appl. Math.}, 126:277--295, 2013.
+
+\bibitem{MallerShub1985}
+M.~Maller and M.~Shub.
+\newblock The integral homology of {S}male diffeomorphisms.
+\newblock {\em Topology}, 24(2):153--164, 1985.
+
+\bibitem{MarcusTuncelwps}
+Brian Marcus and Selim Tuncel.
+\newblock The weight-per-symbol polytope and scaffolds of invariants associated
+  with {M}arkov chains.
+\newblock {\em Ergodic Theory Dynam. Systems}, 11(1):129--180, 1991.
+
+\bibitem{marcusDaniel}
+Daniel~A. Marcus.
+\newblock {\em Number fields}.
+\newblock Springer-Verlag, New York-Heidelberg, 1977.
+\newblock Universitext.
+
+\bibitem{MilnorBook}
+John Milnor.
+\newblock {\em Introduction to algebraic {$K$}-theory}.
+\newblock Princeton University Press, Princeton, N.J.; University of Tokyo
+  Press, Tokyo, 1971.
+\newblock Annals of Mathematics Studies, No. 72.
+
+\bibitem{MischaikowWeibel2023}
+Konstantin Mischaikov and Charles Weibel.
+\newblock Computing the conley index: a cautionary tale.
+\newblock arxiv:2303.06492, 2023.
+
+\bibitem{MH1938}
+Marston Morse and Gustav~A. Hedlund.
+\newblock Symbolic {D}ynamics.
+\newblock {\em Amer. J. Math.}, 60(4):815--866, 1938.
+
+\bibitem{Nasu88}
+Masakazu Nasu.
+\newblock Topological conjugacy for sofic systems and extensions of
+  automorphisms of finite subsystems of topological {M}arkov shifts.
+\newblock In {\em Dynamical systems ({C}ollege {P}ark, {MD}, 1986--87)}, volume
+  1342 of {\em Lecture Notes in Math.}, pages 564--607. Springer, Berlin, 1988.
+
+\bibitem{MR1234883}
+Masakazu Nasu.
+\newblock Textile systems for endomorphisms and automorphisms of the shift.
+\newblock {\em Mem. Amer. Math. Soc.}, 114(546):viii+215, 1995.
+
+\bibitem{MR1926865}
+Masakazu Nasu.
+\newblock The dynamics of expansive invertible onesided cellular automata.
+\newblock {\em Trans. Amer. Math. Soc.}, 354(10):4067--4084 (electronic), 2002.
+
+\bibitem{MR2177043}
+Masakazu Nasu.
+\newblock Nondegenerate {$q$}-biresolving textile systems and expansive
+  automorphisms of onesided full shifts.
+\newblock {\em Trans. Amer. Math. Soc.}, 358(2):871--891 (electronic), 2006.
+
+\bibitem{MR2380306}
+Masakazu Nasu.
+\newblock Textile systems and one-sided resolving automorphisms and
+  endomorphisms of the shift.
+\newblock {\em Ergodic Theory Dynam. Systems}, 28(1):167--209, 2008.
+
+\bibitem{Newman}
+Morris Newman.
+\newblock {\em Integral matrices}.
+\newblock Academic Press, New York-London, 1972.
+\newblock Pure and Applied Mathematics, Vol. 45.
+
+\bibitem{OliverBook}
+Robert Oliver.
+\newblock {\em Whitehead groups of finite groups}, volume 132 of {\em London
+  Mathematical Society Lecture Note Series}.
+\newblock Cambridge University Press, Cambridge, 1988.
+
+\bibitem{Olli2013}
+Jeanette Olli.
+\newblock Endomorphisms of {S}turmian systems and the discrete chair
+  substitution tiling system.
+\newblock {\em Discrete Contin. Dyn. Syst.}, 33(9):4173--4186, 2013.
+
+\bibitem{parrysullivan}
+Bill Parry and Dennis Sullivan.
+\newblock A topological invariant of flows on {$1$}-dimensional spaces.
+\newblock {\em Topology}, 14(4):297--299, 1975.
+
+\bibitem{Parry1964}
+William Parry.
+\newblock Intrinsic {M}arkov chains.
+\newblock {\em Trans. Amer. Math. Soc.}, 112:55--66, 1964.
+
+\bibitem{ParryTuncel1982}
+William Parry and Selim Tuncel.
+\newblock {\em Classification problems in ergodic theory}, volume~67 of {\em
+  London Mathematical Society Lecture Note Series}.
+\newblock Cambridge University Press, Cambridge, 1982.
+\newblock Statistics: Textbooks and Monographs, 41.
+
+\bibitem{ParryTuncel1982stoch}
+William Parry and Selim Tuncel.
+\newblock On the stochastic and topological structure of {M}arkov chains.
+\newblock {\em Bull. London Math. Soc.}, 14(1):16--27, 1982.
+
+\bibitem{ParryWilliams}
+William Parry and R.~F. Williams.
+\newblock Block coding and a zeta function for finite {M}arkov chains.
+\newblock {\em Proc. London Math. Soc. (3)}, 35(3):483--495, 1977.
+
+\bibitem{Perrin1992}
+Dominique Perrin.
+\newblock On positive matrices.
+\newblock {\em Theoret. Comput. Sci.}, 94(2):357--366, 1992.
+
+\bibitem{reinerMaximalOrders}
+I.~Reiner.
+\newblock {\em Maximal orders}, volume~28 of {\em London Mathematical Society
+  Monographs. New Series}.
+\newblock The Clarendon Press, Oxford University Press, Oxford, 2003.
+\newblock Corrected reprint of the 1975 original, With a foreword by M. J.
+  Taylor.
+
+\bibitem{Restorff2006}
+Gunnar Restorff.
+\newblock Classification of {C}untz-{K}rieger algebras up to stable
+  isomorphism.
+\newblock {\em J. Reine Angew. Math.}, 598:185--210, 2006.
+
+\bibitem{riedel1983}
+Norbert Riedel.
+\newblock An example on strong shift equivalence of positive integral matrices.
+\newblock {\em Monatsh. Math.}, 95(1):45--55, 1983.
+
+\bibitem{Roberts1979}
+Leslie~G. Roberts.
+\newblock {$K\sb{2}$} of some truncated polynomial rings.
+\newblock In {\em Ring theory ({P}roc. {C}onf., {U}niv. {W}aterloo, {W}aterloo,
+  1978)}, volume 734 of {\em Lecture Notes in Math.}, pages 249--278. Springer,
+  Berlin, 1979.
+\newblock With a section written jointly with S. Geller.
+
+\bibitem{Rordam1995}
+Mikael R{\o}rdam.
+\newblock Classification of {C}untz-{K}rieger algebras.
+\newblock {\em $K$-Theory}, 9(1):31--58, 1995.
+
+\bibitem{RosenbergBook}
+Jonathan Rosenberg.
+\newblock {\em Algebraic {$K$}-theory and its applications}, volume 147 of {\em
+  Graduate Texts in Mathematics}.
+\newblock Springer-Verlag, New York, 1994.
+
+\bibitem{Ryan1}
+J.~Patrick Ryan.
+\newblock The shift and commutativity.
+\newblock {\em Math. Systems Theory}, 6:82--85, 1972.
+
+\bibitem{Ryan2}
+J.~Patrick Ryan.
+\newblock The shift and commutivity. {II}.
+\newblock {\em Math. Systems Theory}, 8(3):249--250, 1974/75.
+
+\bibitem{Salo2019}
+Ville Salo.
+\newblock Transitive action on finite points of a full shift and a finitary
+  {R}yan's theorem.
+\newblock {\em Ergodic Theory Dynam. Systems}, 39(6):1637--1667, 2019.
+
+\bibitem{SaloMCG}
+Ville {Salo}.
+\newblock {Veelike actions and the MCG of a mixing SFT}.
+\newblock {\em arXiv e-prints}, page arXiv:2103.15505, March 2021.
+
+\bibitem{SaloGateLattices}
+Ville Salo.
+\newblock Gate lattices and the stabilized automorphism group.
+\newblock {\em Journal of Modern Dynamics}, to appear.
+
+\bibitem{SaloTorma2015}
+Ville Salo and Ilkka T\"{o}rm\"{a}.
+\newblock Block maps between primitive uniform and {P}isot substitutions.
+\newblock {\em Ergodic Theory Dynam. Systems}, 35(7):2292--2310, 2015.
+
+\bibitem{SchmiedingExamples}
+Scott {Schmieding}.
+\newblock {Explicit Examples in $NK_{1}$}.
+\newblock {\em arXiv e-prints}, page arXiv:1506.07418, June 2015.
+
+\bibitem{SchmiedingPentropy}
+Scott Schmieding.
+\newblock Local {$\mathcal{P}$} entropy and stabilized automorphism groups of
+  subshifts.
+\newblock {\em Invent. Math.}, 227(3):963--995, 2022.
+
+\bibitem{SYmcg}
+Scott Schmieding and Kitty Yang.
+\newblock The mapping class group of a minimal subshift.
+\newblock {\em Colloq. Math.}, 163(2):233--265, 2021.
+
+\bibitem{SenetaBook2006}
+E.~Seneta.
+\newblock {\em Non-negative matrices and {M}arkov chains}.
+\newblock Springer Series in Statistics. Springer, New York, 2006.
+\newblock Revised reprint of the second (1981) edition [Springer-Verlag, New
+  York; MR0719544].
+
+\bibitem{ShannonWeaver1949}
+Claude~E. Shannon and Warren Weaver.
+\newblock {\em The {M}athematical {T}heory of {C}ommunication}.
+\newblock The University of Illinois Press, Urbana, Ill., 1949.
+
+\bibitem{SheihamWhitehead}
+Desmond Sheiham.
+\newblock Whitehead groups of localizations and the endomorphism class group.
+\newblock {\em J. Algebra}, 270(1):261--280, 2003.
+
+\bibitem{SilverWilliams1999}
+Daniel~S. Silver and Susan~G. Williams.
+\newblock Knot invariants from symbolic dynamical systems.
+\newblock {\em Trans. Amer. Math. Soc.}, 351(8):3243--3265, 1999.
+
+\bibitem{Silvester1981}
+John~R. Silvester.
+\newblock {\em Introduction to algebraic {$K$}-theory}.
+\newblock Chapman and Hall Mathematics Series. Chapman \& Hall, London-New
+  York, 1981.
+
+\bibitem{suleimanova}
+H.~R. Sule\u{\i}manova.
+\newblock Stochastic matrices with real characteristic numbers.
+\newblock {\em Doklady Akad. Nauk SSSR (N.S.)}, 66:343--345, 1949.
+
+\bibitem{tausskyOnLatimerTheorem}
+Olga Taussky.
+\newblock On a theorem of {L}atimer and {M}ac{D}uffee.
+\newblock {\em Canad. J. Math.}, 1:300--302, 1949.
+
+\bibitem{tausskyInverseIdeal}
+Olga Taussky.
+\newblock On matrix classes corresponding to an ideal and its inverse.
+\newblock {\em Illinois J. Math.}, 1:108--113, 1957.
+
+\bibitem{vdK}
+Wilberd van~der Kallen.
+\newblock Le {$K\sb{2}$} des nombres duaux.
+\newblock {\em C. R. Acad. Sci. Paris S\'{e}r. A-B}, 273:A1204--A1207, 1971.
+
+\bibitem{MR908217}
+J.~B. Wagoner.
+\newblock Markov partitions and {$K_2$}.
+\newblock {\em Inst. Hautes \'Etudes Sci. Publ. Math.}, (65):91--129, 1987.
+
+\bibitem{Wagoner90eventual}
+J.~B. Wagoner.
+\newblock Eventual finite order generation for the kernel of the dimension
+  group representation.
+\newblock {\em Trans. Amer. Math. Soc.}, 317(1):331--350, 1990.
+
+\bibitem{MR1012941}
+J.~B. Wagoner.
+\newblock Higher-dimensional shift equivalence and strong shift equivalence are
+  the same over the integers.
+\newblock {\em Proc. Amer. Math. Soc.}, 109(2):527--536, 1990.
+
+\bibitem{Wagoner90triangle}
+J.~B. Wagoner.
+\newblock Triangle identities and symmetries of a subshift of finite type.
+\newblock {\em Pacific J. Math.}, 144(1):181--205, 1990.
+
+\bibitem{Wagoner99}
+J.~B. Wagoner.
+\newblock Strong shift equivalence theory and the shift equivalence problem.
+\newblock {\em Bull. Amer. Math. Soc. (N.S.)}, 36(3):271--296, 1999.
+
+\bibitem{Wagoner2000}
+J.~B. Wagoner.
+\newblock Strong shift equivalence and {$K_2$} of the dual numbers.
+\newblock {\em J. Reine Angew. Math.}, 521:119--160, 2000.
+\newblock With an appendix by K. H. Kim and F. W. Roush.
+
+\bibitem{Weibelnk1calc}
+Charles Weibel.
+\newblock {$NK_0$} and {$NK_1$} of the groups {$C_4$} and {$D_4$}. {A}ddendum
+  to ``{L}ower algebraic {$K$}-theory of hyperbolic 3-simplex reflection
+  groups'' by {J}.-{F}. {L}afont and {I}. {J}. {O}rtiz [mr2495796].
+\newblock {\em Comment. Math. Helv.}, 84(2):339--349, 2009.
+
+\bibitem{WeibelHomAlgBook}
+Charles~A. Weibel.
+\newblock {\em An introduction to homological algebra}, volume~38 of {\em
+  Cambridge Studies in Advanced Mathematics}.
+\newblock Cambridge University Press, Cambridge, 1994.
+
+\bibitem{WeibelBook}
+Charles~A. Weibel.
+\newblock {\em The {$K$}-book}, volume 145 of {\em Graduate Studies in
+  Mathematics}.
+\newblock American Mathematical Society, Providence, RI, 2013.
+\newblock An introduction to algebraic $K$-theory.
+
+\bibitem{Whitehead1950}
+J.~H.~C. Whitehead.
+\newblock Simple homotopy types.
+\newblock {\em Amer. J. Math.}, 72:1--57, 1950.
+
+\bibitem{Williams1970}
+R.~F. Williams.
+\newblock Classification of one dimensional attractors.
+\newblock In {\em Global {A}nalysis ({P}roc. {S}ympos. {P}ure {M}ath., {V}ol.
+  {XIV}, {B}erkeley, {C}alif., 1968)}, pages 341--361. Amer. Math. Soc.,
+  Providence, R.I., 1970.
+
+\bibitem{Williams73}
+R.~F. Williams.
+\newblock Classification of subshifts of finite type.
+\newblock {\em Ann. of Math. (2)}, 98:120--153, 1973; erratum, ibid.
+  99:380--381, 1974.
+
+\bibitem{Williams1992}
+R.~F. Williams.
+\newblock Strong shift equivalence of matrices in {${\rm GL}(2,{\bf Z})$}.
+\newblock In {\em Symbolic dynamics and its applications ({N}ew {H}aven, {CT},
+  1991)}, volume 135 of {\em Contemp. Math.}, pages 445--451. Amer. Math. Soc.,
+  Providence, RI, 1992.
+
+\bibitem{Yang2021}
+Kitty Yang.
+\newblock Normal amenable subgroups of the automorphism group of sofic shifts.
+\newblock {\em Ergodic Theory Dynam. Systems}, 41(4):1250--1263, 2021.
+
+\bibitem{zakharevich2019}
+Inna Zakharevich.
+\newblock Attitudes of {$K$}-theory: topological, algebraic, combinatorial.
+\newblock {\em Notices Amer. Math. Soc.}, 66(7):1034--1044, 2019.
+
+\end{thebibliography}
