@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 
 use ahash::AHashMap as HashMap;
 
+use super::path::{reanchor_dyn_sse_path, reverse_dyn_sse_path, validate_sse_path_dyn};
 use super::*;
+use crate::types::{GuideArtifact, GuideArtifactPayload};
 
 #[derive(Clone, Debug)]
 pub(super) struct RankedGuide {
@@ -517,21 +519,6 @@ fn matrices_share_endpoint_identity(left: &DynMatrix, right: &DynMatrix) -> bool
         && left.canonical_perm() == right.canonical_perm()
 }
 
-pub(super) fn reverse_dyn_sse_path(path: &DynSsePath) -> DynSsePath {
-    DynSsePath {
-        matrices: path.matrices.iter().cloned().rev().collect(),
-        steps: path
-            .steps
-            .iter()
-            .rev()
-            .map(|step| EsseStep {
-                u: step.v.clone(),
-                v: step.u.clone(),
-            })
-            .collect(),
-    }
-}
-
 fn prepare_shortcut_guide_pool(
     request: &SearchRequest,
 ) -> Result<PreparedShortcutGuidePool, String> {
@@ -634,45 +621,6 @@ fn compare_optional_score_desc(left: Option<f64>, right: Option<f64>) -> Orderin
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     }
-}
-
-fn reanchor_dyn_sse_path(
-    path: &DynSsePath,
-    source: &DynMatrix,
-    target: &DynMatrix,
-) -> Result<DynSsePath, String> {
-    let mut path = path.clone();
-    if path.matrices.is_empty() {
-        return Err("guide path contains no matrices".to_string());
-    }
-
-    if path.matrices.first() != Some(source) {
-        let first = path
-            .matrices
-            .first()
-            .expect("non-empty path should have a first matrix")
-            .clone();
-        let step = permutation_step_between(source, &first).ok_or_else(|| {
-            "guide start is not permutation-compatible with the request".to_string()
-        })?;
-        path.steps.insert(0, step);
-        path.matrices.insert(0, source.clone());
-    }
-
-    if path.matrices.last() != Some(target) {
-        let last = path
-            .matrices
-            .last()
-            .expect("non-empty path should have a last matrix")
-            .clone();
-        let step = permutation_step_between(&last, target).ok_or_else(|| {
-            "guide end is not permutation-compatible with the request".to_string()
-        })?;
-        path.steps.push(step);
-        path.matrices.push(target.clone());
-    }
-
-    Ok(path)
 }
 
 fn refine_guide_path(

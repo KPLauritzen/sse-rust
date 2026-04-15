@@ -3,10 +3,6 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
-use crate::aligned::{
-    search_concrete_shift_equivalence_with_lag_2x2, ConcreteShiftRelation2x2,
-    ConcreteShiftSearchResult2x2,
-};
 use crate::graph_moves::{
     enumerate_graph_move_successors, enumerate_graph_proposals, GraphProposal,
     SameFuturePastSignatureGap,
@@ -18,19 +14,19 @@ use crate::search_observer::{
     SearchRootRecord, SearchStartRecord,
 };
 use crate::types::{
-    ConcreteShiftProof2x2, DynSsePath, DynSseResult, EsseStep, FrontierMode, GuideArtifact,
-    GuideArtifactCompatibility, GuideArtifactEndpoints, GuideArtifactPayload,
-    GuideArtifactProvenance, GuideArtifactQuality, GuideArtifactValidation, GuidedRefinementConfig,
-    MoveFamilyPolicy, SearchConfig, SearchDirection, SearchLayerTelemetry,
-    SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig, ShortcutSearchRoundTelemetry,
-    ShortcutSearchStopReason, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    DynSsePath, DynSseResult, EsseStep, FrontierMode, GuidedRefinementConfig, MoveFamilyPolicy,
+    SearchConfig, SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry,
+    SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
+    ShortcutSearchConfig, ShortcutSearchRoundTelemetry, ShortcutSearchStopReason, SsePath,
+    SseResult, DEFAULT_BEAM_WIDTH,
 };
 
 use rayon::prelude::*;
 
 mod beam;
 mod frontier;
+mod path;
+mod shortcut;
 mod stages;
 
 use self::beam::{
@@ -48,10 +44,23 @@ use self::frontier::{
     deduplicate_expansions, should_expand_forward, FrontierExpansion, LayerExpansionOrderKey,
 };
 #[cfg(test)]
-use self::stages::{
-    compare_ranked_guides, prepare_full_path_guide, refine_guide_path_once, reverse_dyn_sse_path,
-    GuidedSegmentCache, GuidedSegmentCacheKey, RankedGuide,
+use self::path::reverse_dyn_sse_path;
+pub use self::path::{
+    build_full_path_guide_artifact, validate_sse_path_2x2, validate_sse_path_dyn,
 };
+use self::path::{
+    permutation_step_between, reconstruct_bidirectional_dyn_path, reconstruct_bidirectional_path,
+};
+#[cfg(test)]
+use self::shortcut::find_concrete_shift_shortcut_proof;
+use self::shortcut::try_concrete_shift_shortcut_2x2;
+#[cfg(test)]
+use self::stages::{
+    compare_ranked_guides, prepare_full_path_guide, refine_guide_path_once, GuidedSegmentCache,
+    GuidedSegmentCacheKey, RankedGuide,
+};
+#[cfg(test)]
+use crate::aligned::{ConcreteShiftRelation2x2, ConcreteShiftSearchResult2x2};
 #[cfg(test)]
 use crate::graph_moves::same_future_past_signature;
 
@@ -304,95 +313,6 @@ fn finish_search_dyn(
 ) -> (DynSseResult, SearchTelemetry) {
     emit_finished(&mut observer, request, result.clone().into(), &telemetry);
     (result, telemetry)
-}
-
-/// Validate a 2x2 witness path against its endpoints.
-pub fn validate_sse_path_2x2(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    path: &SsePath<2>,
-) -> Result<(), String> {
-    validate_sse_path_dyn(
-        &DynMatrix::from_sq(a),
-        &DynMatrix::from_sq(b),
-        &path.clone().into(),
-    )
-}
-
-/// Validate a dynamic witness path against its endpoints.
-pub fn validate_sse_path_dyn(
-    a: &DynMatrix,
-    b: &DynMatrix,
-    path: &DynSsePath,
-) -> Result<(), String> {
-    if path.matrices.len() != path.steps.len() + 1 {
-        return Err(format!(
-            "path contains {} matrices but {} steps",
-            path.matrices.len(),
-            path.steps.len()
-        ));
-    }
-
-    if path.steps.is_empty() {
-        if path.matrices.len() != 1 {
-            return Err(format!(
-                "empty-step path should contain exactly one matrix, got {}",
-                path.matrices.len()
-            ));
-        }
-        if path.matrices[0] != *a || path.matrices[0] != *b {
-            return Err("empty-step path does not match the endpoint matrices".to_string());
-        }
-        return Ok(());
-    }
-
-    if path.matrices.first() != Some(a) {
-        return Err("path.matrices does not start at A".to_string());
-    }
-    if path.matrices.last() != Some(b) {
-        return Err("path.matrices does not end at B".to_string());
-    }
-
-    for (idx, step) in path.steps.iter().enumerate() {
-        let uv = step.u.mul(&step.v);
-        let vu = step.v.mul(&step.u);
-        if uv != path.matrices[idx] {
-            return Err(format!("step {idx} does not start at path.matrices[{idx}]"));
-        }
-        if vu != path.matrices[idx + 1] {
-            return Err(format!(
-                "step {idx} does not end at path.matrices[{}]",
-                idx + 1
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Build a reusable `full_path` guide artifact from a validated witness path.
-pub fn build_full_path_guide_artifact(
-    source: &DynMatrix,
-    target: &DynMatrix,
-    path: &DynSsePath,
-) -> Result<GuideArtifact, String> {
-    validate_sse_path_dyn(source, target, path)?;
-    Ok(GuideArtifact {
-        artifact_id: None,
-        endpoints: GuideArtifactEndpoints {
-            source: source.clone(),
-            target: target.clone(),
-        },
-        payload: GuideArtifactPayload::FullPath { path: path.clone() },
-        provenance: GuideArtifactProvenance::default(),
-        validation: GuideArtifactValidation::WitnessValidated,
-        compatibility: GuideArtifactCompatibility::default(),
-        quality: GuideArtifactQuality {
-            lag: Some(path.steps.len()),
-            cost: Some(path.steps.len()),
-            score: None,
-        },
-    })
 }
 
 /// Search for a strong shift equivalence path between arbitrary square endpoints,
@@ -1411,86 +1331,6 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     }
 
     finish_search_2x2(observer, &request, SseResult::Unknown, telemetry)
-}
-
-fn is_essential_matrix_2x2(m: &SqMatrix<2>) -> bool {
-    let row0 = m.data[0][0] + m.data[0][1];
-    let row1 = m.data[1][0] + m.data[1][1];
-    let col0 = m.data[0][0] + m.data[1][0];
-    let col1 = m.data[0][1] + m.data[1][1];
-    row0 > 0 && row1 > 0 && col0 > 0 && col1 > 0
-}
-
-fn concrete_shift_witness_budget(config: &SearchConfig) -> usize {
-    if config.max_lag <= 4 && config.max_entry <= 6 {
-        10_000
-    } else {
-        25_000
-    }
-}
-
-fn should_try_concrete_shift_fallback(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    config: &SearchConfig,
-) -> bool {
-    is_essential_matrix_2x2(a)
-        && is_essential_matrix_2x2(b)
-        && config.max_lag <= 4
-        && config.max_entry <= 6
-}
-
-fn try_concrete_shift_shortcut_2x2(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    config: &SearchConfig,
-) -> Option<ConcreteShiftProof2x2> {
-    if !should_try_concrete_shift_fallback(a, b, config) {
-        return None;
-    }
-
-    let max_witnesses = concrete_shift_witness_budget(config);
-    find_concrete_shift_shortcut_proof(config.max_lag as u32, |lag, relation| {
-        search_concrete_shift_equivalence_with_lag_2x2(
-            a,
-            b,
-            lag,
-            config.max_entry,
-            max_witnesses,
-            relation,
-        )
-    })
-}
-
-fn find_concrete_shift_shortcut_proof<F>(
-    max_lag: u32,
-    mut probe: F,
-) -> Option<ConcreteShiftProof2x2>
-where
-    F: FnMut(u32, ConcreteShiftRelation2x2) -> ConcreteShiftSearchResult2x2,
-{
-    for lag in 1..=max_lag {
-        let mut any_limit = false;
-        for relation in [
-            ConcreteShiftRelation2x2::Aligned,
-            ConcreteShiftRelation2x2::Balanced,
-            ConcreteShiftRelation2x2::Compatible,
-        ] {
-            match probe(lag, relation) {
-                ConcreteShiftSearchResult2x2::Equivalent(witness) => {
-                    return Some(ConcreteShiftProof2x2 { relation, witness });
-                }
-                ConcreteShiftSearchResult2x2::Exhausted => {}
-                ConcreteShiftSearchResult2x2::SearchLimitReached => any_limit = true,
-            }
-        }
-
-        if any_limit {
-            return None;
-        }
-    }
-
-    None
 }
 
 fn search_beam_2x2_with_telemetry_and_observer(
@@ -3879,248 +3719,6 @@ fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) 
 
 fn trace_square(m: &DynMatrix) -> i64 {
     m.mul(m).trace() as i64
-}
-
-/// Create a permutation similarity step: given matrices M and M' = PMP
-/// where P is the swap permutation, return an EsseStep with U = MP, V = P
-/// so that UV = M and VU = M'.
-fn permutation_step(m: &DynMatrix) -> EsseStep {
-    let n = m.rows;
-    let mut p_data = vec![0u32; n * n];
-    for i in 0..n {
-        p_data[i * n + (n - 1 - i)] = 1;
-    }
-    let p = DynMatrix::new(n, n, p_data);
-    let mp = m.mul(&p);
-    EsseStep { u: mp, v: p }
-}
-
-fn permutation_step_between(from: &DynMatrix, to: &DynMatrix) -> Option<EsseStep> {
-    if from.rows != from.cols || to.rows != to.cols || from.rows != to.rows {
-        return None;
-    }
-    let n = from.rows;
-    let mut perm: Vec<usize> = (0..n).collect();
-    let mut result = None;
-    for_each_permutation(&mut perm, 0, &mut |perm| {
-        if result.is_some() {
-            return;
-        }
-        let (p, pinv) = permutation_matrices(perm);
-        let candidate = pinv.mul(from).mul(&p);
-        if candidate == *to {
-            let u = from.mul(&p);
-            result = Some(EsseStep { u, v: pinv });
-        }
-    });
-    result
-}
-
-fn permutation_matrices(perm: &[usize]) -> (DynMatrix, DynMatrix) {
-    let n = perm.len();
-    let mut p_data = vec![0u32; n * n];
-    let mut pinv_data = vec![0u32; n * n];
-    for (row, &col) in perm.iter().enumerate() {
-        p_data[row * n + col] = 1;
-        pinv_data[col * n + row] = 1;
-    }
-    (
-        DynMatrix::new(n, n, p_data),
-        DynMatrix::new(n, n, pinv_data),
-    )
-}
-
-fn for_each_permutation<F>(perm: &mut [usize], start: usize, visit: &mut F)
-where
-    F: FnMut(&[usize]),
-{
-    if start == perm.len() {
-        visit(perm);
-        return;
-    }
-    for idx in start..perm.len() {
-        perm.swap(start, idx);
-        for_each_permutation(perm, start + 1, visit);
-        perm.swap(start, idx);
-    }
-}
-
-/// Walk a parent chain from `node` back to the root, returning
-/// (matrices, steps) in root-to-node order.
-fn walk_parent_chain(
-    node: &DynMatrix,
-    parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
-    orig: &HashMap<DynMatrix, DynMatrix>,
-) -> (Vec<DynMatrix>, Vec<EsseStep>) {
-    let mut matrices = Vec::new();
-    let mut steps = Vec::new();
-    let mut current = node.clone();
-
-    matrices.push(orig[&current].clone());
-
-    while let Some(Some((prev, step))) = parent.get(&current) {
-        steps.push(step.clone());
-        matrices.push(orig[prev].clone());
-        current = prev.clone();
-    }
-
-    matrices.reverse();
-    steps.reverse();
-    (matrices, steps)
-}
-
-/// Reconstruct a path from the forward and backward BFS trees that meet
-/// at `meeting_canon`.
-///
-/// Forward chain: A -> ... -> M (steps recorded as current=UV, neighbor=VU).
-/// Backward chain: B -> ... -> M (same convention).
-/// We reverse the backward chain to get M -> ... -> B, flipping each step's
-/// (U,V) to (V,U) since the direction of the elementary SSE is reversed.
-fn reconstruct_bidirectional_path(
-    a: &SqMatrix<2>,
-    b: &SqMatrix<2>,
-    meeting_canon: &DynMatrix,
-    fwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
-    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
-    bwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
-    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
-) -> SsePath<2> {
-    // Forward: A -> ... -> M
-    let (fwd_matrices, fwd_steps) = walk_parent_chain(meeting_canon, fwd_parent, fwd_orig);
-
-    // Backward: B -> ... -> M, which we reverse to M -> ... -> B.
-    let (bwd_matrices, bwd_steps) = walk_parent_chain(meeting_canon, bwd_parent, bwd_orig);
-
-    let fwd_meeting = fwd_matrices
-        .last()
-        .expect("forward chain should end at the meeting node")
-        .clone();
-    let bwd_meeting = bwd_matrices
-        .last()
-        .expect("backward chain should end at the meeting node")
-        .clone();
-
-    // Build the combined step list.
-    let mut all_steps = fwd_steps;
-
-    if fwd_meeting != bwd_meeting {
-        let step = permutation_step_between(&fwd_meeting, &bwd_meeting)
-            .expect("meeting representatives should be permutation-similar");
-        all_steps.push(step);
-    }
-
-    // Reverse backward steps: each backward step had current=UV, neighbor=VU.
-    // In the forward direction (M->...->B) we need neighbor=UV, current=VU,
-    // i.e. the elementary SSE step with U and V swapped.
-    for step in bwd_steps.into_iter().rev() {
-        all_steps.push(EsseStep {
-            u: step.v,
-            v: step.u,
-        });
-    }
-
-    // Build the combined matrix list (all intermediate DynMatrix nodes).
-    let mut all_dyn_matrices: Vec<DynMatrix> = fwd_matrices;
-    if fwd_meeting != bwd_meeting {
-        all_dyn_matrices.push(bwd_meeting);
-    }
-    // bwd_matrices is [B, ..., M] — reversed and skip M (already in fwd).
-    for m in bwd_matrices.into_iter().rev().skip(1) {
-        all_dyn_matrices.push(m);
-    }
-
-    let a_dyn = DynMatrix::from_sq(a);
-    let b_dyn = DynMatrix::from_sq(b);
-
-    // If the BFS start node differs from `a` (due to canonicalisation),
-    // prepend a permutation step: a -> canonical(a).
-    if *all_dyn_matrices.first().unwrap() != a_dyn {
-        all_steps.insert(0, permutation_step(&a_dyn));
-        all_dyn_matrices.insert(0, a_dyn);
-    }
-
-    // If the BFS end node differs from `b` (due to canonicalisation),
-    // append a permutation step: canonical(b) -> b.
-    if *all_dyn_matrices.last().unwrap() != b_dyn {
-        let last = all_dyn_matrices.last().unwrap().clone();
-        all_steps.push(permutation_step(&last));
-        all_dyn_matrices.push(b_dyn);
-    }
-
-    // Collect the 2x2 nodes for the SsePath matrices field.
-    let sq_matrices: Vec<SqMatrix<2>> = all_dyn_matrices
-        .iter()
-        .filter_map(|dm| dm.to_sq::<2>())
-        .collect();
-
-    SsePath {
-        matrices: sq_matrices,
-        steps: all_steps,
-    }
-}
-
-fn reconstruct_bidirectional_dyn_path(
-    a: &DynMatrix,
-    b: &DynMatrix,
-    meeting_canon: &DynMatrix,
-    fwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
-    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
-    bwd_parent: &HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>>,
-    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
-) -> DynSsePath {
-    let (fwd_matrices, fwd_steps) = walk_parent_chain(meeting_canon, fwd_parent, fwd_orig);
-    let (bwd_matrices, bwd_steps) = walk_parent_chain(meeting_canon, bwd_parent, bwd_orig);
-
-    let fwd_meeting = fwd_matrices
-        .last()
-        .expect("forward chain should end at the meeting node")
-        .clone();
-    let bwd_meeting = bwd_matrices
-        .last()
-        .expect("backward chain should end at the meeting node")
-        .clone();
-
-    let mut all_steps = fwd_steps;
-    if fwd_meeting != bwd_meeting {
-        let step = permutation_step_between(&fwd_meeting, &bwd_meeting)
-            .expect("meeting representatives should be permutation-similar");
-        all_steps.push(step);
-    }
-
-    for step in bwd_steps.into_iter().rev() {
-        all_steps.push(EsseStep {
-            u: step.v,
-            v: step.u,
-        });
-    }
-
-    let mut all_dyn_matrices: Vec<DynMatrix> = fwd_matrices;
-    if fwd_meeting != bwd_meeting {
-        all_dyn_matrices.push(bwd_meeting);
-    }
-    for m in bwd_matrices.into_iter().rev().skip(1) {
-        all_dyn_matrices.push(m);
-    }
-
-    if *all_dyn_matrices.first().unwrap() != *a {
-        let first = all_dyn_matrices.first().unwrap().clone();
-        let step =
-            permutation_step_between(a, &first).expect("start should be permutation-similar");
-        all_steps.insert(0, step);
-        all_dyn_matrices.insert(0, a.clone());
-    }
-
-    if *all_dyn_matrices.last().unwrap() != *b {
-        let last = all_dyn_matrices.last().unwrap().clone();
-        let step = permutation_step_between(&last, b).expect("end should be permutation-similar");
-        all_steps.push(step);
-        all_dyn_matrices.push(b.clone());
-    }
-
-    DynSsePath {
-        matrices: all_dyn_matrices,
-        steps: all_steps,
-    }
 }
 
 #[cfg(test)]
