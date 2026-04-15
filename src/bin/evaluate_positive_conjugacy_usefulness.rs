@@ -11,8 +11,8 @@ use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SearchTeleme
 
 #[derive(Clone)]
 struct Case2x2 {
-    name: &'static str,
-    description: &'static str,
+    name: String,
+    description: String,
     source: SqMatrix<2>,
     target: SqMatrix<2>,
 }
@@ -27,17 +27,17 @@ struct SearchProfile {
 struct CandidateEvaluation {
     label: String,
     matrix: SqMatrix<2>,
-    origin: CandidateOrigin,
+    origin_label: String,
     proposal_rank: Option<usize>,
     shadow_l1_distance: Option<f64>,
     nearest_sample_t: Option<f64>,
     segment_runs: Vec<ProfileSegmentRuns>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CandidateOrigin {
-    TopProposal,
-    SameDiagonalDeterminantControl,
+#[derive(Clone)]
+struct LocalControls {
+    family_label: &'static str,
+    matrices: Vec<SqMatrix<2>>,
 }
 
 #[derive(Clone)]
@@ -178,7 +178,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: evaluate_positive_conjugacy_usefulness [--case brix_k3|brix_k4|simple_diag|constant_positive] [--max-conjugator-entry N] [--sample-points N] [--top-k N] [--controls-limit N] [--graph-max-lag N] [--graph-max-dim N] [--graph-max-entry N] [--include-mixed] [--mixed-max-lag N] [--mixed-max-dim N] [--mixed-max-entry N] [--mixed-beam-width N]"
+                    "usage: evaluate_positive_conjugacy_usefulness [--case brix_k3|brix_k4|simple_diag|constant_positive|riedel_baker_kN] [--max-conjugator-entry N] [--sample-points N] [--top-k N] [--controls-limit N] [--graph-max-lag N] [--graph-max-dim N] [--graph-max-entry N] [--include-mixed] [--mixed-max-lag N] [--mixed-max-dim N] [--mixed-max-entry N] [--mixed-beam-width N]"
                 );
                 return;
             }
@@ -247,12 +247,7 @@ fn main() {
         &proposal_config,
     );
     let top_proposals: Vec<_> = proposals.iter().take(top_k).cloned().collect();
-    let controls = derive_same_diagonal_determinant_controls(
-        &case.source,
-        &case.target,
-        &proposals,
-        controls_limit,
-    );
+    let controls = derive_local_controls(&case.source, &case.target, &proposals, controls_limit);
     let direct_by_profile: Vec<_> = profiles
         .iter()
         .map(|profile| {
@@ -268,8 +263,9 @@ fn main() {
     println!("unique proposal candidates = {}", proposals.len());
     println!("selected top-ranked proposals = {}", top_proposals.len());
     println!(
-        "same-diagonal determinant-matched controls = {}",
-        controls.len()
+        "{} controls = {}",
+        controls.family_label,
+        controls.matrices.len()
     );
     println!();
 
@@ -290,7 +286,7 @@ fn main() {
         .map(|(index, proposal)| {
             evaluate_candidate(
                 &case,
-                CandidateOrigin::TopProposal,
+                "top-ranked proposal".to_string(),
                 format!("P{}", index + 1),
                 proposal.matrix.clone(),
                 Some(index + 1),
@@ -306,12 +302,13 @@ fn main() {
     }
 
     let control_evaluations: Vec<_> = controls
+        .matrices
         .iter()
         .enumerate()
         .map(|(index, control)| {
             evaluate_candidate(
                 &case,
-                CandidateOrigin::SameDiagonalDeterminantControl,
+                format!("{} control", controls.family_label),
                 format!("C{}", index + 1),
                 control.clone(),
                 None,
@@ -321,7 +318,7 @@ fn main() {
         })
         .collect();
 
-    if !controls.is_empty() {
+    if !controls.matrices.is_empty() {
         println!("Local controls:");
         for evaluation in &control_evaluations {
             print_candidate(&evaluation, &case.source, &case.target);
@@ -334,60 +331,141 @@ fn main() {
 fn load_case(case: &str) -> Case2x2 {
     match case {
         "brix_k3" => Case2x2 {
-            name: "brix_k3",
-            description: "Brix-Ruiz witness-known calibration, k=3",
+            name: "brix_k3".to_string(),
+            description: "Brix-Ruiz witness-known calibration, k=3".to_string(),
             source: SqMatrix::new([[1, 3], [2, 1]]),
             target: SqMatrix::new([[1, 6], [1, 1]]),
         },
         "brix_k4" => Case2x2 {
-            name: "brix_k4",
-            description: "Brix-Ruiz witness-known calibration, k=4",
+            name: "brix_k4".to_string(),
+            description: "Brix-Ruiz witness-known calibration, k=4".to_string(),
             source: SqMatrix::new([[1, 4], [3, 1]]),
             target: SqMatrix::new([[1, 12], [1, 1]]),
         },
         "simple_diag" => Case2x2 {
-            name: "simple_diag",
-            description: "simple diagonal scaling calibration",
+            name: "simple_diag".to_string(),
+            description: "simple diagonal scaling calibration".to_string(),
             source: SqMatrix::new([[1, 2], [2, 1]]),
             target: SqMatrix::new([[1, 4], [1, 1]]),
         },
         "constant_positive" => Case2x2 {
-            name: "constant_positive",
-            description: "constant positive sanity case",
+            name: "constant_positive".to_string(),
+            description: "constant positive sanity case".to_string(),
             source: SqMatrix::new([[1, 2], [2, 1]]),
             target: SqMatrix::new([[1, 2], [2, 1]]),
         },
-        _ => panic!("unsupported case: {case}"),
+        _ => load_riedel_baker_case(case).unwrap_or_else(|| panic!("unsupported case: {case}")),
     }
 }
 
-fn print_profiles(profiles: &[SearchProfile]) {
-    println!("Search profiles:");
-    for profile in profiles {
-        let frontier = match profile.config.frontier_mode {
-            FrontierMode::Bfs => "bfs".to_string(),
-            FrontierMode::Beam => format!("beam({})", profile.config.beam_width.unwrap_or(0)),
-            FrontierMode::BeamBfsHandoff => {
-                format!(
-                    "beam-bfs-handoff({})",
-                    profile.config.beam_width.unwrap_or(0)
-                )
-            }
-        };
-        let move_policy = match profile.config.move_family_policy {
-            MoveFamilyPolicy::Mixed => "mixed",
-            MoveFamilyPolicy::GraphOnly => "graph-only",
-        };
-        println!(
-            "  {}: lag<= {}, dim<= {}, entry<= {}, frontier={}, moves={}",
-            profile.name,
-            profile.config.max_lag,
-            profile.config.max_intermediate_dim,
-            profile.config.max_entry,
-            frontier,
-            move_policy
-        );
+fn load_riedel_baker_case(case: &str) -> Option<Case2x2> {
+    let k = case.strip_prefix("riedel_baker_k")?.parse::<u32>().ok()?;
+    if k < 2 {
+        return None;
     }
+
+    Some(Case2x2 {
+        name: case.to_string(),
+        description: format!(
+            "Riedel/Baker literature family, k={} (Boyle-Schmieding Example `riedelexample`)",
+            k
+        ),
+        source: SqMatrix::new([[k, 2], [1, k]]),
+        target: SqMatrix::new([[k - 1, 1], [1, k + 1]]),
+    })
+}
+
+fn derive_local_controls(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    proposals: &[PositiveConjugacyProposal2x2],
+    limit: usize,
+) -> LocalControls {
+    if source.data[0][0] == target.data[0][0] && source.data[1][1] == target.data[1][1] {
+        return LocalControls {
+            family_label: "same-diagonal determinant-matched",
+            matrices: derive_same_diagonal_determinant_controls(source, target, proposals, limit),
+        };
+    }
+
+    LocalControls {
+        family_label: "same-trace determinant-matched",
+        matrices: derive_same_trace_determinant_controls(source, target, proposals, limit),
+    }
+}
+
+fn derive_same_trace_determinant_controls(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    proposals: &[PositiveConjugacyProposal2x2],
+    limit: usize,
+) -> Vec<SqMatrix<2>> {
+    if limit == 0 || source.trace() != target.trace() || source.det() != target.det() {
+        return Vec::new();
+    }
+
+    let trace = source.trace();
+    let det = source.det();
+
+    let mut excluded = BTreeSet::new();
+    excluded.insert(source.clone());
+    excluded.insert(target.clone());
+    for proposal in proposals {
+        excluded.insert(proposal.matrix.clone());
+    }
+
+    let mut controls = Vec::new();
+    let max_diagonal_checks = (limit.max(1) as u64).saturating_mul(8_192);
+    let mut diagonal_checks = 0u64;
+    for upper_left in 1..trace {
+        if diagonal_checks >= max_diagonal_checks {
+            break;
+        }
+        diagonal_checks += 1;
+
+        let lower_right = trace - upper_left;
+        let product = i128::from(upper_left) * i128::from(lower_right) - i128::from(det);
+        if product <= 0 {
+            continue;
+        }
+
+        let Ok(product) = u64::try_from(product) else {
+            continue;
+        };
+
+        let mut upper_right = 1u64;
+        while upper_right * upper_right <= product {
+            if product % upper_right != 0 {
+                upper_right += 1;
+                continue;
+            }
+
+            let lower_left = product / upper_right;
+            for (upper_right, lower_left) in [(upper_right, lower_left), (lower_left, upper_right)]
+            {
+                let (Ok(upper_left), Ok(upper_right), Ok(lower_left), Ok(lower_right)) = (
+                    u32::try_from(upper_left),
+                    u32::try_from(upper_right),
+                    u32::try_from(lower_left),
+                    u32::try_from(lower_right),
+                ) else {
+                    continue;
+                };
+
+                let matrix = SqMatrix::new([[upper_left, upper_right], [lower_left, lower_right]]);
+                if excluded.contains(&matrix) {
+                    continue;
+                }
+                controls.push(matrix);
+            }
+            upper_right += 1;
+        }
+    }
+
+    controls.sort_by(|left, right| compare_control_priority(left, right, source, target));
+    controls.dedup();
+    controls.truncate(limit);
+    controls
 }
 
 fn derive_same_diagonal_determinant_controls(
@@ -460,6 +538,35 @@ fn derive_same_diagonal_determinant_controls(
     controls
 }
 
+fn print_profiles(profiles: &[SearchProfile]) {
+    println!("Search profiles:");
+    for profile in profiles {
+        let frontier = match profile.config.frontier_mode {
+            FrontierMode::Bfs => "bfs".to_string(),
+            FrontierMode::Beam => format!("beam({})", profile.config.beam_width.unwrap_or(0)),
+            FrontierMode::BeamBfsHandoff => {
+                format!(
+                    "beam-bfs-handoff({})",
+                    profile.config.beam_width.unwrap_or(0)
+                )
+            }
+        };
+        let move_policy = match profile.config.move_family_policy {
+            MoveFamilyPolicy::Mixed => "mixed",
+            MoveFamilyPolicy::GraphOnly => "graph-only",
+        };
+        println!(
+            "  {}: lag<= {}, dim<= {}, entry<= {}, frontier={}, moves={}",
+            profile.name,
+            profile.config.max_lag,
+            profile.config.max_intermediate_dim,
+            profile.config.max_entry,
+            frontier,
+            move_policy
+        );
+    }
+}
+
 fn compare_control_priority(
     left: &SqMatrix<2>,
     right: &SqMatrix<2>,
@@ -490,7 +597,7 @@ fn l1_distance(left: &SqMatrix<2>, right: &SqMatrix<2>) -> u64 {
 
 fn evaluate_candidate(
     case: &Case2x2,
-    origin: CandidateOrigin,
+    origin_label: String,
     label: String,
     matrix: SqMatrix<2>,
     proposal_rank: Option<usize>,
@@ -509,7 +616,7 @@ fn evaluate_candidate(
     CandidateEvaluation {
         label,
         matrix,
-        origin,
+        origin_label,
         proposal_rank,
         shadow_l1_distance: proposal.map(|proposal| proposal.shadow_l1_distance),
         nearest_sample_t: proposal.map(|proposal| proposal.nearest_sample_t),
@@ -611,18 +718,12 @@ fn print_candidate(candidate: &CandidateEvaluation, source: &SqMatrix<2>, target
     let det = candidate.matrix.det();
     let source_det = source.det();
     let target_det = target.det();
-    let origin = match candidate.origin {
-        CandidateOrigin::TopProposal => "top-ranked proposal",
-        CandidateOrigin::SameDiagonalDeterminantControl => {
-            "same-diagonal determinant-matched control"
-        }
-    };
 
     print!(
         "{}. {:?}  kind={}  det={}  dA={}  dB={}",
         candidate.label,
         candidate.matrix,
-        origin,
+        candidate.origin_label,
         det,
         l1_distance(&candidate.matrix, source),
         l1_distance(&candidate.matrix, target)
@@ -714,6 +815,7 @@ fn print_summary(
             waypoint_verdict(control) != "bounded exact-waypoint success on both segments"
         })
         .count();
+    let controls_with_gain = controls.len().saturating_sub(controls_without_gain);
 
     println!("Summary:");
     println!(
@@ -732,14 +834,25 @@ fn print_summary(
         );
     }
     if !controls.is_empty() {
-        println!(
-            "  determinant-matched local controls exist, but they reduce to endpoint permutations or leave a residual segment that is no easier than the direct pair under the graph-only bound"
-        );
-        println!(
-            "  controls without a bounded exact-waypoint win: {}/{}",
-            controls_without_gain,
-            controls.len()
-        );
+        if controls_with_gain > 0 {
+            println!(
+                "  local invariant-matched controls with a bounded exact-waypoint win: {}/{}",
+                controls_with_gain,
+                controls.len()
+            );
+            println!(
+                "  these wins come from tiny invariant-compatible neighbours; the top-ranked positive-conjugacy proposals still do not match them"
+            );
+        } else {
+            println!(
+                "  determinant-matched local controls exist, but they reduce to endpoint permutations or leave a residual segment that is no easier than the direct pair under the graph-only bound"
+            );
+            println!(
+                "  controls without a bounded exact-waypoint win: {}/{}",
+                controls_without_gain,
+                controls.len()
+            );
+        }
     }
     if profiles.len() > 1 {
         println!(
@@ -839,7 +952,7 @@ mod tests {
         let candidate = CandidateEvaluation {
             label: "P1".to_string(),
             matrix: SqMatrix::new([[1, 5], [1, 1]]),
-            origin: CandidateOrigin::TopProposal,
+            origin_label: "top-ranked proposal".to_string(),
             proposal_rank: Some(1),
             shadow_l1_distance: Some(0.2),
             nearest_sample_t: Some(0.5),
@@ -887,6 +1000,29 @@ mod tests {
         assert_eq!(
             waypoint_verdict(&candidate),
             "rejected as an exact waypoint by endpoint invariants"
+        );
+    }
+
+    #[test]
+    fn test_load_case_supports_riedel_baker_family() {
+        let case = load_case("riedel_baker_k10");
+
+        assert_eq!(case.name, "riedel_baker_k10");
+        assert_eq!(case.source, SqMatrix::new([[10, 2], [1, 10]]));
+        assert_eq!(case.target, SqMatrix::new([[9, 1], [1, 11]]));
+    }
+
+    #[test]
+    fn test_riedel_baker_trace_determinant_controls_are_local_permutations() {
+        let case = load_case("riedel_baker_k3");
+        let controls = derive_same_trace_determinant_controls(&case.source, &case.target, &[], 4);
+
+        assert_eq!(
+            controls,
+            vec![
+                SqMatrix::new([[3, 1], [2, 3]]),
+                SqMatrix::new([[4, 1], [1, 2]])
+            ]
         );
     }
 
