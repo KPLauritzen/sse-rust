@@ -14,6 +14,7 @@ Defaults:
 Example:
   scripts/nudge-workmux-agent.sh optimize-program-md-longrun
   scripts/nudge-workmux-agent.sh optimize-program-md-longrun 6 300 "continue working"
+  scripts/nudge-workmux-agent.sh main 12 600 'Line one.\nLine two.'
 EOF
 }
 
@@ -22,14 +23,28 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+scratch_dir="$repo_root/tmp"
+
 handle="${1:-}"
 iterations="${2:-12}"
 sleep_seconds="${3:-600}"
 shift $(( $# >= 3 ? 3 : $# ))
 if (( $# > 0 )); then
-  message="$*"
+  raw_message="$*"
 else
-  message=$'Continue working.\nIf you think you are done, pick the next highest-leverage optimization step from research/program.md and keep going without waiting for user input.\nPrefer profiling and measurement first so you cut in the right place.'
+  raw_message=$'Continue working.\nIf you think you are done, pick the next highest-leverage optimization step from research/program.md and keep going without waiting for user input.\nPrefer profiling and measurement first so you cut in the right place.'
+fi
+
+# Callers often quote \n literally; decode it so file-backed sends stay multiline.
+message="${raw_message//\\n/$'\n'}"
+
+# Codex panes only submit reliably when the file payload contains a real line break.
+if [[ "$message" != *$'\n'* ]]; then
+  message+=$'\n'
+fi
+if [[ "$message" != *$'\n' ]]; then
+  message+=$'\n'
 fi
 
 if [[ -z "$handle" ]]; then
@@ -50,9 +65,10 @@ for ((i = 1; i <= iterations; i++)); do
     echo "[$timestamp] iteration $i/$iterations: could not determine status for '$handle'" >&2
   elif [[ "$status_line" == "waiting" || "$status_line" == "idle" || "$status_line" == "done" ]]; then
     echo "[$timestamp] iteration $i/$iterations: '$handle' is $status_line, sending: $message"
-    tmpfile="$(mktemp)"
+    mkdir -p "$scratch_dir"
+    tmpfile="$(mktemp "$scratch_dir/workmux-nudge.XXXXXX.txt")"
     trap 'rm -f "$tmpfile"' EXIT
-    printf '%s\n' "$message" > "$tmpfile"
+    printf '%s' "$message" > "$tmpfile"
     workmux send "$handle" -f "$tmpfile"
     rm -f "$tmpfile"
     trap - EXIT
