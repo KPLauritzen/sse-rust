@@ -11,7 +11,16 @@ Concretely:
   families, stage configs, and guide artifacts,
 - mark those cases with `"required": false` so they do not affect required-pass
   correctness gates,
-- keep their scoring neutral (`target_outcome: null`, points typically `0`).
+- keep their scoring neutral (`target_outcome: null`, points typically `0`),
+- optionally add a per-case `measurement` block when warmup/repeat timing is
+  needed:
+
+```json
+"measurement": {
+  "warmup_runs": 1,
+  "repeat_runs": 5
+}
+```
 
 ## Why
 
@@ -29,6 +38,12 @@ Risks if unmanaged:
 
 The `required=false` split keeps correctness gates stable while preserving a
 standard measurement lane in the same harness report.
+
+For repeated measurement cases, `elapsed_ms` in the case summary is the
+representative median repeat sample rather than the total wall time spent
+running warmups/repeats. The detailed measurement block in JSON/pretty output
+includes the repeat samples plus `median` and `p90` so noise can be compared
+without distorting harness fitness tie-break semantics.
 
 ## Boundary
 
@@ -51,13 +66,10 @@ Use plain `cargo bench` / `just bench-search` only for local sanity runs where
 no benchmark delta is being claimed. If a result is used for a keep/revert
 decision or reported as a regression/speedup, compare against a named baseline.
 
-## Follow-Up Plan
+## Guardrails
 
-Deferred implementation work:
-
-1. add optional harness-level repeat/warmup controls for non-required cases,
-2. add summary stats (median/p90) for repeated measurement cases,
-3. optionally add a `measurement` block in case schema to formalize these knobs.
-
-Until then, keep measurement cases bounded and explicit, and rely on saved JSON
-artifacts for trend comparison.
+- `measurement` is only valid on `required=false` cases. Required cases remain
+  single-run correctness gates.
+- Warmup runs are excluded from reported elapsed samples.
+- Repeated measurement is for scenario-level harness probes; keep dedicated
+  bench surfaces for microbench-style statistical work.

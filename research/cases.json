@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "cases": [
     {
       "id": "self_sse",
@@ -685,6 +685,10 @@
       "id": "brix_ruiz_k3_graph_only_beam_probe",
       "description": "Benchmark-style measurement probe: graph-only endpoint search with the beam frontier on the hard k=3 family target.",
       "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 5
+      },
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "config": {
         "max_lag": 10,
@@ -715,6 +719,10 @@
       "id": "brix_ruiz_k3_graph_only_beam_bfs_handoff_probe",
       "description": "Benchmark-style measurement probe: graph-only endpoint search with beam-to-BFS handoff on the hard k=3 family target.",
       "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 5
+      },
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "config": {
         "max_lag": 10,
@@ -745,6 +753,10 @@
       "id": "brix_ruiz_k3_shortcut_normalized_pool_probe",
       "description": "Benchmark-style measurement probe: shortcut search over the normalized k=3 guide pool under a bounded staged configuration.",
       "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 5
+      },
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "guide_artifact_paths": ["research/guide_artifacts/k3_normalized_guide_pool.json"],
       "config": {

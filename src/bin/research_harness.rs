@@ -64,6 +64,8 @@ struct ResearchCase {
     tags: Vec<String>,
     #[serde(default)]
     campaign: Option<CampaignConfig>,
+    #[serde(default)]
+    measurement: Option<MeasurementConfig>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -72,6 +74,14 @@ struct CampaignConfig {
     strategy: String,
     #[serde(default)]
     schedule_order: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+struct MeasurementConfig {
+    #[serde(default)]
+    warmup_runs: usize,
+    #[serde(default = "default_measurement_repeat_runs")]
+    repeat_runs: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -151,6 +161,10 @@ fn default_case_required() -> bool {
     true
 }
 
+fn default_measurement_repeat_runs() -> usize {
+    1
+}
+
 fn default_move_family_policy() -> MoveFamilyPolicy {
     MoveFamilyPolicy::Mixed
 }
@@ -164,7 +178,7 @@ struct OutcomePoints {
     panic: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct WorkerCaseResult {
     id: String,
     actual_outcome: String,
@@ -217,6 +231,7 @@ struct CaseSummary {
     id: String,
     description: String,
     campaign: Option<CampaignConfig>,
+    measurement: Option<MeasurementSummary>,
     endpoint_fixture: Option<String>,
     seeded_guide_ids: Vec<String>,
     guide_artifact_paths: Vec<String>,
@@ -294,6 +309,7 @@ struct ComparisonVariantSummary {
     case_id: String,
     description: String,
     campaign: Option<CampaignConfig>,
+    measurement: Option<MeasurementSummary>,
     stage_combination: String,
     config: JsonSearchConfig,
     actual_outcome: String,
@@ -333,6 +349,7 @@ struct CampaignCaseSummary {
     case_id: String,
     strategy: String,
     schedule_order: usize,
+    measurement: Option<MeasurementSummary>,
     actual_outcome: String,
     current_witness_lag: Option<usize>,
     best_known_witness: Option<BestKnownWitness>,
@@ -357,6 +374,18 @@ struct StrategySummary {
     best_known_witness_lag_total: usize,
     best_known_lag_score: i64,
     best_known_improvements: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct MeasurementSummary {
+    warmup_runs: usize,
+    repeat_runs: usize,
+    elapsed_samples_ms: Vec<u128>,
+    min_elapsed_ms: u128,
+    median_elapsed_ms: u128,
+    p90_elapsed_ms: u128,
+    max_elapsed_ms: u128,
+    outcome_counts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -505,7 +534,38 @@ where
 fn load_corpus(path: &Path) -> Result<CaseCorpus, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    serde_json::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+    let corpus = serde_json::from_str(&raw)
+        .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+    validate_corpus(&corpus)?;
+    Ok(corpus)
+}
+
+fn validate_corpus(corpus: &CaseCorpus) -> Result<(), String> {
+    for case in &corpus.cases {
+        normalized_measurement_config(case)?;
+    }
+    Ok(())
+}
+
+fn normalized_measurement_config(case: &ResearchCase) -> Result<Option<MeasurementConfig>, String> {
+    let Some(measurement) = case.measurement.clone() else {
+        return Ok(None);
+    };
+
+    if case.required {
+        return Err(format!(
+            "case {} cannot define measurement for required=true cases",
+            case.id
+        ));
+    }
+    if measurement.repeat_runs == 0 {
+        return Err(format!(
+            "case {} measurement.repeat_runs must be at least 1",
+            case.id
+        ));
+    }
+
+    Ok(Some(measurement))
 }
 
 fn resolve_case(case: &ResearchCase, cases_path: &Path) -> Result<ResolvedCase, String> {
@@ -1067,6 +1127,93 @@ fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResult {
     }
 }
 
+#[derive(Debug)]
+struct ExecutedCase {
+    representative: WorkerCaseResult,
+    measurement: Option<MeasurementSummary>,
+}
+
+fn execute_case_for_harness<F>(
+    case: &ResearchCase,
+    mut run_attempt: F,
+) -> Result<ExecutedCase, String>
+where
+    F: FnMut() -> Result<WorkerCaseResult, String>,
+{
+    let Some(measurement) = normalized_measurement_config(case)? else {
+        return Ok(ExecutedCase {
+            representative: run_attempt()?,
+            measurement: None,
+        });
+    };
+
+    for _ in 0..measurement.warmup_runs {
+        run_attempt()?;
+    }
+
+    let mut measured_results = Vec::with_capacity(measurement.repeat_runs);
+    for _ in 0..measurement.repeat_runs {
+        measured_results.push(run_attempt()?);
+    }
+
+    let measurement_summary = summarize_measurement_results(&measurement, &measured_results);
+    let representative = measured_results
+        .iter()
+        .find(|result| result.elapsed_ms == measurement_summary.median_elapsed_ms)
+        .cloned()
+        .unwrap_or_else(|| {
+            measured_results
+                .first()
+                .expect("measurement.repeat_runs should guarantee measured results")
+                .clone()
+        });
+
+    Ok(ExecutedCase {
+        representative,
+        measurement: Some(measurement_summary),
+    })
+}
+
+fn summarize_measurement_results(
+    measurement: &MeasurementConfig,
+    results: &[WorkerCaseResult],
+) -> MeasurementSummary {
+    let mut elapsed_samples_ms = results
+        .iter()
+        .map(|result| result.elapsed_ms)
+        .collect::<Vec<_>>();
+    elapsed_samples_ms.sort_unstable();
+
+    let mut outcome_counts = BTreeMap::<String, usize>::new();
+    for result in results {
+        *outcome_counts
+            .entry(result.actual_outcome.clone())
+            .or_default() += 1;
+    }
+
+    MeasurementSummary {
+        warmup_runs: measurement.warmup_runs,
+        repeat_runs: measurement.repeat_runs,
+        min_elapsed_ms: *elapsed_samples_ms
+            .first()
+            .expect("measurement.repeat_runs should guarantee elapsed samples"),
+        median_elapsed_ms: nearest_rank_value(&elapsed_samples_ms, 1, 2),
+        p90_elapsed_ms: nearest_rank_value(&elapsed_samples_ms, 9, 10),
+        max_elapsed_ms: *elapsed_samples_ms
+            .last()
+            .expect("measurement.repeat_runs should guarantee elapsed samples"),
+        elapsed_samples_ms,
+        outcome_counts,
+    }
+}
+
+fn nearest_rank_value(sorted_values: &[u128], numerator: usize, denominator: usize) -> u128 {
+    let rank = (sorted_values.len() * numerator)
+        .div_ceil(denominator)
+        .max(1);
+    sorted_values[rank - 1]
+}
+
 fn normalized_beam_width(
     frontier_mode: FrontierMode,
     beam_width: Option<usize>,
@@ -1312,16 +1459,20 @@ fn run_harness(
 
     for case in scheduled_cases {
         let resolved = resolve_case(case, cases_path)?;
-        let executed = run_case_in_subprocess(&current_exe, cases_path, case)?;
+        let executed = execute_case_for_harness(case, || {
+            run_case_in_subprocess(&current_exe, cases_path, case)
+        })?;
         let passed = case
             .allowed_outcomes
             .iter()
-            .any(|allowed| allowed == &executed.actual_outcome);
+            .any(|allowed| allowed == &executed.representative.actual_outcome);
         let hit_target = case
             .target_outcome
             .as_ref()
-            .is_some_and(|target| target == &executed.actual_outcome);
-        let points = case.points.for_outcome(&executed.actual_outcome);
+            .is_some_and(|target| target == &executed.representative.actual_outcome);
+        let points = case
+            .points
+            .for_outcome(&executed.representative.actual_outcome);
 
         if case.required {
             required_cases += 1;
@@ -1336,8 +1487,8 @@ fn run_harness(
         }
 
         total_points += points;
-        total_elapsed_ms += executed.elapsed_ms;
-        if let Some(lag) = executed.result_model.witness_lag {
+        total_elapsed_ms += executed.representative.elapsed_ms;
+        if let Some(lag) = executed.representative.result_model.witness_lag {
             current_witness_cases += 1;
             current_witness_lag_total += lag;
         }
@@ -1347,8 +1498,8 @@ fn run_harness(
             generalized_cases += 1;
         }
         let telemetry_summary = derive_telemetry_summary(
-            &executed.actual_outcome,
-            &executed.telemetry,
+            &executed.representative.actual_outcome,
+            &executed.representative.telemetry,
             case.config.max_lag,
         );
         if case.tags.iter().any(|tag| tag == "telemetry-focus") {
@@ -1359,11 +1510,12 @@ fn run_harness(
 
         let (best_known_witness, improved_best_known_witness) = merge_best_known_witness(
             executed
+                .representative
                 .result_model
                 .witness_lag
                 .map(|lag| BestKnownWitness {
                     lag,
-                    elapsed_ms: executed.elapsed_ms,
+                    elapsed_ms: executed.representative.elapsed_ms,
                     source: "current-run".to_string(),
                 }),
             reused_results.endpoint_best_witness.get(&endpoint_key),
@@ -1380,26 +1532,27 @@ fn run_harness(
             id: case.id.clone(),
             description: case.description.clone(),
             campaign: case.campaign.clone(),
+            measurement: executed.measurement.clone(),
             endpoint_fixture: resolved.endpoint_fixture,
             seeded_guide_ids: resolved.seeded_guide_ids,
             guide_artifact_paths: resolved.guide_artifact_paths,
             endpoint,
             config: case.config.clone(),
-            actual_outcome: executed.actual_outcome,
+            actual_outcome: executed.representative.actual_outcome,
             allowed_outcomes: case.allowed_outcomes.clone(),
             target_outcome: case.target_outcome.clone(),
             required: case.required,
             passed,
             hit_target,
             points,
-            elapsed_ms: executed.elapsed_ms,
+            elapsed_ms: executed.representative.elapsed_ms,
             timeout_ms: case.timeout_ms,
-            steps: executed.steps,
-            reason: executed.reason,
-            result_model: executed.result_model,
+            steps: executed.representative.steps,
+            reason: executed.representative.reason,
+            result_model: executed.representative.result_model,
             best_known_witness,
             improved_best_known_witness,
-            telemetry: executed.telemetry,
+            telemetry: executed.representative.telemetry,
             telemetry_summary,
             tags: case.tags.clone(),
         });
@@ -1454,6 +1607,7 @@ fn build_comparison_summaries(cases: &[CaseSummary]) -> Vec<ComparisonSummary> {
             case_id: case.id.clone(),
             description: case.description.clone(),
             campaign: case.campaign.clone(),
+            measurement: case.measurement.clone(),
             stage_combination: stage_combination_label(&case.config),
             config: case.config.clone(),
             actual_outcome: case.actual_outcome.clone(),
@@ -1536,6 +1690,7 @@ fn build_campaign_summaries(cases: &[CaseSummary]) -> Vec<CampaignSummary> {
                     case_id: case.id.clone(),
                     strategy: campaign.strategy.clone(),
                     schedule_order: campaign.schedule_order,
+                    measurement: case.measurement.clone(),
                     actual_outcome: case.actual_outcome.clone(),
                     current_witness_lag: case.result_model.witness_lag,
                     best_known_witness: case.best_known_witness.clone(),
@@ -1991,6 +2146,20 @@ impl OutcomePoints {
     }
 }
 
+fn format_measurement_summary(summary: &MeasurementSummary) -> String {
+    format!(
+        "warmups={} repeats={} min={}ms median={}ms p90={}ms max={}ms outcomes={:?} samples={:?}",
+        summary.warmup_runs,
+        summary.repeat_runs,
+        summary.min_elapsed_ms,
+        summary.median_elapsed_ms,
+        summary.p90_elapsed_ms,
+        summary.max_elapsed_ms,
+        summary.outcome_counts,
+        summary.elapsed_samples_ms,
+    )
+}
+
 fn format_pretty_summary(summary: &HarnessSummary) -> String {
     let mut out = String::new();
     out.push_str("Research Harness\n");
@@ -2062,19 +2231,19 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
             for variant in &comparison.variants {
                 out.push_str(&format!(
-                "  {}: strategy={} stage_combo={} frontier={:?} beam_width={:?} move_family_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
-                variant.case_id,
-                variant
-                    .campaign
-                    .as_ref()
-                    .map(|campaign| campaign.strategy.as_str())
-                    .unwrap_or("-"),
-                variant.stage_combination,
-                variant.config.frontier_mode,
-                variant.config.beam_width,
-                variant.config.move_family_policy,
-                variant.config.stage,
-                variant.config.max_lag,
+                    "  {}: strategy={} stage_combo={} frontier={:?} beam_width={:?} move_family_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} outcome={} resolution={:?} witness_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms",
+                    variant.case_id,
+                    variant
+                        .campaign
+                        .as_ref()
+                        .map(|campaign| campaign.strategy.as_str())
+                        .unwrap_or("-"),
+                    variant.stage_combination,
+                    variant.config.frontier_mode,
+                    variant.config.beam_width,
+                    variant.config.move_family_policy,
+                    variant.config.stage,
+                    variant.config.max_lag,
                     variant.config.max_intermediate_dim,
                     variant.config.max_entry,
                     variant.actual_outcome,
@@ -2085,6 +2254,13 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
                     variant.points,
                     variant.elapsed_ms,
                 ));
+                if let Some(measurement) = &variant.measurement {
+                    out.push_str(&format!(
+                        " measurement=[{}]",
+                        format_measurement_summary(measurement)
+                    ));
+                }
+                out.push('\n');
             }
         }
         out.push('\n');
@@ -2104,7 +2280,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
             ));
             for scheduled_case in &campaign.scheduled_cases {
                 out.push_str(&format!(
-                    "  order={} {} strategy={} outcome={} current_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms\n",
+                    "  order={} {} strategy={} outcome={} current_lag={:?} best_known_lag={:?} improved_best={} points={} elapsed={}ms",
                     scheduled_case.schedule_order,
                     scheduled_case.case_id,
                     scheduled_case.strategy,
@@ -2115,6 +2291,13 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
                     scheduled_case.points,
                     scheduled_case.elapsed_ms,
                 ));
+                if let Some(measurement) = &scheduled_case.measurement {
+                    out.push_str(&format!(
+                        " measurement=[{}]",
+                        format_measurement_summary(measurement)
+                    ));
+                }
+                out.push('\n');
             }
         }
         out.push('\n');
@@ -2218,6 +2401,12 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
                 case.improved_best_known_witness,
             ));
         }
+        if let Some(measurement) = &case.measurement {
+            out.push_str(&format!(
+                "  measurement: {}\n",
+                format_measurement_summary(measurement)
+            ));
+        }
         out.push_str(&format!(
             "  telemetry: layers={} expanded={} factorisations={} kept={} pruned_size={} pruned_spectrum={} discovered={} approx_hits={} dead_ends={} seen_collisions={} max_frontier={} visited={}\n",
             case.telemetry.layers.len(),
@@ -2270,6 +2459,7 @@ fn format_pretty_summary(summary: &HarnessSummary) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2307,6 +2497,7 @@ mod tests {
             },
             tags: vec![],
             campaign: None,
+            measurement: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -2356,6 +2547,7 @@ mod tests {
             },
             tags: vec![],
             campaign: None,
+            measurement: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -2408,6 +2600,7 @@ mod tests {
             },
             tags: vec![],
             campaign: None,
+            measurement: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -2494,6 +2687,7 @@ mod tests {
             },
             tags: vec![],
             campaign: None,
+            measurement: None,
         };
 
         let resolved = resolve_case(&case, &temp_dir.join("cases.json"))
@@ -2549,6 +2743,7 @@ mod tests {
             },
             tags: vec![],
             campaign: None,
+            measurement: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -2607,6 +2802,7 @@ mod tests {
             },
             tags: vec![],
             campaign: None,
+            measurement: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -2619,6 +2815,338 @@ mod tests {
             result.telemetry.shortcut_search.initial_working_set_guides,
             2
         );
+    }
+
+    #[test]
+    fn load_corpus_parses_measurement_block_for_non_required_cases() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!(
+            "research-harness-measurement-corpus-{}-{}",
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&temp_dir).expect("temporary measurement corpus directory should exist");
+        let corpus_path = temp_dir.join("cases.json");
+        fs::write(
+            &corpus_path,
+            r#"{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "measurement-probe",
+      "description": "non-required measurement probe",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 5
+      },
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 2,
+        "max_entry": 1
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -100
+      }
+    }
+  ]
+}"#,
+        )
+        .expect("measurement corpus file should be written");
+
+        let corpus = load_corpus(&corpus_path).expect("measurement corpus should load");
+        assert_eq!(corpus.cases.len(), 1);
+        assert_eq!(
+            corpus.cases[0].measurement,
+            Some(MeasurementConfig {
+                warmup_runs: 1,
+                repeat_runs: 5,
+            })
+        );
+
+        fs::remove_dir_all(temp_dir)
+            .expect("temporary measurement corpus directory should go away");
+    }
+
+    #[test]
+    fn load_corpus_rejects_measurement_on_required_case() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!(
+            "research-harness-invalid-measurement-corpus-{}-{}",
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&temp_dir).expect("temporary invalid corpus directory should exist");
+        let corpus_path = temp_dir.join("cases.json");
+        fs::write(
+            &corpus_path,
+            r#"{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "required-measurement",
+      "description": "required case should not accept measurement",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "measurement": {
+        "repeat_runs": 3
+      },
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 2,
+        "max_entry": 1
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 1,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      }
+    }
+  ]
+}"#,
+        )
+        .expect("invalid measurement corpus file should be written");
+
+        let err = load_corpus(&corpus_path).expect_err("required case measurement should fail");
+        assert!(err.contains("cannot define measurement"));
+
+        fs::remove_dir_all(temp_dir).expect("temporary invalid corpus directory should go away");
+    }
+
+    #[test]
+    fn execute_case_for_harness_uses_warmup_repeat_measurement_summary() {
+        let case = ResearchCase {
+            id: "measurement-probe".to_string(),
+            description: "repeat timing probe".to_string(),
+            a: vec![vec![1, 0], vec![0, 1]],
+            b: vec![vec![1, 0], vec![0, 1]],
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
+            required: false,
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 2,
+                max_entry: 1,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
+            },
+            timeout_ms: 100,
+            allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
+            target_outcome: None,
+            points: OutcomePoints {
+                equivalent: 0,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: -100,
+            },
+            tags: vec![],
+            campaign: None,
+            measurement: Some(MeasurementConfig {
+                warmup_runs: 1,
+                repeat_runs: 5,
+            }),
+        };
+        let result = |elapsed_ms: u128, actual_outcome: &str| WorkerCaseResult {
+            id: case.id.clone(),
+            actual_outcome: actual_outcome.to_string(),
+            elapsed_ms,
+            steps: None,
+            reason: None,
+            result_model: ResultModel {
+                solver_path: HarnessSolverPath::TwoByTwo,
+                source_dim: 2,
+                target_dim: 2,
+                resolution_kind: ResultResolutionKind::SearchExhausted,
+                witness_lag: None,
+                path_matrix_count: None,
+                frontier_layers: 0,
+            },
+            telemetry: SearchTelemetry::default(),
+        };
+        let mut results = VecDeque::from(vec![
+            result(90, "unknown"),
+            result(22, "equivalent"),
+            result(11, "unknown"),
+            result(19, "unknown"),
+            result(16, "unknown"),
+            result(27, "timeout"),
+        ]);
+        let mut attempts = 0usize;
+
+        let executed = execute_case_for_harness(&case, || {
+            attempts += 1;
+            Ok(results
+                .pop_front()
+                .expect("measurement test should have a queued worker result"))
+        })
+        .expect("measurement execution should succeed");
+
+        assert_eq!(attempts, 6);
+        assert_eq!(executed.representative.elapsed_ms, 19);
+        assert_eq!(executed.representative.actual_outcome, "unknown");
+
+        let measurement = executed
+            .measurement
+            .expect("measurement summary should exist for repeated case");
+        assert_eq!(measurement.warmup_runs, 1);
+        assert_eq!(measurement.repeat_runs, 5);
+        assert_eq!(measurement.elapsed_samples_ms, vec![11, 16, 19, 22, 27]);
+        assert_eq!(measurement.min_elapsed_ms, 11);
+        assert_eq!(measurement.median_elapsed_ms, 19);
+        assert_eq!(measurement.p90_elapsed_ms, 27);
+        assert_eq!(measurement.max_elapsed_ms, 27);
+        assert_eq!(measurement.outcome_counts.get("equivalent"), Some(&1));
+        assert_eq!(measurement.outcome_counts.get("unknown"), Some(&3));
+        assert_eq!(measurement.outcome_counts.get("timeout"), Some(&1));
+    }
+
+    #[test]
+    fn summary_serialization_and_pretty_output_include_measurement_stats() {
+        let measurement = MeasurementSummary {
+            warmup_runs: 1,
+            repeat_runs: 5,
+            elapsed_samples_ms: vec![11, 16, 19, 22, 27],
+            min_elapsed_ms: 11,
+            median_elapsed_ms: 19,
+            p90_elapsed_ms: 27,
+            max_elapsed_ms: 27,
+            outcome_counts: BTreeMap::from([
+                ("equivalent".to_string(), 1usize),
+                ("timeout".to_string(), 1usize),
+                ("unknown".to_string(), 3usize),
+            ]),
+        };
+        let summary = HarnessSummary {
+            schema_version: 5,
+            cases_path: "tmp/measurement-cases.json".to_string(),
+            reused_history_sources: 0,
+            fitness: FitnessSummary {
+                required_cases: 0,
+                passed_required_cases: 0,
+                non_required_cases: 1,
+                target_hits: 0,
+                total_points: 0,
+                total_elapsed_ms: 19,
+                current_witness_cases: 0,
+                current_witness_lag_total: 0,
+                current_lag_score: 0,
+                best_known_witness_cases: 0,
+                best_known_witness_lag_total: 0,
+                best_known_lag_score: 0,
+                best_known_improvements: 0,
+                generalized_cases: 0,
+                comparison_groups: 0,
+                campaign_groups: 0,
+                strategy_groups: 0,
+                telemetry_focus_cases: 0,
+                telemetry_focus_score: 0,
+                telemetry_focus_reach_score: 0,
+                telemetry_focus_directed_score: 0,
+            },
+            comparisons: vec![],
+            campaigns: vec![],
+            strategies: vec![],
+            cases: vec![CaseSummary {
+                id: "measurement-probe".to_string(),
+                description: "repeat timing probe".to_string(),
+                campaign: None,
+                measurement: Some(measurement.clone()),
+                endpoint_fixture: None,
+                seeded_guide_ids: vec![],
+                guide_artifact_paths: vec![],
+                endpoint: EndpointSummary {
+                    source_dim: 2,
+                    target_dim: 2,
+                    a: vec![vec![1, 0], vec![0, 1]],
+                    b: vec![vec![1, 0], vec![0, 1]],
+                },
+                config: JsonSearchConfig {
+                    max_lag: 1,
+                    max_intermediate_dim: 2,
+                    max_entry: 1,
+                    frontier_mode: FrontierMode::Bfs,
+                    beam_width: None,
+                    move_family_policy: MoveFamilyPolicy::Mixed,
+                    stage: SearchStage::EndpointSearch,
+                    guided_refinement: GuidedRefinementConfig::default(),
+                    shortcut_search: ShortcutSearchConfig::default(),
+                },
+                actual_outcome: "unknown".to_string(),
+                allowed_outcomes: vec!["equivalent".to_string(), "unknown".to_string()],
+                target_outcome: None,
+                required: false,
+                passed: true,
+                hit_target: false,
+                points: 0,
+                elapsed_ms: 19,
+                timeout_ms: 100,
+                steps: None,
+                reason: None,
+                result_model: ResultModel {
+                    solver_path: HarnessSolverPath::TwoByTwo,
+                    source_dim: 2,
+                    target_dim: 2,
+                    resolution_kind: ResultResolutionKind::SearchExhausted,
+                    witness_lag: None,
+                    path_matrix_count: None,
+                    frontier_layers: 0,
+                },
+                best_known_witness: None,
+                improved_best_known_witness: false,
+                telemetry: SearchTelemetry::default(),
+                telemetry_summary: derive_telemetry_summary(
+                    "unknown",
+                    &SearchTelemetry::default(),
+                    1,
+                ),
+                tags: vec!["benchmark-measurement".to_string()],
+            }],
+        };
+
+        let encoded = serde_json::to_value(&summary).expect("summary should serialize");
+        assert_eq!(
+            encoded["cases"][0]["measurement"]["median_elapsed_ms"]
+                .as_u64()
+                .map(u128::from),
+            Some(19)
+        );
+        assert_eq!(
+            encoded["cases"][0]["measurement"]["p90_elapsed_ms"]
+                .as_u64()
+                .map(u128::from),
+            Some(27)
+        );
+
+        let pretty = format_pretty_summary(&summary);
+        assert!(pretty.contains("measurement: warmups=1 repeats=5"));
+        assert!(pretty.contains("median=19ms"));
+        assert!(pretty.contains("p90=27ms"));
     }
 
     #[test]
@@ -2647,6 +3175,7 @@ mod tests {
                     strategy: "mixed".to_string(),
                     schedule_order: 10,
                 }),
+                measurement: None,
                 endpoint_fixture: None,
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
@@ -2696,6 +3225,7 @@ mod tests {
                     strategy: "graph-only".to_string(),
                     schedule_order: 20,
                 }),
+                measurement: None,
                 endpoint_fixture: None,
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
@@ -2969,6 +3499,7 @@ mod tests {
                 strategy: strategy.to_string(),
                 schedule_order: 10,
             }),
+            measurement: None,
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
@@ -3046,6 +3577,7 @@ mod tests {
                 strategy: strategy.to_string(),
                 schedule_order,
             }),
+            measurement: None,
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],

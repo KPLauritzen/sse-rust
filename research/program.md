@@ -74,6 +74,10 @@ Usage rules for measurement cases:
 - set `required` to `false`,
 - keep `target_outcome` as `null`,
 - keep points neutral (typically `0` across normal outcomes),
+- use an optional `measurement` block (`warmup_runs`, `repeat_runs`) only on
+  those non-required cases when repeat timing is needed,
+- treat repeated-case `elapsed_ms` / `total_elapsed_ms` as representative median
+  timing, not accumulated warmup/repeat wall time,
 - use campaign IDs/strategies that clearly label them as measurement probes.
 
 Microbench-level timing of isolated hot loops still belongs in dedicated bench
