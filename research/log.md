@@ -318,3 +318,9 @@
 
 - `loop27-lagcap-timeout-boundary` Re-measured lag-cap and segment-timeout tradeoffs on the rebuilt hard dim5 baseline.
   Kept as evidence only. Lag-cap 4 was strictly worse than lag-cap 5 at attempts 160 (same lag/improvements, higher cost). Segment-timeout 3 improved tractability at fixed progress (attempts160 kept lag7/improved20/promoted3 while reducing work), and raised the feasible boundary to attempts168 (attempts176+ timed out). No lag<7 movement. Details in `research/notes/2026-04-14-k3-shortcut-lagcap-timeout-boundary-rebuild.md`.
+
+- `loop28-timeout3-guide-breadth` Checked guide-count effects at the improved timeout=3 hard-surface boundary.
+  Kept as evidence only. At attempts168, guides=12 was identical to guides=8 (same lag7/improvements/promotions/work), while guides=4 was strictly worse due two-round churn and higher cost. Guide-count tuning appears exhausted here.
+
+- `loop28-k4-beam-envelope` Ran Goal-3-focused k4 endpoint sweeps and mapped a tractable beam envelope.
+  Kept as evidence only. No k4 witness found (`equivalent` absent), but mixed-beam gives a tractable dim5 region up to about lag14 under 120s (`beam64, dim5, entry10` unknown in 101-119s), with a timeout cliff at lag16. Mixed beam-bfs-handoff timed out and did not improve reach in this setup.
