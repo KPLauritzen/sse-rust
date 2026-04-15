@@ -184,6 +184,7 @@ fn main() -> Result<(), String> {
         .filter_map(|seed| {
             seed_by_matrix
                 .get(&seed.matrix)
+                .filter(|local_seed| local_seed.local_lag <= search_config.max_lag)
                 .map(|local_seed| evaluate_seed(local_seed, seed, &case.target, &search_config))
         })
         .collect::<Vec<_>>();
@@ -192,6 +193,7 @@ fn main() -> Result<(), String> {
         .filter_map(|seed| {
             seed_by_matrix
                 .get(&seed.matrix)
+                .filter(|local_seed| local_seed.local_lag <= search_config.max_lag)
                 .map(|local_seed| evaluate_seed(local_seed, seed, &case.target, &search_config))
         })
         .collect::<Vec<_>>();
@@ -365,7 +367,11 @@ fn enumerate_same_dimension_local_seeds(
     max_local_lag: usize,
 ) -> Vec<LocalSeed> {
     if max_local_lag == 0 {
-        return Vec::new();
+        return vec![LocalSeed {
+            matrix: source.clone(),
+            local_lag: 0,
+            path_families: Vec::new(),
+        }];
     }
 
     let mut best_by_matrix = BTreeMap::<SqMatrix<2>, LocalSeed>::new();
