@@ -65,7 +65,7 @@
 ## 2026-04-05 Sidecar Split Work
 
 - `763c18e` Added bounded balanced-elementary witness search as a sidecar.
-  Kept as evidence. It did not solve the hard cases, but it ruled out cheap direct balanced witnesses.
+  Kept as evidence. It did not solve the hard cases, but it ruled out cheap direct balanced-elementary witnesses.
 
 - `1c83ead` Added explicit out-split sidecar probes.
   Kept as evidence. No common one-step `3x3` refinement or simple bridge appeared for the Brix-Ruiz pairs.

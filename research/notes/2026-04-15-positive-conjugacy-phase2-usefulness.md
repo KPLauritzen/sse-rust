@@ -1,8 +1,8 @@
-# Positive-conjugacy phase 2 usefulness check (2026-04-15)
+# Sampled positive-conjugacy phase 2 usefulness check (2026-04-15)
 
 ## Question
 
-Are the top-ranked phase-1 positive-conjugacy proposals actually useful as bounded offline waypoint or seed candidates?
+Are the top-ranked phase-1 sampled positive-conjugacy proposals actually useful as bounded offline waypoint or seed candidates?
 
 ## Setup
 
@@ -12,7 +12,7 @@ Added a standalone research binary:
 
 The evaluator reuses the merged phase-1 code in `src/conjugacy.rs` and does three things:
 
-1. derive the ranked discrete proposals from the positive-conjugacy witness;
+1. derive the ranked discrete proposals from the sampled positive-conjugacy witness;
 2. run bounded endpoint searches on `A -> M` and `M -> B` for each selected proposal;
 3. compare them against a tiny same-diagonal determinant-matched control family.
 
@@ -69,7 +69,7 @@ Endpoint:
 - `A = [[1, 3], [2, 1]]`
 - `B = [[1, 6], [1, 1]]`
 
-Phase-1 witness/proposals:
+Phase-1 sampled positive-conjugacy witness/proposals:
 
 - witness conjugator `G = [[1, 0], [0, 2]]`
 - `6` unique proposal candidates
@@ -182,7 +182,7 @@ Interpretation:
 
 Negative result:
 
-- for `brix_k3`, the top-ranked phase-1 positive-conjugacy proposals are **not** measurably useful as exact offline waypoint candidates;
+- for `brix_k3`, the top-ranked phase-1 sampled positive-conjugacy proposals are **not** measurably useful as exact offline waypoint candidates;
 - they are rejected immediately by endpoint invariants, so they do not even reach bounded graph-only or mixed frontier work;
 - nearby determinant-matched controls do not beat the direct pair either, because they only strip off permutation-equivalent endpoints and leave the hard segment unchanged;
 - the `k=4` spot-check points in the same direction: even the exact integer-shadow proposal dies on a stronger invariant.

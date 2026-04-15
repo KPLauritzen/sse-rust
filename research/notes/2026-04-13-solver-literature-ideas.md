@@ -104,10 +104,11 @@ success on either:
 ### 3. Best-first search that breaks the layer barrier
 
 Paper/result:
-Bilich-Dor-On-Ruiz (2024) prove aligned, balanced, and compatible fixed-lag
-relations coincide on finite essential matrices, and explicitly note that fixed-
-lag aligned algorithms performed better in experiments. Boyle-Kim-Roush (2013)
-also push toward guided constructive paths rather than blind enumeration.
+Bilich-Dor-On-Ruiz (2024) prove aligned concrete shift, balanced concrete
+shift, and compatible concrete shift with a fixed lag coincide on finite
+essential matrices, and explicitly note that fixed-lag aligned algorithms
+performed better in experiments. Boyle-Kim-Roush (2013) also push toward
+guided constructive paths rather than blind enumeration.
 
 Specific actionable idea:
 Replace FIFO frontier order with a best-first order that can act *across*
@@ -117,7 +118,7 @@ layers, using a score such as:
 - fewer same-future / same-past classes,
 - lower entry sum,
 - structured-move-family bonus,
-- closeness to a positive-conjugacy sample.
+- closeness to a sampled positive-conjugacy waypoint.
 
 Why it seems relevant here:
 This addresses a failure mode the log already isolates: concrete-shift-guided
@@ -220,7 +221,8 @@ factorisation.
 Why it seems relevant here:
 The hard family is the one place where the literature gives explicit structure.
 The local sidecar log already says this structure points more toward diagonal
-refactorizations and balanced witnesses than toward blind BFS expansion.
+refactorizations and balanced elementary-equivalence witnesses than toward
+blind BFS expansion.
 
 Expected upside/risk:
 Potentially very high leverage on the benchmark family. The risk is

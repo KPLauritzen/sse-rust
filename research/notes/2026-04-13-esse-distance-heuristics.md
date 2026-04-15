@@ -14,9 +14,9 @@ for the current `sse-rust` search?
 
 The strongest candidates are not generic matrix norms. They are:
 
-1. small-lag aligned or compatible witness deficits,
+1. small-lag aligned or compatible concrete-shift witness deficits,
 2. same-future or same-past quotient mismatch data,
-3. proximity to positive-conjugacy path waypoints,
+3. proximity to sampled positive-conjugacy path waypoints,
 4. restricted move-graph distances such as shear-adjacency style graphs.
 
 For `2x2` endpoint rejection, the arithmetic line from Eilers-Kiming is still
@@ -48,11 +48,12 @@ invariants of the node alone.
   obstruction framework between SE and SSE, and proves that for finite
   essential matrices, compatible shift equivalence coincides with SSE.
 - Bilich-Dor-On-Ruiz (2024) defines matrix-level concrete shifts via path
-  isomorphisms and proves that aligned, balanced, and compatible shift
-  relations with a fixed lag `m` are equivalent to each other.
-- Bilich-Dor-On-Ruiz also states that SSE with lag `m` implies aligned shift
-  equivalence with lag `m`, and notes that fixed-lag aligned algorithms have
-  performed better experimentally than some more complicated variants.
+  isomorphisms and proves that aligned concrete shift, balanced concrete shift,
+  and compatible concrete shift with a fixed lag `m` are equivalent to each
+  other.
+- Bilich-Dor-On-Ruiz also states that SSE with lag `m` implies aligned
+  concrete shift with lag `m`, and notes that fixed-lag aligned algorithms
+  have performed better experimentally than some more complicated variants.
 
 **Repo inference**
 
@@ -115,7 +116,7 @@ invariants of the node alone.
   repo evidence.
 - More promising than plain entrywise distance.
 
-### 3. Positive-conjugacy path proximity
+### 3. Sampled positive-conjugacy path proximity
 
 **Paper-backed**
 
@@ -129,9 +130,9 @@ invariants of the node alone.
 
 **Repo inference**
 
-- If the repo can cheaply sample a positive-conjugacy path or a few conjugacy
-  waypoints, a useful score is distance from a frontier node to that sampled
-  path:
+- If the repo can cheaply sample a positive-conjugacy path or retain a few
+  sampled positive-conjugacy waypoints, a useful score is distance from a
+  frontier node to that sampled path:
   - Frobenius distance,
   - entrywise `L1`,
   - log-entry distance,
@@ -147,7 +148,7 @@ invariants of the node alone.
 
 **Assessment**
 
-- Strong candidate for proposal ordering when conjugacy sampling succeeds.
+- Strong candidate for proposal ordering when sampled positive-conjugacy runs succeed.
 - Weaker than aligned deficits as a theorem-backed lower bound.
 
 ### 4. Restricted move-graph distance
