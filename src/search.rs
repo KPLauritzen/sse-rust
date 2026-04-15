@@ -8,10 +8,9 @@ use crate::aligned::{
     search_concrete_shift_equivalence_with_lag_2x2, ConcreteShiftRelation2x2,
     ConcreteShiftSearchResult2x2,
 };
-use crate::factorisation::visit_factorisations_with_family_for_policy;
 use crate::graph_moves::{
-    enumerate_graph_move_successors, enumerate_graph_proposals, same_future_past_signature,
-    GraphProposal, SameFuturePastSignature, SameFuturePastSignatureGap,
+    enumerate_graph_move_successors, enumerate_graph_proposals, GraphProposal,
+    SameFuturePastSignatureGap,
 };
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
@@ -33,50 +32,18 @@ use crate::types::{
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
-#[derive(Clone)]
-struct FrontierExpansion {
-    order_key: LayerExpansionOrderKey,
-    parent_canon: DynMatrix,
-    next_canon: DynMatrix,
-    next_orig: DynMatrix,
-    step: EsseStep,
-    move_family: &'static str,
-    same_future_past_signature: Option<SameFuturePastSignature>,
-}
+mod frontier;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct LayerExpansionOrderKey {
-    frontier_index: usize,
-    successor_index: usize,
-}
-
-impl LayerExpansionOrderKey {
-    const fn new(frontier_index: usize, successor_index: usize) -> Self {
-        Self {
-            frontier_index,
-            successor_index,
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-struct FrontierExpansionStats {
-    frontier_nodes: usize,
-    factorisation_calls: usize,
-    factorisations_enumerated: usize,
-    candidates_generated: usize,
-    pruned_by_size: usize,
-    pruned_by_spectrum: usize,
-    same_future_past_collisions: usize,
-    move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
-}
-
-#[derive(Clone, Copy, Default)]
-struct FrontierExpansionTiming {
-    expand_compute_nanos: u64,
-    expand_accumulate_nanos: u64,
-    dedup_nanos: u64,
-}
+use self::frontier::{
+    choose_next_layer, expand_frontier_layer, expand_frontier_layer_dyn, FrontierExpansionSettings,
+    FrontierExpansionTiming, FrontierLayerChoiceInputs, FrontierOverlapSignal,
+};
+#[cfg(test)]
+use self::frontier::{
+    deduplicate_expansions, should_expand_forward, FrontierExpansion, LayerExpansionOrderKey,
+};
+#[cfg(test)]
+use crate::graph_moves::same_future_past_signature;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ApproxSignature {
@@ -88,7 +55,6 @@ struct ApproxSignature {
     col_supports: Vec<u8>,
 }
 
-const SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD: usize = 8;
 const TIMED_SEARCH_FRONTIER_CHUNK_SIZE: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -124,12 +90,6 @@ pub struct GraphProposalProbeResult {
     pub attempts: Vec<GraphProposalProbeAttempt>,
 }
 
-#[derive(Clone, Copy, Default)]
-struct FrontierOverlapSignal {
-    frontier_nodes: usize,
-    approximate_other_side_hits: usize,
-}
-
 fn elapsed_nanos(started: Instant) -> u64 {
     let nanos = started.elapsed().as_nanos();
     nanos.min(u128::from(u64::MAX)) as u64
@@ -151,20 +111,11 @@ fn layer_timing(
     }
 }
 
-impl FrontierOverlapSignal {
-    fn from_layer(frontier_nodes: usize, approximate_other_side_hits: usize) -> Self {
-        Self {
-            frontier_nodes,
-            approximate_other_side_hits,
-        }
-    }
-
-    fn is_trained(self) -> bool {
-        self.frontier_nodes >= 8
-    }
-
-    fn overlap_ratio(self) -> f64 {
-        self.approximate_other_side_hits as f64 / self.frontier_nodes.max(1) as f64
+fn frontier_expansion_settings(config: &SearchConfig) -> FrontierExpansionSettings {
+    FrontierExpansionSettings {
+        max_intermediate_dim: config.max_intermediate_dim,
+        max_entry: config.max_entry,
+        move_family_policy: config.move_family_policy,
     }
 }
 
@@ -1732,18 +1683,18 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             .front()
             .and_then(|node| bwd_depths.get(node))
             .copied();
-        let Some((expand_forward, layer_depth)) = choose_next_layer(
-            next_fwd_depth,
-            next_bwd_depth,
-            fwd_frontier.len(),
-            bwd_frontier.len(),
+        let Some((expand_forward, layer_depth)) = choose_next_layer(FrontierLayerChoiceInputs {
+            fwd_depth: next_fwd_depth,
+            bwd_depth: next_bwd_depth,
+            fwd_frontier_len: fwd_frontier.len(),
+            bwd_frontier_len: bwd_frontier.len(),
             fwd_factorisations_per_node,
             bwd_factorisations_per_node,
             fwd_cost_sample_nodes,
             bwd_cost_sample_nodes,
             fwd_overlap_signal,
             bwd_overlap_signal,
-        ) else {
+        }) else {
             break;
         };
         if layer_depth >= config.max_lag {
@@ -1784,9 +1735,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         let (expansions, expansion_stats, expansion_timing, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
-            config.max_intermediate_dim,
-            config.max_entry,
-            config.move_family_policy,
+            frontier_expansion_settings(config),
             deadline,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
@@ -2164,18 +2113,18 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             .front()
             .and_then(|node| bwd_depths.get(node))
             .copied();
-        let Some((expand_forward, layer_depth)) = choose_next_layer(
-            next_fwd_depth,
-            next_bwd_depth,
-            fwd_frontier.len(),
-            bwd_frontier.len(),
+        let Some((expand_forward, layer_depth)) = choose_next_layer(FrontierLayerChoiceInputs {
+            fwd_depth: next_fwd_depth,
+            bwd_depth: next_bwd_depth,
+            fwd_frontier_len: fwd_frontier.len(),
+            bwd_frontier_len: bwd_frontier.len(),
             fwd_factorisations_per_node,
             bwd_factorisations_per_node,
             fwd_cost_sample_nodes,
             bwd_cost_sample_nodes,
             fwd_overlap_signal,
             bwd_overlap_signal,
-        ) else {
+        }) else {
             break;
         };
         if layer_depth >= config.max_lag {
@@ -2213,13 +2162,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
         let layer_started = Instant::now();
-        let (expansions, expansion_stats, expansion_timing) = expand_frontier_layer(
-            &current_frontier,
-            orig,
-            config.max_intermediate_dim,
-            config.max_entry,
-            config.move_family_policy,
-        );
+        let (expansions, expansion_stats, expansion_timing) =
+            expand_frontier_layer(&current_frontier, orig, frontier_expansion_settings(config));
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
         telemetry.factorisations_enumerated += expansion_stats.factorisations_enumerated;
@@ -2657,18 +2601,18 @@ fn choose_next_beam_bfs_handoff_direction(
 
     let next_fwd_depth = fwd_frontier.peek_deferred().map(|entry| entry.depth);
     let next_bwd_depth = bwd_frontier.peek_deferred().map(|entry| entry.depth);
-    choose_next_layer(
-        next_fwd_depth,
-        next_bwd_depth,
-        fwd_frontier.pending_len(),
-        bwd_frontier.pending_len(),
-        1.0,
-        1.0,
-        0,
-        0,
-        FrontierOverlapSignal::default(),
-        FrontierOverlapSignal::default(),
-    )
+    choose_next_layer(FrontierLayerChoiceInputs {
+        fwd_depth: next_fwd_depth,
+        bwd_depth: next_bwd_depth,
+        fwd_frontier_len: fwd_frontier.pending_len(),
+        bwd_frontier_len: bwd_frontier.pending_len(),
+        fwd_factorisations_per_node: 1.0,
+        bwd_factorisations_per_node: 1.0,
+        fwd_cost_sample_nodes: 0,
+        bwd_cost_sample_nodes: 0,
+        fwd_overlap_signal: FrontierOverlapSignal::default(),
+        bwd_overlap_signal: FrontierOverlapSignal::default(),
+    })
     .map(|(expand_forward, _)| expand_forward)
 }
 
@@ -2889,13 +2833,8 @@ fn search_beam_2x2_with_telemetry_and_observer(
             .map(|entry| entry.canonical.clone())
             .collect::<Vec<_>>();
         let layer_started = Instant::now();
-        let (expansions, expansion_stats, expansion_timing) = expand_frontier_layer(
-            &current_frontier,
-            orig,
-            config.max_intermediate_dim,
-            config.max_entry,
-            config.move_family_policy,
-        );
+        let (expansions, expansion_stats, expansion_timing) =
+            expand_frontier_layer(&current_frontier, orig, frontier_expansion_settings(config));
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
         telemetry.factorisations_enumerated += expansion_stats.factorisations_enumerated;
@@ -3309,13 +3248,8 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
             .map(|entry| entry.canonical.clone())
             .collect::<Vec<_>>();
         let layer_started = Instant::now();
-        let (expansions, expansion_stats, expansion_timing) = expand_frontier_layer(
-            &current_frontier,
-            orig,
-            config.max_intermediate_dim,
-            config.max_entry,
-            config.move_family_policy,
-        );
+        let (expansions, expansion_stats, expansion_timing) =
+            expand_frontier_layer(&current_frontier, orig, frontier_expansion_settings(config));
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
         telemetry.factorisations_enumerated += expansion_stats.factorisations_enumerated;
@@ -3750,9 +3684,7 @@ fn search_beam_dyn_with_telemetry(
         let (expansions, expansion_stats, expansion_timing, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
-            config.max_intermediate_dim,
-            config.max_entry,
-            config.move_family_policy,
+            frontier_expansion_settings(config),
             deadline,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
@@ -4166,9 +4098,7 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
         let (expansions, expansion_stats, expansion_timing, timed_out) = expand_frontier_layer_dyn(
             &current_frontier,
             orig,
-            config.max_intermediate_dim,
-            config.max_entry,
-            config.move_family_policy,
+            frontier_expansion_settings(config),
             deadline,
         );
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
@@ -4513,18 +4443,18 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
             .front()
             .and_then(|node| bwd_depths.get(node))
             .copied();
-        let Some((expand_forward, layer_depth)) = choose_next_layer(
-            next_fwd_depth,
-            next_bwd_depth,
-            fwd_frontier.len(),
-            bwd_frontier.len(),
-            fwd_candidates_per_node,
-            bwd_candidates_per_node,
+        let Some((expand_forward, layer_depth)) = choose_next_layer(FrontierLayerChoiceInputs {
+            fwd_depth: next_fwd_depth,
+            bwd_depth: next_bwd_depth,
+            fwd_frontier_len: fwd_frontier.len(),
+            bwd_frontier_len: bwd_frontier.len(),
+            fwd_factorisations_per_node: fwd_candidates_per_node,
+            bwd_factorisations_per_node: bwd_candidates_per_node,
             fwd_cost_sample_nodes,
             bwd_cost_sample_nodes,
-            FrontierOverlapSignal::default(),
-            FrontierOverlapSignal::default(),
-        ) else {
+            fwd_overlap_signal: FrontierOverlapSignal::default(),
+            bwd_overlap_signal: FrontierOverlapSignal::default(),
+        }) else {
             break;
         };
         if layer_depth >= config.max_lag {
@@ -4835,18 +4765,18 @@ fn search_graph_only_dyn_with_telemetry(
             .front()
             .and_then(|node| bwd_depths.get(node))
             .copied();
-        let Some((expand_forward, layer_depth)) = choose_next_layer(
-            next_fwd_depth,
-            next_bwd_depth,
-            fwd_frontier.len(),
-            bwd_frontier.len(),
-            fwd_candidates_per_node,
-            bwd_candidates_per_node,
+        let Some((expand_forward, layer_depth)) = choose_next_layer(FrontierLayerChoiceInputs {
+            fwd_depth: next_fwd_depth,
+            bwd_depth: next_bwd_depth,
+            fwd_frontier_len: fwd_frontier.len(),
+            bwd_frontier_len: bwd_frontier.len(),
+            fwd_factorisations_per_node: fwd_candidates_per_node,
+            bwd_factorisations_per_node: bwd_candidates_per_node,
             fwd_cost_sample_nodes,
             bwd_cost_sample_nodes,
-            FrontierOverlapSignal::default(),
-            FrontierOverlapSignal::default(),
-        ) else {
+            fwd_overlap_signal: FrontierOverlapSignal::default(),
+            bwd_overlap_signal: FrontierOverlapSignal::default(),
+        }) else {
             break;
         };
         if layer_depth >= config.max_lag {
@@ -5058,439 +4988,6 @@ fn frontier_chunk_size(frontier_len: usize, deadline: Option<Instant>) -> usize 
     }
 }
 
-fn expand_frontier_layer_dyn(
-    current_frontier: &[DynMatrix],
-    orig: &HashMap<DynMatrix, DynMatrix>,
-    max_intermediate_dim: usize,
-    max_entry: u32,
-    move_family_policy: MoveFamilyPolicy,
-    deadline: Option<Instant>,
-) -> (
-    Vec<FrontierExpansion>,
-    FrontierExpansionStats,
-    FrontierExpansionTiming,
-    bool,
-) {
-    let expand_node = |frontier_index: usize, current_canon: &DynMatrix| {
-        let current = orig
-            .get(current_canon)
-            .expect("frontier node should have an original matrix");
-        let mut expansions = Vec::new();
-        let mut seen_successors = HashSet::new();
-        let mut stats = FrontierExpansionStats {
-            frontier_nodes: 1,
-            factorisation_calls: 1,
-            ..FrontierExpansionStats::default()
-        };
-
-        let graph_successors = enumerate_graph_move_successors(current, max_intermediate_dim);
-        stats.candidates_generated += graph_successors.candidates;
-        for (family, count) in graph_successors.family_candidates {
-            move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
-                .candidates_generated += count;
-        }
-
-        for successor in graph_successors.nodes {
-            let next = successor.orig_matrix;
-            let next_canon = successor.matrix;
-            if !seen_successors.insert(next_canon.clone()) {
-                continue;
-            }
-            let same_future_past_signature = same_future_past_signature(&next_canon);
-            expansions.push(FrontierExpansion {
-                order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
-                parent_canon: current_canon.clone(),
-                next_canon,
-                next_orig: next,
-                step: successor.step,
-                move_family: successor.family,
-                same_future_past_signature,
-            });
-        }
-
-        if move_family_policy.permits_factorisations() {
-            visit_factorisations_with_family_for_policy(
-                current,
-                max_intermediate_dim,
-                max_entry,
-                move_family_policy,
-                |move_family, u, v| {
-                    move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
-                        .candidates_generated += 1;
-                    stats.factorisations_enumerated += 1;
-                    stats.candidates_generated += 1;
-                    let next = v.mul(&u);
-
-                    if next.rows > max_intermediate_dim {
-                        stats.pruned_by_size += 1;
-                        return;
-                    }
-
-                    let next_canon = next.canonical_perm();
-                    if !seen_successors.insert(next_canon.clone()) {
-                        return;
-                    }
-                    let step = EsseStep { u, v };
-                    expansions.push(FrontierExpansion {
-                        order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
-                        parent_canon: current_canon.clone(),
-                        next_canon,
-                        next_orig: next,
-                        step,
-                        move_family,
-                        same_future_past_signature: None,
-                    });
-                },
-            );
-        }
-
-        (expansions, stats)
-    };
-
-    let mut expansions = Vec::new();
-    let mut stats = FrontierExpansionStats::default();
-    let mut timing = FrontierExpansionTiming::default();
-    let mut timed_out = false;
-    let chunk_size = frontier_chunk_size(current_frontier.len(), deadline);
-    for (chunk_index, chunk) in current_frontier.chunks(chunk_size).enumerate() {
-        if deadline_reached(deadline) {
-            timed_out = true;
-            break;
-        }
-        let frontier_offset = chunk_index * chunk_size;
-
-        let compute_started = Instant::now();
-        #[cfg(not(target_arch = "wasm32"))]
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = chunk
-            .par_iter()
-            .enumerate()
-            .map(|(node_index, current_canon)| {
-                expand_node(frontier_offset + node_index, current_canon)
-            })
-            .collect();
-
-        #[cfg(target_arch = "wasm32")]
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = chunk
-            .iter()
-            .enumerate()
-            .map(|(node_index, current_canon)| {
-                expand_node(frontier_offset + node_index, current_canon)
-            })
-            .collect();
-        timing.expand_compute_nanos += elapsed_nanos(compute_started);
-
-        let accumulate_started = Instant::now();
-        for (node_expansions, node_stats) in per_node {
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        timing.expand_accumulate_nanos += elapsed_nanos(accumulate_started);
-    }
-
-    let dedup_started = Instant::now();
-    let (deduped, same_future_past_collisions) = deduplicate_expansions(
-        expansions,
-        current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-    );
-    timing.dedup_nanos = elapsed_nanos(dedup_started);
-    stats.same_future_past_collisions = same_future_past_collisions;
-    record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-    (deduped, stats, timing, timed_out)
-}
-
-fn deduplicate_expansions(
-    mut expansions: Vec<FrontierExpansion>,
-    enable_same_future_past_representatives: bool,
-) -> (Vec<FrontierExpansion>, usize) {
-    let needs_sort = expansions
-        .windows(2)
-        .any(|window| window[0].order_key > window[1].order_key);
-    #[cfg(not(test))]
-    debug_assert!(
-        !needs_sort,
-        "frontier expansions should already be emitted in nondecreasing order_key order"
-    );
-    if needs_sort {
-        expansions.sort_unstable_by_key(|expansion| expansion.order_key);
-    }
-    let mut seen = HashSet::new();
-    let mut same_future_past_seen = HashSet::new();
-    let mut deduped = Vec::with_capacity(expansions.len());
-    let mut same_future_past_collisions = 0usize;
-    for mut expansion in expansions {
-        if seen.contains(&expansion.next_canon) {
-            continue;
-        }
-        if enable_same_future_past_representatives && expansion.next_canon.rows >= 3 {
-            if let Some(signature) = expansion.same_future_past_signature.take() {
-                if !same_future_past_seen.insert(signature) {
-                    same_future_past_collisions += 1;
-                    continue;
-                }
-            }
-        }
-        seen.insert(expansion.next_canon.clone());
-        deduped.push(expansion);
-    }
-    (deduped, same_future_past_collisions)
-}
-
-fn choose_next_layer(
-    fwd_depth: Option<usize>,
-    bwd_depth: Option<usize>,
-    fwd_frontier_len: usize,
-    bwd_frontier_len: usize,
-    fwd_factorisations_per_node: f64,
-    bwd_factorisations_per_node: f64,
-    fwd_cost_sample_nodes: usize,
-    bwd_cost_sample_nodes: usize,
-    fwd_overlap_signal: FrontierOverlapSignal,
-    bwd_overlap_signal: FrontierOverlapSignal,
-) -> Option<(bool, usize)> {
-    match (fwd_depth, bwd_depth) {
-        (Some(fwd), Some(bwd)) => {
-            if fwd < bwd {
-                Some((true, fwd))
-            } else if bwd < fwd {
-                Some((false, bwd))
-            } else {
-                Some((
-                    should_expand_forward(
-                        fwd_frontier_len,
-                        bwd_frontier_len,
-                        fwd_factorisations_per_node,
-                        bwd_factorisations_per_node,
-                        fwd_cost_sample_nodes,
-                        bwd_cost_sample_nodes,
-                        fwd_overlap_signal,
-                        bwd_overlap_signal,
-                    ),
-                    fwd,
-                ))
-            }
-        }
-        (Some(fwd), None) => Some((true, fwd)),
-        (None, Some(bwd)) => Some((false, bwd)),
-        (None, None) => None,
-    }
-}
-
-fn should_expand_forward(
-    fwd_frontier_len: usize,
-    bwd_frontier_len: usize,
-    fwd_factorisations_per_node: f64,
-    bwd_factorisations_per_node: f64,
-    fwd_cost_sample_nodes: usize,
-    bwd_cost_sample_nodes: usize,
-    fwd_overlap_signal: FrontierOverlapSignal,
-    bwd_overlap_signal: FrontierOverlapSignal,
-) -> bool {
-    if fwd_frontier_len == 0 || bwd_frontier_len == 0 {
-        return fwd_frontier_len <= bwd_frontier_len;
-    }
-    if fwd_cost_sample_nodes < 8 || bwd_cost_sample_nodes < 8 {
-        return fwd_frontier_len <= bwd_frontier_len;
-    }
-
-    if fwd_overlap_signal.is_trained() && bwd_overlap_signal.is_trained() {
-        if fwd_overlap_signal.approximate_other_side_hits > 0
-            && bwd_overlap_signal.approximate_other_side_hits == 0
-        {
-            return true;
-        }
-        if bwd_overlap_signal.approximate_other_side_hits > 0
-            && fwd_overlap_signal.approximate_other_side_hits == 0
-        {
-            return false;
-        }
-
-        let fwd_overlap_ratio = fwd_overlap_signal.overlap_ratio();
-        let bwd_overlap_ratio = bwd_overlap_signal.overlap_ratio();
-        if fwd_overlap_signal.approximate_other_side_hits >= 2
-            && fwd_overlap_ratio > bwd_overlap_ratio * 2.0
-        {
-            return true;
-        }
-        if bwd_overlap_signal.approximate_other_side_hits >= 2
-            && bwd_overlap_ratio > fwd_overlap_ratio * 2.0
-        {
-            return false;
-        }
-    }
-
-    let fwd_estimated_work = fwd_frontier_len as f64 * fwd_factorisations_per_node.max(1.0);
-    let bwd_estimated_work = bwd_frontier_len as f64 * bwd_factorisations_per_node.max(1.0);
-    fwd_estimated_work <= bwd_estimated_work
-}
-
-fn expand_frontier_layer(
-    current_frontier: &[DynMatrix],
-    orig: &HashMap<DynMatrix, DynMatrix>,
-    max_intermediate_dim: usize,
-    max_entry: u32,
-    move_family_policy: MoveFamilyPolicy,
-) -> (
-    Vec<FrontierExpansion>,
-    FrontierExpansionStats,
-    FrontierExpansionTiming,
-) {
-    let expand_node = |frontier_index: usize, current_canon: &DynMatrix| {
-        let current = orig
-            .get(current_canon)
-            .expect("frontier node should have an original matrix");
-        let mut expansions = Vec::new();
-        let mut seen_successors = HashSet::new();
-        let mut stats = FrontierExpansionStats {
-            frontier_nodes: 1,
-            factorisation_calls: 1,
-            ..FrontierExpansionStats::default()
-        };
-
-        let graph_successors = enumerate_graph_move_successors(current, max_intermediate_dim);
-        stats.candidates_generated += graph_successors.candidates;
-        for (family, count) in graph_successors.family_candidates {
-            move_family_telemetry_mut(&mut stats.move_family_telemetry, family)
-                .candidates_generated += count;
-        }
-
-        for successor in graph_successors.nodes {
-            let next = successor.orig_matrix;
-            let next_canon = successor.matrix;
-            if !seen_successors.insert(next_canon.clone()) {
-                continue;
-            }
-            let same_future_past_signature = same_future_past_signature(&next_canon);
-            expansions.push(FrontierExpansion {
-                order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
-                parent_canon: current_canon.clone(),
-                next_canon,
-                next_orig: next,
-                step: successor.step,
-                move_family: successor.family,
-                same_future_past_signature,
-            });
-        }
-
-        if move_family_policy.permits_factorisations() {
-            visit_factorisations_with_family_for_policy(
-                current,
-                max_intermediate_dim,
-                max_entry,
-                move_family_policy,
-                |move_family, u, v| {
-                    move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
-                        .candidates_generated += 1;
-                    stats.factorisations_enumerated += 1;
-                    stats.candidates_generated += 1;
-                    let next = v.mul(&u);
-
-                    // Size bound: don't explore matrices larger than max_intermediate_dim.
-                    if next.rows > max_intermediate_dim {
-                        stats.pruned_by_size += 1;
-                        return;
-                    }
-
-                    let next_canon = next.canonical_perm();
-                    if !seen_successors.insert(next_canon.clone()) {
-                        return;
-                    }
-                    let step = EsseStep { u, v };
-                    expansions.push(FrontierExpansion {
-                        order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
-                        parent_canon: current_canon.clone(),
-                        next_canon,
-                        next_orig: next,
-                        step,
-                        move_family,
-                        same_future_past_signature: None,
-                    });
-                },
-            );
-        }
-
-        (expansions, stats)
-    };
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let compute_started = Instant::now();
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = current_frontier
-            .par_iter()
-            .enumerate()
-            .map(|(frontier_index, current_canon)| expand_node(frontier_index, current_canon))
-            .collect();
-        let expand_compute_nanos = elapsed_nanos(compute_started);
-        let mut expansions = Vec::new();
-        let mut stats = FrontierExpansionStats::default();
-        let accumulate_started = Instant::now();
-        for (node_expansions, node_stats) in per_node {
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        let expand_accumulate_nanos = elapsed_nanos(accumulate_started);
-        let dedup_started = Instant::now();
-        let (deduped, same_future_past_collisions) = deduplicate_expansions(
-            expansions,
-            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-        );
-        let dedup_nanos = elapsed_nanos(dedup_started);
-        stats.same_future_past_collisions = same_future_past_collisions;
-        record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (
-            deduped,
-            stats,
-            FrontierExpansionTiming {
-                expand_compute_nanos,
-                expand_accumulate_nanos,
-                dedup_nanos,
-            },
-        )
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut expansions = Vec::new();
-        let mut stats = FrontierExpansionStats::default();
-        let compute_started = Instant::now();
-        for (frontier_index, current_canon) in current_frontier.iter().enumerate() {
-            let (node_expansions, node_stats) = expand_node(frontier_index, current_canon);
-            expansions.extend(node_expansions);
-            accumulate_frontier_stats(&mut stats, &node_stats);
-        }
-        let expand_compute_nanos = elapsed_nanos(compute_started);
-        let dedup_started = Instant::now();
-        let (deduped, same_future_past_collisions) = deduplicate_expansions(
-            expansions,
-            current_frontier.len() >= SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD,
-        );
-        let dedup_nanos = elapsed_nanos(dedup_started);
-        stats.same_future_past_collisions = same_future_past_collisions;
-        record_candidates_after_pruning_by_family(&deduped, &mut stats.move_family_telemetry);
-        (
-            deduped,
-            stats,
-            FrontierExpansionTiming {
-                expand_compute_nanos,
-                expand_accumulate_nanos: 0,
-                dedup_nanos,
-            },
-        )
-    }
-}
-
-fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &FrontierExpansionStats) {
-    total.frontier_nodes += delta.frontier_nodes;
-    total.factorisation_calls += delta.factorisation_calls;
-    total.factorisations_enumerated += delta.factorisations_enumerated;
-    total.candidates_generated += delta.candidates_generated;
-    total.pruned_by_size += delta.pruned_by_size;
-    total.pruned_by_spectrum += delta.pruned_by_spectrum;
-    accumulate_move_family_telemetry(
-        &mut total.move_family_telemetry,
-        &delta.move_family_telemetry,
-    );
-}
-
 fn approx_signature(m: &DynMatrix) -> ApproxSignature {
     let mut row_sums = vec![0u32; m.rows];
     let mut col_sums = vec![0u32; m.cols];
@@ -5544,15 +5041,6 @@ fn accumulate_move_family_telemetry(
         family_total.discovered_nodes += family_delta.discovered_nodes;
         family_total.exact_meets += family_delta.exact_meets;
         family_total.approximate_other_side_hits += family_delta.approximate_other_side_hits;
-    }
-}
-
-fn record_candidates_after_pruning_by_family(
-    expansions: &[FrontierExpansion],
-    telemetry: &mut BTreeMap<String, SearchMoveFamilyTelemetry>,
-) {
-    for expansion in expansions {
-        move_family_telemetry_mut(telemetry, expansion.move_family).candidates_after_pruning += 1;
     }
 }
 
@@ -7290,8 +6778,15 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (expansions, stats, _timing) =
-            expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::Mixed);
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[a_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 2,
+                max_entry: 10,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+            },
+        );
 
         assert!(!expansions.is_empty());
         assert!(stats.factorisations_enumerated > expansions.len());
@@ -7305,8 +6800,15 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (_expansions, stats, _timing) =
-            expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::GraphOnly);
+        let (_expansions, stats, _timing) = expand_frontier_layer(
+            &[a_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 2,
+                max_entry: 10,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+            },
+        );
 
         assert_eq!(stats.factorisations_enumerated, 0);
     }
@@ -7323,9 +6825,11 @@ mod tests {
         let (_expansions, stats, _timing) = expand_frontier_layer(
             &[current_canon],
             &orig,
-            3,
-            6,
-            MoveFamilyPolicy::GraphPlusStructured,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
         );
 
         assert!(stats.factorisations_enumerated > 0);
@@ -7348,16 +6852,20 @@ mod tests {
         let (single_expansions, _, _) = expand_frontier_layer(
             std::slice::from_ref(&a_canon),
             &orig,
-            2,
-            10,
-            MoveFamilyPolicy::Mixed,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 2,
+                max_entry: 10,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+            },
         );
         let (duplicate_frontier_expansions, _, _) = expand_frontier_layer(
             &[a_canon.clone(), a_canon],
             &orig,
-            2,
-            10,
-            MoveFamilyPolicy::Mixed,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 2,
+                max_entry: 10,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+            },
         );
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
@@ -7374,8 +6882,15 @@ mod tests {
         let mut orig = HashMap::new();
         orig.insert(a_canon.clone(), a_dyn);
 
-        let (expansions, _, _) =
-            expand_frontier_layer(&[a_canon], &orig, 3, 6, MoveFamilyPolicy::Mixed);
+        let (expansions, _, _) = expand_frontier_layer(
+            &[a_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+            },
+        );
 
         assert!(expansions.len() > 1);
         assert!(expansions
@@ -7406,54 +6921,62 @@ mod tests {
 
     #[test]
     fn test_should_expand_forward_prefers_lower_estimated_work() {
-        assert!(!should_expand_forward(
-            1002,
-            1137,
-            151644.0 / 323.0,
-            103760.0 / 662.0,
-            323,
-            662,
-            FrontierOverlapSignal::default(),
-            FrontierOverlapSignal::default(),
-        ));
+        assert!(!should_expand_forward(FrontierLayerChoiceInputs {
+            fwd_depth: Some(0),
+            bwd_depth: Some(0),
+            fwd_frontier_len: 1002,
+            bwd_frontier_len: 1137,
+            fwd_factorisations_per_node: 151644.0 / 323.0,
+            bwd_factorisations_per_node: 103760.0 / 662.0,
+            fwd_cost_sample_nodes: 323,
+            bwd_cost_sample_nodes: 662,
+            fwd_overlap_signal: FrontierOverlapSignal::default(),
+            bwd_overlap_signal: FrontierOverlapSignal::default(),
+        }));
     }
 
     #[test]
     fn test_should_expand_forward_falls_back_to_smaller_frontier_when_untrained() {
-        assert!(should_expand_forward(
-            3,
-            5,
-            100.0,
-            1.0,
-            0,
-            0,
-            FrontierOverlapSignal::default(),
-            FrontierOverlapSignal::default(),
-        ));
-        assert!(!should_expand_forward(
-            7,
-            2,
-            1.0,
-            100.0,
-            0,
-            0,
-            FrontierOverlapSignal::default(),
-            FrontierOverlapSignal::default(),
-        ));
+        assert!(should_expand_forward(FrontierLayerChoiceInputs {
+            fwd_depth: Some(0),
+            bwd_depth: Some(0),
+            fwd_frontier_len: 3,
+            bwd_frontier_len: 5,
+            fwd_factorisations_per_node: 100.0,
+            bwd_factorisations_per_node: 1.0,
+            fwd_cost_sample_nodes: 0,
+            bwd_cost_sample_nodes: 0,
+            fwd_overlap_signal: FrontierOverlapSignal::default(),
+            bwd_overlap_signal: FrontierOverlapSignal::default(),
+        }));
+        assert!(!should_expand_forward(FrontierLayerChoiceInputs {
+            fwd_depth: Some(0),
+            bwd_depth: Some(0),
+            fwd_frontier_len: 7,
+            bwd_frontier_len: 2,
+            fwd_factorisations_per_node: 1.0,
+            bwd_factorisations_per_node: 100.0,
+            fwd_cost_sample_nodes: 0,
+            bwd_cost_sample_nodes: 0,
+            fwd_overlap_signal: FrontierOverlapSignal::default(),
+            bwd_overlap_signal: FrontierOverlapSignal::default(),
+        }));
     }
 
     #[test]
     fn test_should_expand_forward_prefers_recent_overlap_signal() {
-        assert!(should_expand_forward(
-            1500,
-            900,
-            200.0,
-            10.0,
-            100,
-            100,
-            FrontierOverlapSignal::from_layer(1500, 4),
-            FrontierOverlapSignal::from_layer(900, 0),
-        ));
+        assert!(should_expand_forward(FrontierLayerChoiceInputs {
+            fwd_depth: Some(0),
+            bwd_depth: Some(0),
+            fwd_frontier_len: 1500,
+            bwd_frontier_len: 900,
+            fwd_factorisations_per_node: 200.0,
+            bwd_factorisations_per_node: 10.0,
+            fwd_cost_sample_nodes: 100,
+            bwd_cost_sample_nodes: 100,
+            fwd_overlap_signal: FrontierOverlapSignal::from_layer(1500, 4),
+            bwd_overlap_signal: FrontierOverlapSignal::from_layer(900, 0),
+        }));
     }
 
     #[test]
