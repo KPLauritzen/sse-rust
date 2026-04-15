@@ -2441,11 +2441,388 @@ fn profile_sq3_from_row0(
     }
 }
 
-/// Unified factorisation dispatcher for any square matrix (given as DynMatrix).
-/// Enumerates factorisations A = UV for intermediate dimensions m = 2, ..., max_intermediate_dim.
-/// For k×k input:
-///   - k=2, m=2: square factorisations
-///   - k=2, m=3: rectangular 2×3 × 3×2
+// --- Family selection seam ---
+
+type FactorisationEnumerator = fn(&DynMatrix, u32, &mut dyn FnMut(DynMatrix, DynMatrix));
+type FactorisationFamilyEnabled = fn(usize, usize, MoveFamilyPolicy) -> bool;
+
+#[derive(Clone, Copy)]
+struct FactorisationFamilyDescriptor {
+    label: &'static str,
+    enabled: FactorisationFamilyEnabled,
+    enumerate: FactorisationEnumerator,
+}
+
+impl FactorisationFamilyDescriptor {
+    const fn new(
+        label: &'static str,
+        enabled: FactorisationFamilyEnabled,
+        enumerate: FactorisationEnumerator,
+    ) -> Self {
+        Self {
+            label,
+            enabled,
+            enumerate,
+        }
+    }
+
+    fn is_enabled(
+        &self,
+        input_dim: usize,
+        max_intermediate_dim: usize,
+        move_family_policy: MoveFamilyPolicy,
+    ) -> bool {
+        (self.enabled)(input_dim, max_intermediate_dim, move_family_policy)
+    }
+
+    fn visit<F>(&self, a: &DynMatrix, max_entry: u32, visit: &mut F)
+    where
+        F: FnMut(&'static str, DynMatrix, DynMatrix),
+    {
+        let label = self.label;
+        (self.enumerate)(a, max_entry, &mut |u, v| visit(label, u, v));
+    }
+}
+
+const TWO_BY_TWO_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
+    FactorisationFamilyDescriptor::new(
+        "square_factorisation_2x2",
+        enabled_square_factorisation_2x2,
+        enumerate_square_factorisation_2x2_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "rectangular_factorisation_2x3",
+        enabled_rectangular_factorisation_2x3,
+        enumerate_rectangular_factorisation_2x3_family,
+    ),
+];
+
+const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
+    FactorisationFamilyDescriptor::new(
+        "rectangular_factorisation_3x3_to_2",
+        enabled_rectangular_factorisation_3x3_to_2,
+        enumerate_rectangular_factorisation_3x3_to_2_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "binary_sparse_rectangular_factorisation_3x3_to_4",
+        enabled_binary_sparse_factorisation_3x3_to_4,
+        enumerate_binary_sparse_factorisation_3x3_to_4_family,
+    ),
+];
+
+const THREE_BY_THREE_SAME_DIMENSION_FAMILIES: [FactorisationFamilyDescriptor; 5] = [
+    FactorisationFamilyDescriptor::new(
+        "square_factorisation_3x3",
+        enabled_square_factorisation_3x3,
+        enumerate_square_factorisation_3x3_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "elementary_conjugation_3x3",
+        enabled_three_by_three_same_dimension_family,
+        enumerate_elementary_conjugation_3x3_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "opposite_shear_conjugation_3x3",
+        enabled_three_by_three_same_dimension_family,
+        enumerate_opposite_shear_conjugation_3x3_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "parallel_shear_conjugation_3x3",
+        enabled_three_by_three_same_dimension_family,
+        enumerate_parallel_shear_conjugation_3x3_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "convergent_shear_conjugation_3x3",
+        enabled_three_by_three_same_dimension_family,
+        enumerate_convergent_shear_conjugation_3x3_family,
+    ),
+];
+
+const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
+    FactorisationFamilyDescriptor::new(
+        "binary_sparse_rectangular_factorisation_4x3_to_3",
+        enabled_binary_sparse_factorisation_4x4_to_3,
+        enumerate_binary_sparse_factorisation_4x4_to_3_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "binary_sparse_rectangular_factorisation_4x4_to_5",
+        enabled_binary_sparse_factorisation_4x4_to_5,
+        enumerate_binary_sparse_factorisation_4x4_to_5_family,
+    ),
+];
+
+const FIVE_BY_FIVE_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 1] =
+    [FactorisationFamilyDescriptor::new(
+        "binary_sparse_rectangular_factorisation_5x5_to_4",
+        enabled_binary_sparse_factorisation_5x5_to_4,
+        enumerate_binary_sparse_factorisation_5x5_to_4_family,
+    )];
+
+const GENERIC_SAME_DIMENSION_CONJUGATION_FAMILIES: [FactorisationFamilyDescriptor; 1] =
+    [FactorisationFamilyDescriptor::new(
+        "elementary_conjugation",
+        enabled_generic_same_dimension_conjugation,
+        enumerate_generic_same_dimension_conjugation_family,
+    )];
+
+fn enabled_square_factorisation_2x2(
+    input_dim: usize,
+    _max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 2
+}
+
+fn enabled_rectangular_factorisation_2x3(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 2 && max_intermediate_dim >= 3
+}
+
+fn enabled_rectangular_factorisation_3x3_to_2(
+    input_dim: usize,
+    _max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3
+}
+
+fn enabled_binary_sparse_factorisation_3x3_to_4(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3 && max_intermediate_dim >= 4
+}
+
+fn enabled_square_factorisation_3x3(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3
+        && max_intermediate_dim >= 3
+        && move_family_policy.includes_square_factorisation_3x3()
+}
+
+fn enabled_three_by_three_same_dimension_family(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3 && max_intermediate_dim >= 3
+}
+
+fn enabled_binary_sparse_factorisation_4x4_to_3(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 4 && max_intermediate_dim >= 4
+}
+
+fn enabled_binary_sparse_factorisation_4x4_to_5(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 4 && max_intermediate_dim >= 5
+}
+
+fn enabled_binary_sparse_factorisation_5x5_to_4(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 5 && max_intermediate_dim >= 5
+}
+
+fn enabled_generic_same_dimension_conjugation(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim >= 4 && max_intermediate_dim >= input_dim
+}
+
+fn enumerate_square_factorisation_2x2_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    let sq: SqMatrix<2> = a
+        .to_sq()
+        .expect("2x2 family descriptor should only be used for 2x2 inputs");
+    visit_square_factorisations_2x2(&sq, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_rectangular_factorisation_2x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    let sq: SqMatrix<2> = a
+        .to_sq()
+        .expect("2x3 family descriptor should only be used for 2x2 inputs");
+    visit_rect_factorisations_2x3(&sq, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_rectangular_factorisation_3x3_to_2_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_factorisations_3x3_to_2(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_binary_sparse_factorisation_3x3_to_4_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_binary_sparse_factorisations_3x3_to_4(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_square_factorisation_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    let sq3_cap = max_entry.min(4);
+    visit_square_factorisations_3x3(a, sq3_cap, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_elementary_conjugation_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_elementary_conjugations_3x3(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_opposite_shear_conjugation_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_opposite_shear_conjugations_3x3(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_parallel_shear_conjugation_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_parallel_shear_conjugations_3x3(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_convergent_shear_conjugation_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_convergent_shear_conjugations_3x3(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_binary_sparse_factorisation_4x4_to_3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_binary_sparse_factorisations_4x4_to_3(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_binary_sparse_factorisation_4x4_to_5_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_binary_sparse_factorisations_4x4_to_5(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_binary_sparse_factorisation_5x5_to_4_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_binary_sparse_factorisations_5x5_to_4(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_generic_same_dimension_conjugation_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_elementary_conjugations_generic(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn visit_enabled_factorisation_family_descriptors<F>(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    move_family_policy: MoveFamilyPolicy,
+    mut visit: F,
+) where
+    F: FnMut(&FactorisationFamilyDescriptor),
+{
+    let mut visit_group = |families: &[FactorisationFamilyDescriptor]| {
+        for family in families {
+            if family.is_enabled(input_dim, max_intermediate_dim, move_family_policy) {
+                visit(family);
+            }
+        }
+    };
+
+    match input_dim {
+        2 => visit_group(&TWO_BY_TWO_FACTORISATION_FAMILIES),
+        3 => {
+            visit_group(&THREE_BY_THREE_RECTANGULAR_FAMILIES);
+            visit_group(&THREE_BY_THREE_SAME_DIMENSION_FAMILIES);
+        }
+        4 => visit_group(&FOUR_BY_FOUR_FACTORISATION_FAMILIES),
+        5 => visit_group(&FIVE_BY_FIVE_FACTORISATION_FAMILIES),
+        _ => {}
+    }
+
+    if input_dim >= 4 {
+        visit_group(&GENERIC_SAME_DIMENSION_CONJUGATION_FAMILIES);
+    }
+}
+
+fn visit_selected_factorisation_families<F>(
+    a: &DynMatrix,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    move_family_policy: MoveFamilyPolicy,
+    visit: &mut F,
+) where
+    F: FnMut(&'static str, DynMatrix, DynMatrix),
+{
+    visit_enabled_factorisation_family_descriptors(
+        a.rows,
+        max_intermediate_dim,
+        move_family_policy,
+        |family| family.visit(a, max_entry, visit),
+    );
+}
+
+#[cfg(test)]
+fn selected_factorisation_family_labels(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    move_family_policy: MoveFamilyPolicy,
+) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    visit_enabled_factorisation_family_descriptors(
+        input_dim,
+        max_intermediate_dim,
+        move_family_policy,
+        |family| labels.push(family.label),
+    );
+    labels
+}
+
 // --- Dimension-generic elementary conjugations ---
 
 /// Dimension-generic elementary conjugations: P = I + k·e_i·e_j^T.
@@ -2627,6 +3004,11 @@ pub fn visit_all_factorisations_with_family<F>(
     );
 }
 
+/// Unified factorisation dispatcher for square matrices.
+///
+/// Family selection is described by dimension-grouped descriptors so policy
+/// gates, stable labels, and enumeration entrypoints stay centralized instead
+/// of being repeated in one large `if k == ...` block.
 pub fn visit_factorisations_with_family_for_policy<F>(
     a: &DynMatrix,
     max_intermediate_dim: usize,
@@ -2641,81 +3023,13 @@ pub fn visit_factorisations_with_family_for_policy<F>(
     }
 
     assert!(a.is_square());
-    let k = a.rows;
-
-    if k == 2 {
-        // Square factorisations (m=2).
-        let sq: SqMatrix<2> = a.to_sq().unwrap();
-        visit_square_factorisations_2x2(&sq, max_entry, &mut |u, v| {
-            visit("square_factorisation_2x2", u, v);
-        });
-
-        // Rectangular factorisations for m=3..=max_intermediate_dim.
-        if max_intermediate_dim >= 3 {
-            visit_rect_factorisations_2x3(&sq, max_entry, &mut |u, v| {
-                visit("rectangular_factorisation_2x3", u, v);
-            });
-        }
-    } else if k == 3 {
-        // Rectangular 3×2 × 2×3 factorisations (the return trip to 2×2).
-        visit_factorisations_3x3_to_2(a, max_entry, &mut |u, v| {
-            visit("rectangular_factorisation_3x3_to_2", u, v);
-        });
-        if max_intermediate_dim >= 4 {
-            visit_binary_sparse_factorisations_3x3_to_4(a, max_entry, &mut |u, v| {
-                visit("binary_sparse_rectangular_factorisation_3x3_to_4", u, v);
-            });
-        }
-        // Square 3×3 factorisations (allows chaining through 3×3 space).
-        // Factor entry bound is capped to keep enumeration tractable: the cost
-        // is O((cap+1)^6) per node, so cap=4 gives ~15K iterations per node.
-        if max_intermediate_dim >= 3 {
-            if move_family_policy.includes_square_factorisation_3x3() {
-                let sq3_cap = max_entry.min(4);
-                visit_square_factorisations_3x3(a, sq3_cap, &mut |u, v| {
-                    visit("square_factorisation_3x3", u, v);
-                });
-            }
-            // Elementary conjugation moves C = P·(P⁻¹C), where P = I ± k·eᵢeⱼᵀ.
-            // These are O(1) per move and reach 3×3 nodes that the capped
-            // square enumeration misses (factor entries > cap).
-            visit_elementary_conjugations_3x3(a, max_entry, &mut |u, v| {
-                visit("elementary_conjugation_3x3", u, v);
-            });
-            visit_opposite_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
-                visit("opposite_shear_conjugation_3x3", u, v);
-            });
-            visit_parallel_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
-                visit("parallel_shear_conjugation_3x3", u, v);
-            });
-            visit_convergent_shear_conjugations_3x3(a, max_entry, &mut |u, v| {
-                visit("convergent_shear_conjugation_3x3", u, v);
-            });
-        }
-    } else if k >= 4 {
-        if k == 4 && max_intermediate_dim >= 4 {
-            visit_binary_sparse_factorisations_4x4_to_3(a, max_entry, &mut |u, v| {
-                visit("binary_sparse_rectangular_factorisation_4x3_to_3", u, v);
-            });
-        }
-        if k == 4 && max_intermediate_dim >= 5 {
-            visit_binary_sparse_factorisations_4x4_to_5(a, max_entry, &mut |u, v| {
-                visit("binary_sparse_rectangular_factorisation_4x4_to_5", u, v);
-            });
-        }
-        if k == 5 && max_intermediate_dim >= 5 {
-            visit_binary_sparse_factorisations_5x5_to_4(a, max_entry, &mut |u, v| {
-                visit("binary_sparse_rectangular_factorisation_5x5_to_4", u, v);
-            });
-        }
-        // For dimensions ≥ 4: elementary conjugations (same-dimension moves).
-        // These use the dimension-generic implementation.
-        if max_intermediate_dim >= k {
-            visit_elementary_conjugations_generic(a, max_entry, &mut |u, v| {
-                visit("elementary_conjugation", u, v);
-            });
-        }
-    }
+    visit_selected_factorisation_families(
+        a,
+        max_intermediate_dim,
+        max_entry,
+        move_family_policy,
+        &mut visit,
+    );
 }
 
 fn gcd(a: u64, b: u64) -> u64 {
@@ -2959,6 +3273,49 @@ mod tests {
 
         assert!(families.contains("opposite_shear_conjugation_3x3"));
         assert!(!families.contains("square_factorisation_3x3"));
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_mixed_3x3_follow_group_order() {
+        assert_eq!(
+            selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::Mixed),
+            vec![
+                "rectangular_factorisation_3x3_to_2",
+                "binary_sparse_rectangular_factorisation_3x3_to_4",
+                "square_factorisation_3x3",
+                "elementary_conjugation_3x3",
+                "opposite_shear_conjugation_3x3",
+                "parallel_shear_conjugation_3x3",
+                "convergent_shear_conjugation_3x3",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_graph_plus_structured_3x3_skip_square_family() {
+        assert_eq!(
+            selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::GraphPlusStructured),
+            vec![
+                "rectangular_factorisation_3x3_to_2",
+                "binary_sparse_rectangular_factorisation_3x3_to_4",
+                "elementary_conjugation_3x3",
+                "opposite_shear_conjugation_3x3",
+                "parallel_shear_conjugation_3x3",
+                "convergent_shear_conjugation_3x3",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_4x4_keep_specific_before_generic() {
+        assert_eq!(
+            selected_factorisation_family_labels(4, 5, MoveFamilyPolicy::Mixed),
+            vec![
+                "binary_sparse_rectangular_factorisation_4x3_to_3",
+                "binary_sparse_rectangular_factorisation_4x4_to_5",
+                "elementary_conjugation",
+            ]
+        );
     }
 
     #[test]
