@@ -255,6 +255,30 @@ current **concrete-shift surface**.
 
 **Source:** Brix, Dor-On, Hazrat & Ruiz (2025, Definitions 5.1 and 5.2).
 
+### Fiberwise bijection
+
+Repo term for the implementation-level form of a path isomorphism.
+
+A **fiberwise bijection** is a bijection between two edge/path sets that
+preserves the source vertex and target vertex of each element. Equivalently,
+it acts separately on each **fiber** consisting of all edges or paths with the
+same source/target pair.
+
+In the repo's current `2x2` concrete-shift code, a fiberwise bijection is
+stored as one permutation per source/target fiber. The four fibers are the
+vertex pairs `(0,0)`, `(0,1)`, `(1,0)`, and `(1,1)`.
+
+This is the data carried by `sigma_g`, `sigma_h`, `omega_e`, and `omega_f` in
+`src/concrete_shift.rs`.
+
+Paper-facing note: Bilich, Dor-On & Ruiz (2024) directly define a **path
+isomorphism** as a bijection preserving source and range. The repo uses
+**fiberwise bijection** for the same structure when it is encoded fiber by
+fiber.
+
+**Source:** Bilich, Dor-On & Ruiz (2024, Definition 1.2 on path isomorphisms),
+specialized to the repo's source/target-fiber encoding.
+
 ### Concrete shift (aligned concrete shift, balanced concrete shift, compatible concrete shift)
 
 A *concrete shift* between matrices A and B with lag m is a tuple
