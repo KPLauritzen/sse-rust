@@ -1,4 +1,4 @@
-# Positive-conjugacy phase 2 follow-up: Riedel/Baker exact-waypoint usefulness (2026-04-15)
+# Sampled positive-conjugacy phase 2 follow-up: Riedel/Baker exact-waypoint usefulness (2026-04-15)
 
 ## Question
 
@@ -74,7 +74,7 @@ timeout -k 10s 30s target/debug/evaluate_positive_conjugacy_usefulness -- \
 
 Shared witness fact:
 
-- all three cases produced a bounded positive-conjugacy witness;
+- all three cases produced a bounded sampled positive-conjugacy witness;
 - the witness was the same unipotent shear in every run:
   `G = [[1, 1], [0, 1]]`;
 - each run produced `6` unique rounded-sample proposals.
@@ -118,7 +118,7 @@ Control outcome:
 Reading:
 
 - even on an easy family member where exact offline waypoints exist nearby, the
-  rounded positive-conjugacy proposals miss them completely.
+  rounded sampled positive-conjugacy proposals miss them completely.
 
 ### `riedel_baker_k3`
 
@@ -207,13 +207,13 @@ Reading:
 
 ## Conclusion
 
-Positive conjugacy does produce witnesses on the tested Riedel/Baker cases, but
-the current rounded-sample proposal family is still not a practical
-cross-family exact offline waypoint heuristic.
+Sampled positive conjugacy does produce bounded witnesses on the tested
+Riedel/Baker cases, but the current rounded-sample proposal family is still not
+a practical cross-family exact offline waypoint heuristic.
 
 The important split is:
 
-- witness existence generalizes beyond Brix-Ruiz;
+- sampled positive-conjugacy witness existence generalizes beyond Brix-Ruiz;
 - exact-waypoint usefulness of the current discrete proposals does not.
 
 On `k=3` and `k=10`, the failure mode matches the Brix-Ruiz phase-2 result:
@@ -222,7 +222,7 @@ nearby invariant-compatible controls only remove permutation-equivalent
 endpoints and leave the hard residual pair unchanged under the current bound.
 
 `k=2` is a useful sanity check in the opposite direction: exact offline
-waypoints do exist nearby, but the positive-conjugacy proposals still do not
+waypoints do exist nearby, but the sampled positive-conjugacy proposals still do not
 find them. That makes the present negative result stronger than “the family is
 too hard”; the proposal projection/ranking itself is the issue under the exact
 waypoint interpretation.
