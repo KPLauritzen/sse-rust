@@ -195,6 +195,34 @@ Supported workflows now go through those two front doors:
 - and treat the remaining `research-tools` binaries as targeted diagnostics or
   paper-reproduction helpers rather than alternate solver entry points.
 
+### Criterion baseline workflow (`benches/search.rs`)
+
+Use named baselines for any performance comparison so we do not compare against
+stale or implicit prior runs.
+
+```sh
+just bench-search-save-baseline <name>
+just bench-search-compare-baseline <name>
+```
+
+Equivalent raw commands:
+
+```sh
+cargo bench --bench search -- --save-baseline <name>
+cargo bench --bench search -- --baseline <name>
+```
+
+Suggested baseline naming: `<YYYY-MM-DD>-<short-label>`.
+
+Use `cargo bench` or `just bench-search` without a baseline only for local
+sanity checks where no performance claim is being made.
+
+Baseline comparison is required when:
+
+- reporting a speedup or regression,
+- deciding whether to keep a solver or search-policy change based on runtime,
+- writing notes/PR summaries that cite benchmark deltas.
+
 The older Brix-Ruiz-specific search sidecars (`brix_ruiz_k3`,
 `find_brix_ruiz_graph_path`, and `find_brix_ruiz_path_shortcuts`) are retired
 from the supported Cargo targets. Their source files remain in-tree as

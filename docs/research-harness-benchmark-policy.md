@@ -38,6 +38,15 @@ move-policy/frontier-policy combinations, staged shortcut settings).
 Use dedicated bench surfaces for microbench/per-function timing where repeated,
 low-noise measurement and statistical summaries are the main goal.
 
+For Criterion runs in `benches/search.rs`, keep baseline usage explicit:
+
+- create baseline: `just bench-search-save-baseline <name>` (or `cargo bench --bench search -- --save-baseline <name>`),
+- compare baseline: `just bench-search-compare-baseline <name>` (or `cargo bench --bench search -- --baseline <name>`).
+
+Use plain `cargo bench` / `just bench-search` only for local sanity runs where
+no benchmark delta is being claimed. If a result is used for a keep/revert
+decision or reported as a regression/speedup, compare against a named baseline.
+
 ## Follow-Up Plan
 
 Deferred implementation work:

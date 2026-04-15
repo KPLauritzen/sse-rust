@@ -8,6 +8,15 @@ check-k3-graph-merge:
 bench:
     cargo bench
 
+bench-search *criterion_args:
+    cargo bench --bench search -- {{criterion_args}}
+
+bench-search-save-baseline name *criterion_args:
+    cargo bench --bench search -- --save-baseline {{name}} {{criterion_args}}
+
+bench-search-compare-baseline name *criterion_args:
+    cargo bench --bench search -- --baseline {{name}} {{criterion_args}}
+
 research:
     cargo run --profile dist --features research-tools --bin research_harness -- --cases research/cases.json --format pretty
 
