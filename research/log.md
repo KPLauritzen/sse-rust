@@ -324,3 +324,6 @@
 
 - `loop28-k4-beam-envelope` Ran Goal-3-focused k4 endpoint sweeps and mapped a tractable beam envelope.
   Kept as evidence only. No k4 witness found (`equivalent` absent), but mixed-beam gives a tractable dim5 region up to about lag14 under 120s (`beam64, dim5, entry10` unknown in 101-119s), with a timeout cliff at lag16. Mixed beam-bfs-handoff timed out and did not improve reach in this setup.
+
+- `loop29-k4-entry-ramp` Extended Goal-3 k4 beam-envelope sweeps with higher entry bounds and wider beam checks.
+  Kept as evidence only. On `mixed + beam64 + dim5 + lag14`, entry 11/12 both remained unknown near the 120s cap (no witness). Beam width 96 was not tractable on dim5 entry12 (timed out at lag14 and lag12). The practical bounded envelope remains beam64 with lag up to about 14.
