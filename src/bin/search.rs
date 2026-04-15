@@ -178,6 +178,8 @@ where
                        --move-policy POLICY     mixed | graph-plus-structured | graph-only (default: mixed)\n\
                        --search-mode MODE       legacy shortcut: mixed | graph-plus-structured | graph-only | beam\n\
                        --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
+                       --beam-bfs-handoff-depth N\n\
+                                              inclusive beam depth before handing discoveries to BFS (default: 4)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
                                               (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
@@ -230,6 +232,10 @@ where
                     return Err("--beam-width must be at least 1".to_string());
                 }
                 config.beam_width = Some(width);
+            }
+            "--beam-bfs-handoff-depth" => {
+                config.beam_bfs_handoff_depth =
+                    Some(next_parsed(&mut args, "--beam-bfs-handoff-depth")?);
             }
             "--stage" => {
                 let value = args.next().ok_or("--stage requires a value")?;
@@ -315,6 +321,13 @@ where
     }
     if !config.frontier_mode.uses_beam_width() && config.beam_width.is_some() {
         return Err("--beam-width requires --frontier-mode beam or beam-bfs-handoff".to_string());
+    }
+    if config.frontier_mode != FrontierMode::BeamBfsHandoff
+        && config.beam_bfs_handoff_depth.is_some()
+    {
+        return Err(
+            "--beam-bfs-handoff-depth requires --frontier-mode beam-bfs-handoff".to_string(),
+        );
     }
 
     Ok(Cli {
@@ -1145,6 +1158,44 @@ mod tests {
         assert_eq!(
             err,
             "--beam-width requires --frontier-mode beam or beam-bfs-handoff"
+        );
+    }
+
+    #[test]
+    fn parse_cli_accepts_beam_bfs_handoff_depth_with_handoff_mode() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--frontier-mode".to_string(),
+                "beam-bfs-handoff".to_string(),
+                "--beam-bfs-handoff-depth".to_string(),
+                "6".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.config.frontier_mode, FrontierMode::BeamBfsHandoff);
+        assert_eq!(cli.config.beam_bfs_handoff_depth, Some(6));
+    }
+
+    #[test]
+    fn parse_cli_rejects_beam_bfs_handoff_depth_without_handoff_mode() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--beam-bfs-handoff-depth".to_string(),
+                "6".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            err,
+            "--beam-bfs-handoff-depth requires --frontier-mode beam-bfs-handoff"
         );
     }
 

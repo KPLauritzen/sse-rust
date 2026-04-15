@@ -129,6 +129,7 @@ fn main() -> Result<(), String> {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let probe =
             probe_graph_proposal_shortlist(&current, &target, &search_config, &probe_config)

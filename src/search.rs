@@ -31,9 +31,9 @@ mod stages;
 
 use self::beam::{
     choose_next_beam_bfs_handoff_direction, choose_next_beam_direction,
-    push_beam_bfs_handoff_entry, push_beam_frontier_entry, record_best_beam_bfs_handoff_exact_meet,
-    should_use_beam_bfs_handoff_phase, BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier,
-    BeamFrontier, DEFAULT_BEAM_BFS_HANDOFF_DEPTH,
+    effective_beam_bfs_handoff_depth, push_beam_bfs_handoff_entry, push_beam_frontier_entry,
+    record_best_beam_bfs_handoff_exact_meet, should_use_beam_bfs_handoff_phase,
+    BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier, BeamFrontier,
 };
 use self::dispatch::{
     emit_layer, emit_roots, emit_started, endpoint_search_request, finish_search_2x2,
@@ -202,6 +202,7 @@ pub fn probe_graph_proposal_shortlist(
         frontier_mode: FrontierMode::Bfs,
         move_family_policy: MoveFamilyPolicy::GraphOnly,
         beam_width: None,
+        beam_bfs_handoff_depth: None,
     };
     let attempts = shortlist
         .into_iter()
@@ -1728,7 +1729,7 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
 
     let mut beam_phase = true;
     let mut best_exact_meet: Option<BeamBfsHandoffExactMeet> = None;
-    let beam_handoff_depth = DEFAULT_BEAM_BFS_HANDOFF_DEPTH.min(config.max_lag);
+    let beam_handoff_depth = effective_beam_bfs_handoff_depth(config);
     let mut layer_index = 0usize;
     loop {
         fwd_frontier.refresh_approximate_hits(&bwd_signatures);
@@ -2572,7 +2573,7 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
 
     let mut beam_phase = true;
     let mut best_exact_meet: Option<BeamBfsHandoffExactMeet> = None;
-    let beam_handoff_depth = DEFAULT_BEAM_BFS_HANDOFF_DEPTH.min(config.max_lag);
+    let beam_handoff_depth = effective_beam_bfs_handoff_depth(config);
     let mut layer_index = 0usize;
     loop {
         fwd_frontier.refresh_approximate_hits(&bwd_signatures);
@@ -3651,6 +3652,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         }
     }
 
@@ -3708,6 +3710,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts,
@@ -3868,6 +3871,7 @@ mod tests {
             frontier_mode: FrontierMode::Beam,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(4),
+            beam_bfs_handoff_depth: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -3892,6 +3896,7 @@ mod tests {
             frontier_mode: FrontierMode::Beam,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: Some(3),
+            beam_bfs_handoff_depth: None,
         };
 
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -3912,6 +3917,7 @@ mod tests {
             frontier_mode: FrontierMode::BeamBfsHandoff,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(2),
+            beam_bfs_handoff_depth: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -3936,6 +3942,7 @@ mod tests {
             frontier_mode: FrontierMode::BeamBfsHandoff,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(1),
+            beam_bfs_handoff_depth: None,
         };
 
         let result = search_sse_2x2(&a, &b, &config);
@@ -3960,6 +3967,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
         );
 
@@ -4062,6 +4070,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
@@ -4110,6 +4119,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
@@ -4160,6 +4170,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let guided = GuidedRefinementConfig {
             max_shortcut_lag: 1,
@@ -4227,6 +4238,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let guided = GuidedRefinementConfig {
             max_shortcut_lag: 2,
@@ -4290,6 +4302,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![full_path_artifact("legacy-guided", guide)],
@@ -4363,6 +4376,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![indirect, direct_duplicate, direct_forward],
@@ -4648,6 +4662,7 @@ mod tests {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![],
@@ -4799,6 +4814,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
 
         let shortcut_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
@@ -4829,6 +4845,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let base_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
             .expect("identity pair should produce a bounded concrete-shift proof");
@@ -4922,6 +4939,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match result {
@@ -4942,6 +4960,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -4971,6 +4990,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
         assert!(!telemetry.invariant_filtered);
@@ -5157,6 +5177,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
 
         for _ in 0..16 {
@@ -5411,6 +5432,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&m1, &m2, &config);
         assert!(
@@ -5430,6 +5452,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&m1, &m3, &config);
         assert!(
@@ -5461,6 +5484,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -5497,6 +5521,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -5522,6 +5547,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -5563,6 +5589,7 @@ mod tests {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match &result {

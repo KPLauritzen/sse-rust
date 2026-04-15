@@ -110,6 +110,8 @@ struct JsonSearchConfig {
     frontier_mode: FrontierMode,
     #[serde(default)]
     beam_width: Option<usize>,
+    #[serde(default)]
+    beam_bfs_handoff_depth: Option<usize>,
     #[serde(
         default = "default_move_family_policy",
         alias = "search_mode",
@@ -760,6 +762,7 @@ fn materialize_seeded_guide_artifact(
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             stage: SearchStage::EndpointSearch,
             guide_artifacts: Vec::new(),
@@ -1050,6 +1053,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -1100,6 +1104,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -1154,6 +1159,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: Some(4),
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -1180,6 +1186,51 @@ mod tests {
             .reason
             .as_deref()
             .is_some_and(|reason| reason.contains("beam_width requires frontier_mode")));
+    }
+
+    #[test]
+    fn run_case_rejects_handoff_depth_without_handoff_frontier() {
+        let case = ResearchCase {
+            id: "invalid-handoff-depth".to_string(),
+            description: "handoff depth requires handoff frontier".to_string(),
+            a: vec![vec![1, 0], vec![0, 1]],
+            b: vec![vec![1, 0], vec![0, 1]],
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
+            required: true,
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 2,
+                max_entry: 1,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
+                beam_bfs_handoff_depth: Some(4),
+                move_family_policy: MoveFamilyPolicy::Mixed,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+            measurement: None,
+        };
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "panic");
+        assert!(result.reason.as_deref().is_some_and(|reason| {
+            reason.contains("beam_bfs_handoff_depth requires frontier_mode")
+        }));
     }
 
     #[test]
@@ -1234,6 +1285,7 @@ mod tests {
                 max_entry: 2,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
@@ -1290,6 +1342,7 @@ mod tests {
                 max_entry: 2,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
                 guided_refinement: GuidedRefinementConfig {
@@ -1344,6 +1397,7 @@ mod tests {
                 max_entry: 2,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::ShortcutSearch,
                 guided_refinement: GuidedRefinementConfig {
@@ -1521,6 +1575,7 @@ mod tests {
                 max_entry: 1,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -1663,6 +1718,7 @@ mod tests {
                     max_entry: 1,
                     frontier_mode: FrontierMode::Bfs,
                     beam_width: None,
+                    beam_bfs_handoff_depth: None,
                     move_family_policy: MoveFamilyPolicy::Mixed,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
@@ -1757,6 +1813,7 @@ mod tests {
                     max_entry: 1,
                     frontier_mode: FrontierMode::Bfs,
                     beam_width: None,
+                    beam_bfs_handoff_depth: None,
                     move_family_policy: MoveFamilyPolicy::Mixed,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
@@ -1807,6 +1864,7 @@ mod tests {
                     max_entry: 2,
                     frontier_mode: FrontierMode::Bfs,
                     beam_width: None,
+                    beam_bfs_handoff_depth: None,
                     move_family_policy: MoveFamilyPolicy::GraphOnly,
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
@@ -1872,8 +1930,9 @@ mod tests {
             max_lag: 2,
             max_intermediate_dim: 3,
             max_entry: 4,
-            frontier_mode: FrontierMode::Beam,
+            frontier_mode: FrontierMode::BeamBfsHandoff,
             beam_width: Some(16),
+            beam_bfs_handoff_depth: Some(6),
             move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
             stage: SearchStage::GuidedRefinement,
             guided_refinement: GuidedRefinementConfig::default(),
@@ -1890,8 +1949,68 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("graph_plus_structured")
         );
+        assert_eq!(
+            object
+                .get("beam_bfs_handoff_depth")
+                .and_then(serde_json::Value::as_u64),
+            Some(6)
+        );
         assert!(!object.contains_key("search_mode"));
         assert!(!object.contains_key("move_policy"));
+    }
+
+    #[test]
+    fn load_corpus_accepts_beam_bfs_handoff_depth_field() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!(
+            "research-harness-handoff-depth-corpus-{}-{}",
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&temp_dir).expect("temporary corpus directory should exist");
+        let corpus_path = temp_dir.join("cases.json");
+        fs::write(
+            &corpus_path,
+            r#"{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "handoff-depth-field",
+      "description": "beam_bfs_handoff_depth field should deserialize",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 2,
+        "max_entry": 1,
+        "frontier_mode": "beam_bfs_handoff",
+        "beam_width": 4,
+        "beam_bfs_handoff_depth": 7
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 1,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      }
+    }
+  ]
+}"#,
+        )
+        .expect("handoff depth corpus file should be written");
+
+        let corpus = load_corpus(&corpus_path).expect("handoff depth corpus should load");
+        assert_eq!(corpus.cases.len(), 1);
+        assert_eq!(corpus.cases[0].config.beam_bfs_handoff_depth, Some(7));
+
+        fs::remove_dir_all(temp_dir).expect("temporary corpus directory should be removed");
     }
 
     #[test]
@@ -1957,6 +2076,7 @@ mod tests {
             max_entry: 4,
             frontier_mode: FrontierMode::BeamBfsHandoff,
             beam_width: Some(8),
+            beam_bfs_handoff_depth: None,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             stage: SearchStage::ShortcutSearch,
             guided_refinement: GuidedRefinementConfig::default(),
@@ -2081,6 +2201,7 @@ mod tests {
                 max_entry: 6,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),
@@ -2159,6 +2280,7 @@ mod tests {
                 max_entry: 4,
                 frontier_mode: FrontierMode::Bfs,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 stage: SearchStage::EndpointSearch,
                 guided_refinement: GuidedRefinementConfig::default(),

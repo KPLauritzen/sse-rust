@@ -207,6 +207,7 @@ fn main() {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         },
     }];
     if include_mixed {
@@ -219,6 +220,7 @@ fn main() {
                 frontier_mode: FrontierMode::Beam,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 beam_width: Some(mixed_beam_width),
+                beam_bfs_handoff_depth: None,
             },
         });
     }

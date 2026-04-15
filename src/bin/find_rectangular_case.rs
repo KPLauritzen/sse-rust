@@ -51,6 +51,7 @@ fn main() {
         frontier_mode: FrontierMode::Bfs,
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
+        beam_bfs_handoff_depth: None,
     };
     let dim3_config = SearchConfig {
         max_lag,
@@ -59,6 +60,7 @@ fn main() {
         frontier_mode: FrontierMode::Bfs,
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
+        beam_bfs_handoff_depth: None,
     };
 
     let mut rectangular_buckets: HashMap<DynMatrix, HashSet<SqMatrix<2>>> = HashMap::new();

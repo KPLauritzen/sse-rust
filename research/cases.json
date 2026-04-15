@@ -730,7 +730,8 @@
         "max_entry": 6,
         "move_family_policy": "graph-only",
         "frontier_mode": "beam_bfs_handoff",
-        "beam_width": 10
+        "beam_width": 10,
+        "beam_bfs_handoff_depth": 4
       },
       "timeout_ms": 3000,
       "allowed_outcomes": ["equivalent", "unknown", "timeout"],

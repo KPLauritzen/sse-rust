@@ -75,6 +75,7 @@ fn main() -> Result<(), String> {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         },
         stage: SearchStage::EndpointSearch,
         guide_artifacts: Vec::new(),

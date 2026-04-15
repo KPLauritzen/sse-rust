@@ -74,6 +74,21 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
                 )
             }
         };
+    let normalized_beam_bfs_handoff_depth = match normalized_beam_bfs_handoff_depth(
+        case.config.frontier_mode,
+        case.config.beam_bfs_handoff_depth,
+    ) {
+        Ok(depth) => depth,
+        Err(reason) => {
+            return panic_result(
+                &case.id,
+                resolved.endpoint.source_dim,
+                resolved.endpoint.target_dim,
+                started.elapsed().as_millis(),
+                reason,
+            )
+        }
+    };
 
     let request = SearchRequest {
         source: a.clone(),
@@ -85,6 +100,7 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
             frontier_mode: case.config.frontier_mode,
             move_family_policy: case.config.move_family_policy,
             beam_width: normalized_beam_width,
+            beam_bfs_handoff_depth: normalized_beam_bfs_handoff_depth,
         },
         stage: case.config.stage,
         guide_artifacts: resolved.guide_artifacts,
@@ -402,6 +418,18 @@ fn normalized_beam_width(
         Some(width) => Ok(Some(width)),
         None => Ok(Some(DEFAULT_BEAM_WIDTH)),
     }
+}
+
+fn normalized_beam_bfs_handoff_depth(
+    frontier_mode: FrontierMode,
+    beam_bfs_handoff_depth: Option<usize>,
+) -> Result<Option<usize>, String> {
+    if frontier_mode != FrontierMode::BeamBfsHandoff && beam_bfs_handoff_depth.is_some() {
+        return Err(
+            "beam_bfs_handoff_depth requires frontier_mode to be beam_bfs_handoff".to_string(),
+        );
+    }
+    Ok(beam_bfs_handoff_depth)
 }
 
 fn panic_result(

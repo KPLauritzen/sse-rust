@@ -232,7 +232,8 @@ impl Default for ShortcutSearchConfig {
 }
 
 /// Configuration for the SSE search.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SearchConfig {
     /// Maximum number of elementary SSE steps to search.
     pub max_lag: usize,
@@ -247,6 +248,11 @@ pub struct SearchConfig {
     pub move_family_policy: MoveFamilyPolicy,
     /// Optional best-first beam frontier cap. `None` preserves layer-synchronous BFS.
     pub beam_width: Option<usize>,
+    /// Optional inclusive depth cutoff for handing beam discoveries over to BFS.
+    ///
+    /// `None` preserves the existing built-in default handoff depth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beam_bfs_handoff_depth: Option<usize>,
 }
 
 impl Default for SearchConfig {
@@ -258,6 +264,7 @@ impl Default for SearchConfig {
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
+            beam_bfs_handoff_depth: None,
         }
     }
 }
@@ -595,7 +602,42 @@ mod tests {
         assert_eq!(config.frontier_mode, FrontierMode::Bfs);
         assert_eq!(config.move_family_policy, MoveFamilyPolicy::Mixed);
         assert_eq!(config.beam_width, None);
+        assert_eq!(config.beam_bfs_handoff_depth, None);
         assert_eq!(DEFAULT_BEAM_WIDTH, 64);
+    }
+
+    #[test]
+    fn test_search_config_deserializes_missing_handoff_depth_as_none() {
+        let config: SearchConfig =
+            serde_json::from_str(r#"{"max_lag":2,"max_intermediate_dim":3,"max_entry":4}"#)
+                .unwrap();
+
+        assert_eq!(config.max_lag, 2);
+        assert_eq!(config.max_intermediate_dim, 3);
+        assert_eq!(config.max_entry, 4);
+        assert_eq!(config.beam_bfs_handoff_depth, None);
+    }
+
+    #[test]
+    fn test_search_config_serializes_handoff_depth_when_present() {
+        let config = SearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 3,
+            max_entry: 4,
+            frontier_mode: FrontierMode::BeamBfsHandoff,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: Some(8),
+            beam_bfs_handoff_depth: Some(6),
+        };
+
+        let encoded = serde_json::to_value(&config).unwrap();
+        let object = encoded.as_object().unwrap();
+        assert_eq!(
+            object
+                .get("beam_bfs_handoff_depth")
+                .and_then(serde_json::Value::as_u64),
+            Some(6)
+        );
     }
 
     #[test]

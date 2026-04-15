@@ -5,6 +5,7 @@ use ahash::AHashSet as HashSet;
 
 use crate::matrix::DynMatrix;
 use crate::path_scoring::score_node;
+use crate::types::SearchConfig;
 
 use super::frontier::{choose_next_layer, FrontierLayerChoiceInputs, FrontierOverlapSignal};
 use super::{approx_signature, ApproxSignature};
@@ -109,6 +110,13 @@ pub(super) struct BeamBfsHandoffExactMeet {
 }
 
 pub(super) const DEFAULT_BEAM_BFS_HANDOFF_DEPTH: usize = 4;
+
+pub(super) fn effective_beam_bfs_handoff_depth(config: &SearchConfig) -> usize {
+    config
+        .beam_bfs_handoff_depth
+        .unwrap_or(DEFAULT_BEAM_BFS_HANDOFF_DEPTH)
+        .min(config.max_lag)
+}
 
 impl BeamBfsHandoffFrontier {
     pub(super) fn new(beam_width: usize) -> Self {
@@ -457,5 +465,27 @@ mod tests {
         assert!(should_use_beam_bfs_handoff_phase(true, 4, 4));
         assert!(!should_use_beam_bfs_handoff_phase(true, 5, 4));
         assert!(!should_use_beam_bfs_handoff_phase(false, 4, 4));
+    }
+
+    #[test]
+    fn test_effective_beam_bfs_handoff_depth_defaults_and_clamps() {
+        let default_config = SearchConfig {
+            max_lag: 3,
+            ..SearchConfig::default()
+        };
+        let configured = SearchConfig {
+            max_lag: 10,
+            beam_bfs_handoff_depth: Some(6),
+            ..SearchConfig::default()
+        };
+        let clamped = SearchConfig {
+            max_lag: 5,
+            beam_bfs_handoff_depth: Some(7),
+            ..SearchConfig::default()
+        };
+
+        assert_eq!(effective_beam_bfs_handoff_depth(&default_config), 3);
+        assert_eq!(effective_beam_bfs_handoff_depth(&configured), 6);
+        assert_eq!(effective_beam_bfs_handoff_depth(&clamped), 5);
     }
 }
