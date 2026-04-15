@@ -410,10 +410,14 @@ fn derive_same_diagonal_determinant_controls(
         return Vec::new();
     }
 
-    let product = i64::from(diag00) * i64::from(diag11) - det;
+    let product = i128::from(diag00) * i128::from(diag11) - i128::from(det);
     if product <= 0 {
         return Vec::new();
     }
+
+    let Ok(product) = u64::try_from(product) else {
+        return Vec::new();
+    };
 
     let mut excluded = BTreeSet::new();
     excluded.insert(source.clone());
@@ -423,20 +427,32 @@ fn derive_same_diagonal_determinant_controls(
     }
 
     let mut controls = Vec::new();
-    let product = product as u32;
-    for upper_right in 1..=product {
+    let mut upper_right = 1u64;
+    while upper_right * upper_right <= product {
         if product % upper_right != 0 {
+            upper_right += 1;
             continue;
         }
+
         let lower_left = product / upper_right;
-        let matrix = SqMatrix::new([[diag00, upper_right], [lower_left, diag11]]);
-        if excluded.contains(&matrix) {
-            continue;
+        for (upper_right, lower_left) in [(upper_right, lower_left), (lower_left, upper_right)] {
+            let (Ok(upper_right), Ok(lower_left)) =
+                (u32::try_from(upper_right), u32::try_from(lower_left))
+            else {
+                continue;
+            };
+
+            let matrix = SqMatrix::new([[diag00, upper_right], [lower_left, diag11]]);
+            if excluded.contains(&matrix) {
+                continue;
+            }
+            controls.push(matrix);
         }
-        controls.push(matrix);
+        upper_right += 1;
     }
 
     controls.sort_by(|left, right| compare_control_priority(left, right, source, target));
+    controls.dedup();
     controls.truncate(limit);
     controls
 }
@@ -869,5 +885,15 @@ mod tests {
             waypoint_verdict(&candidate),
             "rejected as an exact waypoint by endpoint invariants"
         );
+    }
+
+    #[test]
+    fn test_control_generation_handles_products_above_u32_range() {
+        let source = SqMatrix::new([[65_536, 65_536], [65_536, 65_536]]);
+        let target = SqMatrix::new([[65_536, 32_768], [131_072, 65_536]]);
+
+        let controls = derive_same_diagonal_determinant_controls(&source, &target, &[], 128);
+
+        assert!(controls.contains(&SqMatrix::new([[65_536, 2], [2_147_483_648, 65_536]])));
     }
 }
