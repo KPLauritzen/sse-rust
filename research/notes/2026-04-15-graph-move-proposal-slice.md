@@ -118,10 +118,52 @@ What it does **not** show:
   is globally useful for full endpoint search;
 - this is not yet a reason to alter default search expansion.
 
+## Follow-up Slice
+
+The next landed step keeps default search untouched, but starts **consuming**
+the best-gap shortlist under explicit bounds instead of only printing it.
+
+Code surface:
+
+- `GraphProposals::best_gap_shortlist(...)` makes the quotient shortlist a
+  concrete reusable graph-move surface instead of ad hoc iterator logic;
+- `search::probe_graph_proposal_shortlist(...)` evaluates only the best-gap
+  shortlist under a bounded graph-only lag cap;
+- `compare_graph_move_proposals --probe-lag N` now exercises that probe on the
+  existing research fixture surface.
+
+### Waypoint probe with bounded realization
+
+Command:
+
+```sh
+cargo run --quiet --features research-tools --bin compare_graph_move_proposals -- \
+  --current guide:1 --target guide:15 --top-k 6 --probe-lag 3
+```
+
+Result:
+
+- the best-gap shortlist remains size `1`;
+- that single shortlisted `3x3` zig-zag proposal is realizable from
+  `guide:1` by a bounded graph-only search in `3` steps;
+- the bounded realization touched `44` visited states and expanded `2`
+  frontier nodes;
+- default endpoint search behavior is unchanged because the probe is opt-in and
+  lives outside `expand_frontier_layer_dyn(...)`.
+
+Interpretation:
+
+- the quotient shortlist is now actionable rather than purely descriptive;
+- the best proposal is not only scored well, it is also reachable under a tiny
+  explicit graph-only budget from the current waypoint;
+- this is still a waypoint evaluator, not yet a proof that proposal-guided
+  restarts improve full endpoint search.
+
 ## Next Steps
 
-1. Keep proposal generation research-only for now.
-2. Add a tiny evaluator or restart/probe surface that consumes only the
-   best-gap proposal shortlist instead of the full raw proposal universe.
-3. If that shortlist proves useful on waypoint or endpoint probes, only then
-   thread a narrow proposal hook into staged search.
+1. Keep raw proposal generation out of the default frontier.
+2. Extend the bounded probe into a restart or continuation evaluator only if it
+   continues to pay off on more waypoint or endpoint cases.
+3. If the best-gap probe repeatedly produces realizable and helpful waypoints,
+   thread only that tiny top-k surface into staged search behind explicit
+   bounds.

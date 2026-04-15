@@ -8,6 +8,8 @@ use sse_core::graph_moves::{
     same_future_past_signature_gap, GraphProposal, SameFuturePastSignatureGap,
 };
 use sse_core::matrix::DynMatrix;
+use sse_core::search::{probe_graph_proposal_shortlist, GraphProposalProbeConfig};
+use sse_core::types::{DynSseResult, FrontierMode, MoveFamilyPolicy, SearchConfig};
 
 #[derive(Deserialize)]
 struct EndpointFixtureFile {
@@ -40,6 +42,8 @@ struct Cli {
     max_dim: Option<usize>,
     zigzag_bridge_entry: Option<u32>,
     top_k: usize,
+    probe_lag: Option<usize>,
+    probe_shortlist_k: usize,
 }
 
 #[derive(Clone)]
@@ -111,6 +115,26 @@ fn main() -> Result<(), String> {
     print_top_blind_successors(&blind_scored, cli.top_k);
     println!();
     print_top_proposals(&proposals.nodes, cli.top_k);
+    if let Some(probe_lag) = cli.probe_lag {
+        println!();
+        let probe_config = GraphProposalProbeConfig {
+            shortlist_size: cli.probe_shortlist_k.max(1),
+            realization_max_lag: probe_lag,
+            max_zigzag_bridge_entry: cli.zigzag_bridge_entry,
+        };
+        let search_config = SearchConfig {
+            max_lag: probe_lag,
+            max_intermediate_dim: max_dim,
+            max_entry: 8,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+        };
+        let probe =
+            probe_graph_proposal_shortlist(&current, &target, &search_config, &probe_config)
+                .map_err(|err| format!("proposal probe failed: {err}"))?;
+        print_proposal_probe(&probe, probe_lag);
+    }
 
     Ok(())
 }
@@ -123,6 +147,8 @@ fn parse_args() -> Result<Cli, String> {
     let mut max_dim = None;
     let mut zigzag_bridge_entry = Some(8u32);
     let mut top_k = 6usize;
+    let mut probe_lag = None;
+    let mut probe_shortlist_k = 4usize;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -165,6 +191,21 @@ fn parse_args() -> Result<Cli, String> {
                     .parse()
                     .map_err(|_| "invalid --top-k".to_string())?;
             }
+            "--probe-lag" => {
+                probe_lag = Some(
+                    args.next()
+                        .ok_or("--probe-lag requires a value")?
+                        .parse()
+                        .map_err(|_| "invalid --probe-lag".to_string())?,
+                );
+            }
+            "--probe-shortlist-k" => {
+                probe_shortlist_k = args
+                    .next()
+                    .ok_or("--probe-shortlist-k requires a value")?
+                    .parse()
+                    .map_err(|_| "invalid --probe-shortlist-k".to_string())?;
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -181,6 +222,8 @@ fn parse_args() -> Result<Cli, String> {
         max_dim,
         zigzag_bridge_entry,
         top_k: top_k.max(1),
+        probe_lag,
+        probe_shortlist_k: probe_shortlist_k.max(1),
     })
 }
 
@@ -195,7 +238,9 @@ fn print_usage() {
            --max-dim N                 max dimension for blind/proposal generation\n\
            --zigzag-bridge-entry N     enable bounded 3x3 zig-zag proposals (default: 8)\n\
            --no-zigzag                 disable zig-zag proposal generation\n\
-           --top-k N                   number of top candidates to print per surface (default: 6)"
+           --top-k N                   number of top candidates to print per surface (default: 6)\n\
+           --probe-lag N               graph-only lag bound for realizing best-gap proposals\n\
+           --probe-shortlist-k N       cap the probed best-gap shortlist (default: 4)"
     );
 }
 
@@ -242,19 +287,11 @@ fn print_proposal_summary(proposals: &sse_core::graph_moves::GraphProposals, bli
         "  overlap with blind one-step successors: {}",
         blind_overlap
     );
-    if let Some(best_gap) = proposals
-        .nodes
-        .first()
-        .map(|proposal| proposal.target_signature_gap)
-    {
+    if let Some(best_gap) = proposals.best_gap() {
         println!("  best target signature gap: {}", format_gap(best_gap));
         println!(
             "  best-gap shortlist: {}",
-            proposals
-                .nodes
-                .iter()
-                .take_while(|proposal| proposal.target_signature_gap == best_gap)
-                .count()
+            proposals.best_gap_shortlist_len()
         );
     }
 }
@@ -291,6 +328,40 @@ fn print_top_proposals(proposals: &[GraphProposal], top_k: usize) {
             proposal.families.join(","),
             format_gap(proposal.target_signature_gap),
             proposal.matrix,
+        );
+    }
+}
+
+fn print_proposal_probe(probe: &sse_core::search::GraphProposalProbeResult, probe_lag: usize) {
+    println!("Best-gap proposal probe");
+    println!("  raw proposal candidates: {}", probe.raw_candidates);
+    println!("  unique canonical proposals: {}", probe.unique_candidates);
+    if let Some(best_gap) = probe.best_gap {
+        println!("  best target signature gap: {}", format_gap(best_gap));
+    }
+    println!("  best-gap shortlist: {}", probe.best_gap_candidates);
+    println!("  probed proposals: {}", probe.attempts.len());
+    println!("  realization lag bound: {}", probe_lag);
+    if probe.attempts.is_empty() {
+        println!("  none");
+        return;
+    }
+
+    for (index, attempt) in probe.attempts.iter().enumerate() {
+        let outcome = match &attempt.result {
+            DynSseResult::Equivalent(path) => format!("realized in {} step(s)", path.steps.len()),
+            DynSseResult::NotEquivalent(reason) => format!("not equivalent ({reason})"),
+            DynSseResult::Unknown => "not realized within bound".to_string(),
+        };
+        println!(
+            "  {}. {} families={} gap={} frontier_nodes={} visited={} {:?}",
+            index + 1,
+            outcome,
+            attempt.proposal.families.join(","),
+            format_gap(attempt.proposal.target_signature_gap),
+            attempt.telemetry.frontier_nodes_expanded,
+            attempt.telemetry.total_visited_nodes,
+            attempt.proposal.matrix,
         );
     }
 }

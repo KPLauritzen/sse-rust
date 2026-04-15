@@ -10,7 +10,8 @@ use crate::aligned::{
 };
 use crate::factorisation::visit_all_factorisations_with_family;
 use crate::graph_moves::{
-    enumerate_graph_move_successors, same_future_past_signature, SameFuturePastSignature,
+    enumerate_graph_move_successors, enumerate_graph_proposals, same_future_past_signature,
+    GraphProposal, SameFuturePastSignature, SameFuturePastSignatureGap,
 };
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
@@ -89,6 +90,39 @@ struct ApproxSignature {
 
 const SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD: usize = 8;
 const TIMED_SEARCH_FRONTIER_CHUNK_SIZE: usize = 256;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphProposalProbeConfig {
+    pub shortlist_size: usize,
+    pub realization_max_lag: usize,
+    pub max_zigzag_bridge_entry: Option<u32>,
+}
+
+impl Default for GraphProposalProbeConfig {
+    fn default() -> Self {
+        Self {
+            shortlist_size: 4,
+            realization_max_lag: 3,
+            max_zigzag_bridge_entry: Some(8),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GraphProposalProbeAttempt {
+    pub proposal: GraphProposal,
+    pub result: DynSseResult,
+    pub telemetry: SearchTelemetry,
+}
+
+#[derive(Clone, Debug)]
+pub struct GraphProposalProbeResult {
+    pub raw_candidates: usize,
+    pub unique_candidates: usize,
+    pub best_gap: Option<SameFuturePastSignatureGap>,
+    pub best_gap_candidates: usize,
+    pub attempts: Vec<GraphProposalProbeAttempt>,
+}
 
 #[derive(Clone, Copy, Default)]
 struct FrontierOverlapSignal {
@@ -500,6 +534,65 @@ fn search_request(
         guided_refinement: GuidedRefinementConfig::default(),
         shortcut_search: ShortcutSearchConfig::default(),
     }
+}
+
+/// Probe the best-gap graph proposal shortlist under a bounded graph-only search.
+///
+/// This is a research-oriented seam: it leaves default frontier expansion alone
+/// and only evaluates a small top-k shortlist of already-scored proposals.
+pub fn probe_graph_proposal_shortlist(
+    current: &DynMatrix,
+    target: &DynMatrix,
+    search_config: &SearchConfig,
+    probe_config: &GraphProposalProbeConfig,
+) -> Result<GraphProposalProbeResult, String> {
+    if !current.is_square() || !target.is_square() {
+        return Err("graph proposal probe requires square current and target matrices".to_string());
+    }
+    if probe_config.shortlist_size == 0 {
+        return Err("graph proposal probe requires shortlist_size >= 1".to_string());
+    }
+    if probe_config.realization_max_lag == 0 {
+        return Err("graph proposal probe requires realization_max_lag >= 1".to_string());
+    }
+
+    let proposals = enumerate_graph_proposals(
+        current,
+        target,
+        search_config.max_intermediate_dim,
+        probe_config.max_zigzag_bridge_entry,
+    );
+    let best_gap = proposals.best_gap();
+    let best_gap_candidates = proposals.best_gap_shortlist_len();
+    let shortlist = proposals.best_gap_shortlist(probe_config.shortlist_size);
+    let realization_config = SearchConfig {
+        max_lag: probe_config.realization_max_lag,
+        max_intermediate_dim: search_config.max_intermediate_dim,
+        max_entry: search_config.max_entry,
+        frontier_mode: FrontierMode::Bfs,
+        move_family_policy: MoveFamilyPolicy::GraphOnly,
+        beam_width: None,
+    };
+    let attempts = shortlist
+        .into_iter()
+        .map(|proposal| {
+            let (result, telemetry) =
+                search_sse_with_telemetry_dyn(current, &proposal.matrix, &realization_config);
+            GraphProposalProbeAttempt {
+                proposal,
+                result,
+                telemetry,
+            }
+        })
+        .collect();
+
+    Ok(GraphProposalProbeResult {
+        raw_candidates: proposals.candidates,
+        unique_candidates: proposals.nodes.len(),
+        best_gap,
+        best_gap_candidates,
+        attempts,
+    })
 }
 
 /// Execute one search request across the staged solver boundary.
@@ -7749,6 +7842,51 @@ mod tests {
         // [[1,0,0],[0,1,0],[0,0,1]]: trace=3, det=1 (no zero eigenvalue)
         let m = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
         assert!(!is_spectrally_consistent(&m, 3, 1));
+    }
+
+    #[test]
+    fn test_probe_graph_proposal_shortlist_realizes_best_gap_waypoint_candidate() {
+        let current = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 1, 2, 2, 1]);
+        let target = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 4, 1, 1, 1]);
+        let config = SearchConfig {
+            max_intermediate_dim: 4,
+            ..default_config()
+        };
+        let probe = GraphProposalProbeConfig {
+            shortlist_size: 4,
+            realization_max_lag: 3,
+            max_zigzag_bridge_entry: Some(8),
+        };
+
+        let result = probe_graph_proposal_shortlist(&current, &target, &config, &probe)
+            .expect("waypoint probe should be valid");
+
+        assert_eq!(
+            result.best_gap,
+            Some(SameFuturePastSignatureGap {
+                dimension_gap: 0,
+                row_class_gap: 2,
+                col_class_gap: 6,
+                entry_sum_gap: 0,
+            })
+        );
+        assert_eq!(result.best_gap_candidates, 1);
+        assert_eq!(result.attempts.len(), 1);
+        let attempt = &result.attempts[0];
+        assert_eq!(
+            attempt.proposal.matrix,
+            DynMatrix::new(3, 3, vec![0, 0, 1, 1, 1, 1, 3, 3, 1])
+        );
+        match &attempt.result {
+            DynSseResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 3);
+                assert_eq!(path.matrices.first(), Some(&current));
+                assert_eq!(path.matrices.last(), Some(&attempt.proposal.matrix));
+            }
+            other => panic!("expected realized proposal path, got {other:?}"),
+        }
+        assert!(attempt.telemetry.frontier_nodes_expanded >= 1);
+        assert_eq!(attempt.telemetry.factorisations_enumerated, 0);
     }
 
     #[test]

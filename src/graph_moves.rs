@@ -73,6 +73,36 @@ pub struct GraphProposals {
     pub nodes: Vec<GraphProposal>,
 }
 
+impl GraphProposals {
+    pub fn best_gap(&self) -> Option<SameFuturePastSignatureGap> {
+        self.nodes
+            .first()
+            .map(|proposal| proposal.target_signature_gap)
+    }
+
+    pub fn best_gap_shortlist_len(&self) -> usize {
+        let Some(best_gap) = self.best_gap() else {
+            return 0;
+        };
+        self.nodes
+            .iter()
+            .take_while(|proposal| proposal.target_signature_gap == best_gap)
+            .count()
+    }
+
+    pub fn best_gap_shortlist(&self, limit: usize) -> Vec<GraphProposal> {
+        let Some(best_gap) = self.best_gap() else {
+            return Vec::new();
+        };
+        self.nodes
+            .iter()
+            .take_while(|proposal| proposal.target_signature_gap == best_gap)
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+}
+
 /// Two successive out-splits starting from a 2x2 matrix.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TwoStepOutsplitChain2x2 {
@@ -1275,5 +1305,29 @@ mod tests {
         assert!(witnesses
             .into_iter()
             .any(|witness| witness.family == successor.family));
+    }
+
+    #[test]
+    fn test_graph_proposals_best_gap_shortlist_is_tiny_on_waypoint_probe() {
+        let current = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 1, 2, 2, 1]);
+        let target = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 4, 1, 1, 1]);
+
+        let proposals = enumerate_graph_proposals(&current, &target, 4, Some(8));
+
+        assert_eq!(
+            proposals.best_gap(),
+            Some(SameFuturePastSignatureGap {
+                dimension_gap: 0,
+                row_class_gap: 2,
+                col_class_gap: 6,
+                entry_sum_gap: 0,
+            })
+        );
+        assert_eq!(proposals.best_gap_shortlist_len(), 1);
+        assert_eq!(proposals.best_gap_shortlist(4).len(), 1);
+        assert_eq!(
+            proposals.best_gap_shortlist(4)[0].matrix,
+            DynMatrix::new(3, 3, vec![0, 0, 1, 1, 1, 1, 3, 3, 1])
+        );
     }
 }
