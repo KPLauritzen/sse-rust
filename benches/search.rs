@@ -45,7 +45,7 @@ struct ExpandNextNCase {
     target_expanded_nodes: usize,
 }
 
-fn run_expand_next_n(case: &ExpandNextNCase) {
+fn run_expand_next_n(case: &ExpandNextNCase) -> usize {
     let mut expanded_nodes = 0usize;
     while expanded_nodes < case.target_expanded_nodes {
         let (_result, telemetry) = search_sse_2x2_with_telemetry(
@@ -63,7 +63,7 @@ fn run_expand_next_n(case: &ExpandNextNCase) {
         black_box(telemetry.factorisations_enumerated);
         black_box(telemetry.candidates_after_pruning);
     }
-    black_box(expanded_nodes);
+    expanded_nodes
 }
 
 /// Throughput benches for frontier expansion.
@@ -107,12 +107,15 @@ fn bench_expand_next_n(c: &mut Criterion) {
     group.sample_size(10);
 
     for case in &cases {
-        group.throughput(Throughput::Elements(case.target_expanded_nodes as u64));
+        // Calibrate throughput units from the actual expanded work done by one
+        // benchmark sample (which may overshoot the target threshold).
+        let sample_expanded_nodes = run_expand_next_n(case);
+        group.throughput(Throughput::Elements(sample_expanded_nodes as u64));
         group.bench_with_input(
             BenchmarkId::new("frontier_expansion", case.name),
             case,
             |bencher, case| {
-                bencher.iter(|| run_expand_next_n(case));
+                bencher.iter(|| black_box(run_expand_next_n(case)));
             },
         );
     }
