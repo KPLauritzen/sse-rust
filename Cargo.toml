@@ -57,6 +57,11 @@ path = "src/bin/compare_brix_ruiz_graph_paths.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "compare_graph_move_proposals"
+path = "src/bin/compare_graph_move_proposals.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "export_k3_paths_neo4j"
 path = "src/bin/export_k3_paths_neo4j.rs"
 required-features = ["research-tools"]

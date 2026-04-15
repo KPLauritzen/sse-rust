@@ -119,6 +119,11 @@
 - `2c87aaa` Added a tightly bounded visible-coincidence `3x3 -> 3x3` refined split family.
   Failed. It preserved correctness but mostly duplicated existing `3x3` successors, so the hard-case telemetry stayed flat.
 
+## 2026-04-15
+
+- `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.
+  Kept as evidence. Raw same-future/same-past/zig-zag proposal families are broader than blind one-step graph expansion, but quotient-signature scoring collapses them to tiny shortlists; on the `brix_ruiz_k3` `guide:1 -> guide:15` probe, the best shortlisted zig-zag proposal beats every blind one-step successor on the same quotient score.
+
 - `2c87aaa` Added a global factorisation-result cache keyed by matrix and bound.
   Failed. It reused exact enumerations but the synchronization and cloning cost regressed harness runtime without changing the hard cases.
 
