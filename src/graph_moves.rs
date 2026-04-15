@@ -31,6 +31,48 @@ pub struct GraphMoveSuccessors {
     pub nodes: Vec<GraphMoveSuccessor>,
 }
 
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SameFuturePastClassSignature {
+    pub multiplicity: usize,
+    pub entry_sum: u32,
+    pub support: u8,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SameFuturePastSignature {
+    pub dim: usize,
+    pub entry_sum: u64,
+    pub row_classes: Vec<SameFuturePastClassSignature>,
+    pub col_classes: Vec<SameFuturePastClassSignature>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SameFuturePastSignatureGap {
+    pub dimension_gap: usize,
+    pub row_class_gap: usize,
+    pub col_class_gap: usize,
+    pub entry_sum_gap: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphProposal {
+    /// Proposal families that produced this canonical matrix.
+    pub families: Vec<&'static str>,
+    pub matrix: DynMatrix,
+    pub orig_matrix: DynMatrix,
+    /// First available one-step witness for the proposal, when the proposal
+    /// comes directly from a graph move family.
+    pub step: Option<EsseStep>,
+    pub target_signature_gap: SameFuturePastSignatureGap,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphProposals {
+    pub candidates: usize,
+    pub family_candidates: BTreeMap<&'static str, usize>,
+    pub nodes: Vec<GraphProposal>,
+}
+
 /// Two successive out-splits starting from a 2x2 matrix.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TwoStepOutsplitChain2x2 {
@@ -141,6 +183,179 @@ pub fn enumerate_one_step_split_refinements(a: &DynMatrix) -> Vec<DynMatrix> {
     }
 
     refinements
+}
+
+/// Compute the coarse same-future/same-past quotient signature of a square matrix.
+pub fn same_future_past_signature(m: &DynMatrix) -> Option<SameFuturePastSignature> {
+    if !m.is_square() {
+        return None;
+    }
+
+    let mut entry_sum = 0u64;
+    let mut row_vectors = Vec::with_capacity(m.rows);
+    for row in 0..m.rows {
+        let mut values = Vec::with_capacity(m.cols);
+        for col in 0..m.cols {
+            let value = m.get(row, col);
+            entry_sum += value as u64;
+            values.push(value);
+        }
+        row_vectors.push(values);
+    }
+
+    let mut col_vectors = Vec::with_capacity(m.cols);
+    for col in 0..m.cols {
+        let mut values = Vec::with_capacity(m.rows);
+        for row in 0..m.rows {
+            values.push(m.get(row, col));
+        }
+        col_vectors.push(values);
+    }
+
+    Some(SameFuturePastSignature {
+        dim: m.rows,
+        entry_sum,
+        row_classes: duplicate_vector_classes(&row_vectors),
+        col_classes: duplicate_vector_classes(&col_vectors),
+    })
+}
+
+/// Coarse lexicographic gap between two same-future/same-past signatures.
+pub fn same_future_past_signature_gap(
+    left: &SameFuturePastSignature,
+    right: &SameFuturePastSignature,
+) -> SameFuturePastSignatureGap {
+    SameFuturePastSignatureGap {
+        dimension_gap: left.dim.abs_diff(right.dim),
+        row_class_gap: class_signature_gap(&left.row_classes, &right.row_classes),
+        col_class_gap: class_signature_gap(&left.col_classes, &right.col_classes),
+        entry_sum_gap: left.entry_sum.abs_diff(right.entry_sum),
+    }
+}
+
+/// Enumerate research-only proposal candidates toward `target` from bounded graph families.
+///
+/// This does not affect default search expansion. It exists so proposal sources can
+/// be inspected and compared against the blind one-step graph successor surface.
+pub fn enumerate_graph_proposals(
+    current: &DynMatrix,
+    target: &DynMatrix,
+    max_dim: usize,
+    max_zigzag_bridge_entry: Option<u32>,
+) -> GraphProposals {
+    assert!(current.is_square());
+    assert!(target.is_square());
+
+    let target_signature = same_future_past_signature(target)
+        .expect("square target should always produce a same-future/past signature");
+    let current_canon = current.canonical_perm();
+    let mut candidates = 0usize;
+    let mut family_candidates = BTreeMap::new();
+    let mut nodes = BTreeMap::<DynMatrix, GraphProposal>::new();
+
+    if current.rows < max_dim {
+        for witness in enumerate_same_future_insplits(current) {
+            candidates += 1;
+            *family_candidates.entry("same_future_insplit").or_default() += 1;
+            record_graph_proposal(
+                &mut nodes,
+                "same_future_insplit",
+                witness.outsplit,
+                Some(EsseStep {
+                    u: witness.edge,
+                    v: witness.division,
+                }),
+                &current_canon,
+                &target_signature,
+            );
+        }
+
+        for witness in enumerate_same_past_outsplits(current) {
+            candidates += 1;
+            *family_candidates.entry("same_past_outsplit").or_default() += 1;
+            record_graph_proposal(
+                &mut nodes,
+                "same_past_outsplit",
+                witness.outsplit,
+                Some(EsseStep {
+                    u: witness.division,
+                    v: witness.edge,
+                }),
+                &current_canon,
+                &target_signature,
+            );
+        }
+    }
+
+    if current.rows > 2 {
+        for witness in enumerate_out_amalgamations(current) {
+            candidates += 1;
+            *family_candidates.entry("out_amalgamation").or_default() += 1;
+            record_graph_proposal(
+                &mut nodes,
+                "out_amalgamation",
+                witness.outsplit,
+                Some(EsseStep {
+                    u: witness.edge,
+                    v: witness.division,
+                }),
+                &current_canon,
+                &target_signature,
+            );
+        }
+
+        for witness in enumerate_in_amalgamations(current) {
+            candidates += 1;
+            *family_candidates.entry("in_amalgamation").or_default() += 1;
+            record_graph_proposal(
+                &mut nodes,
+                "in_amalgamation",
+                witness.outsplit,
+                Some(EsseStep {
+                    u: witness.division,
+                    v: witness.edge,
+                }),
+                &current_canon,
+                &target_signature,
+            );
+        }
+    }
+
+    if let Some(max_bridge_entry) = max_zigzag_bridge_entry {
+        if current.rows == 3 && current.cols == 3 {
+            for neighbor in enumerate_3x3_outsplit_zigzag_neighbors(current, max_bridge_entry) {
+                candidates += 1;
+                *family_candidates
+                    .entry("outsplit_zigzag_neighbor")
+                    .or_default() += 1;
+                record_graph_proposal(
+                    &mut nodes,
+                    "outsplit_zigzag_neighbor",
+                    neighbor,
+                    None,
+                    &current_canon,
+                    &target_signature,
+                );
+            }
+        }
+    }
+
+    let mut nodes = nodes.into_values().collect::<Vec<_>>();
+    nodes.sort_by(|left, right| {
+        left.target_signature_gap
+            .cmp(&right.target_signature_gap)
+            .then_with(|| left.matrix.cmp(&right.matrix))
+    });
+    for proposal in &mut nodes {
+        proposal.families.sort_unstable();
+        proposal.families.dedup();
+    }
+
+    GraphProposals {
+        candidates,
+        family_candidates,
+        nodes,
+    }
 }
 
 /// Enumerate canonical successors reached by one graph split or amalgamation.
@@ -331,6 +546,43 @@ fn push_canonical_graph_successor(
     }
 }
 
+fn record_graph_proposal(
+    nodes: &mut BTreeMap<DynMatrix, GraphProposal>,
+    family: &'static str,
+    matrix: DynMatrix,
+    step: Option<EsseStep>,
+    current_canon: &DynMatrix,
+    target_signature: &SameFuturePastSignature,
+) {
+    let canon = matrix.canonical_perm();
+    if canon == *current_canon {
+        return;
+    }
+    let signature = same_future_past_signature(&canon)
+        .expect("square graph proposal should always produce a same-future/past signature");
+    let gap = same_future_past_signature_gap(&signature, target_signature);
+
+    match nodes.entry(canon.clone()) {
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            if !entry.get().families.contains(&family) {
+                entry.get_mut().families.push(family);
+            }
+            if entry.get().step.is_none() && step.is_some() {
+                entry.get_mut().step = step;
+            }
+        }
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(GraphProposal {
+                families: vec![family],
+                matrix: canon,
+                orig_matrix: matrix,
+                step,
+                target_signature_gap: gap,
+            });
+        }
+    }
+}
+
 /// Search for a common one-step 3x3 out-split refinement up to permutation.
 pub fn find_common_outsplit_refinement_2x2(
     a: &SqMatrix<2>,
@@ -419,6 +671,47 @@ fn child_parent_assignments(child_count: usize, parent_count: usize) -> Vec<Vec<
     let mut current = vec![0usize; child_count];
     recurse_child_parent_assignments(0, child_count, parent_count, &mut current, &mut assignments);
     assignments
+}
+
+fn duplicate_vector_classes(vectors: &[Vec<u32>]) -> Vec<SameFuturePastClassSignature> {
+    let mut multiplicities = BTreeMap::<Vec<u32>, usize>::new();
+    for values in vectors {
+        *multiplicities.entry(values.clone()).or_default() += 1;
+    }
+
+    let mut classes = multiplicities
+        .into_iter()
+        .map(|(values, multiplicity)| SameFuturePastClassSignature {
+            multiplicity,
+            entry_sum: values.iter().copied().sum(),
+            support: values.iter().filter(|&&value| value > 0).count() as u8,
+        })
+        .collect::<Vec<_>>();
+    classes.sort_unstable();
+    classes
+}
+
+fn class_signature_gap(
+    left: &[SameFuturePastClassSignature],
+    right: &[SameFuturePastClassSignature],
+) -> usize {
+    let shared = left.len().min(right.len());
+    let mut gap = 0usize;
+
+    for (left_class, right_class) in left.iter().zip(right.iter()).take(shared) {
+        gap += left_class.multiplicity.abs_diff(right_class.multiplicity);
+        gap += left_class.entry_sum.abs_diff(right_class.entry_sum) as usize;
+        gap += left_class.support.abs_diff(right_class.support) as usize;
+    }
+
+    for extra in &left[shared..] {
+        gap += extra.multiplicity + extra.entry_sum as usize + extra.support as usize;
+    }
+    for extra in &right[shared..] {
+        gap += extra.multiplicity + extra.entry_sum as usize + extra.support as usize;
+    }
+
+    gap
 }
 
 fn has_duplicate_rows(a: &DynMatrix) -> bool {
@@ -814,6 +1107,40 @@ mod tests {
             assert_eq!(witness.division.mul(&witness.edge), DynMatrix::from_sq(&a));
             assert!(has_duplicate_columns(&witness.outsplit));
         }
+    }
+
+    #[test]
+    fn test_same_future_past_signature_gap_zero_for_matching_duplicate_profiles() {
+        let a = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 1, 1]);
+        let b = DynMatrix::new(3, 3, vec![1, 0, 1, 1, 0, 1, 0, 1, 1]);
+        let a_signature = same_future_past_signature(&a).unwrap();
+        let b_signature = same_future_past_signature(&b).unwrap();
+
+        assert_eq!(
+            same_future_past_signature_gap(&a_signature, &b_signature),
+            SameFuturePastSignatureGap::default()
+        );
+    }
+
+    #[test]
+    fn test_graph_proposals_include_amalgamations_and_sort_by_gap() {
+        let source = SqMatrix::new([[1, 3], [2, 1]]);
+        let current = enumerate_same_future_insplits_2x2_to_3x3(&source)[0]
+            .outsplit
+            .clone();
+        let target = DynMatrix::from_sq(&SqMatrix::new([[1, 6], [1, 1]]));
+
+        let proposals = enumerate_graph_proposals(&current, &target, 4, Some(8));
+
+        assert!(!proposals.nodes.is_empty());
+        assert!(proposals
+            .nodes
+            .iter()
+            .any(|proposal| proposal.families.contains(&"in_amalgamation")));
+        assert!(proposals
+            .nodes
+            .windows(2)
+            .all(|window| { window[0].target_signature_gap <= window[1].target_signature_gap }));
     }
 
     #[test]

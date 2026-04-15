@@ -9,7 +9,9 @@ use crate::aligned::{
     ConcreteShiftSearchResult2x2,
 };
 use crate::factorisation::visit_all_factorisations_with_family;
-use crate::graph_moves::enumerate_graph_move_successors;
+use crate::graph_moves::{
+    enumerate_graph_move_successors, same_future_past_signature, SameFuturePastSignature,
+};
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::path_scoring::score_node;
@@ -67,21 +69,6 @@ struct ApproxSignature {
     col_sums: Vec<u32>,
     row_supports: Vec<u8>,
     col_supports: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct SameFuturePastClassSignature {
-    multiplicity: usize,
-    entry_sum: u32,
-    support: u8,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct SameFuturePastSignature {
-    dim: usize,
-    entry_sum: u64,
-    row_classes: Vec<SameFuturePastClassSignature>,
-    col_classes: Vec<SameFuturePastClassSignature>,
 }
 
 const SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD: usize = 8;
@@ -5387,58 +5374,6 @@ fn approx_signature(m: &DynMatrix) -> ApproxSignature {
         row_supports,
         col_supports,
     }
-}
-
-fn same_future_past_signature(m: &DynMatrix) -> Option<SameFuturePastSignature> {
-    if !m.is_square() {
-        return None;
-    }
-
-    let mut entry_sum = 0u64;
-    let mut row_vectors = Vec::with_capacity(m.rows);
-    for row in 0..m.rows {
-        let mut values = Vec::with_capacity(m.cols);
-        for col in 0..m.cols {
-            let value = m.get(row, col);
-            entry_sum += value as u64;
-            values.push(value);
-        }
-        row_vectors.push(values);
-    }
-
-    let mut col_vectors = Vec::with_capacity(m.cols);
-    for col in 0..m.cols {
-        let mut values = Vec::with_capacity(m.rows);
-        for row in 0..m.rows {
-            values.push(m.get(row, col));
-        }
-        col_vectors.push(values);
-    }
-
-    Some(SameFuturePastSignature {
-        dim: m.rows,
-        entry_sum,
-        row_classes: duplicate_vector_classes(&row_vectors),
-        col_classes: duplicate_vector_classes(&col_vectors),
-    })
-}
-
-fn duplicate_vector_classes(vectors: &[Vec<u32>]) -> Vec<SameFuturePastClassSignature> {
-    let mut multiplicities = BTreeMap::<Vec<u32>, usize>::new();
-    for values in vectors {
-        *multiplicities.entry(values.clone()).or_default() += 1;
-    }
-
-    let mut classes = multiplicities
-        .into_iter()
-        .map(|(values, multiplicity)| SameFuturePastClassSignature {
-            multiplicity,
-            entry_sum: values.iter().copied().sum(),
-            support: values.iter().filter(|&&value| value > 0).count() as u8,
-        })
-        .collect::<Vec<_>>();
-    classes.sort_unstable();
-    classes
 }
 
 fn move_family_telemetry_mut<'a>(
