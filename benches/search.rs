@@ -14,6 +14,7 @@ fn bench_endpoint_equivalent_fast(c: &mut Criterion) {
         frontier_mode: FrontierMode::Bfs,
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
+        beam_bfs_handoff_depth: None,
     };
     c.bench_function("endpoint_equivalent_fast", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
@@ -31,6 +32,7 @@ fn bench_endpoint_invariant_reject_fast(c: &mut Criterion) {
         frontier_mode: FrontierMode::Bfs,
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
+        beam_bfs_handoff_depth: None,
     };
     c.bench_function("endpoint_invariant_reject_fast", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
@@ -86,6 +88,7 @@ fn bench_expand_next_n(c: &mut Criterion) {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             target_expanded_nodes: 2_048,
         },
@@ -100,6 +103,7 @@ fn bench_expand_next_n(c: &mut Criterion) {
                 frontier_mode: FrontierMode::Bfs,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
+                beam_bfs_handoff_depth: None,
             },
             target_expanded_nodes: 8_192,
         },
