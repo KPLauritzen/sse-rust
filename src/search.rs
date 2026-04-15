@@ -5075,6 +5075,34 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_exposes_diagonal_refactorization() {
+        let u = DynMatrix::new(3, 3, vec![3, 0, 0, 0, 1, 0, 0, 0, 2]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 2, 1, 1, 1, 0, 1]);
+        let current = u.mul(&v);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(expansions
+            .iter()
+            .any(|expansion| expansion.move_family == "diagonal_refactorization_3x3"));
+        assert!(stats
+            .move_family_telemetry
+            .get("diagonal_refactorization_3x3")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_deduplicates_across_frontier_nodes() {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         let a_dyn = DynMatrix::from_sq(&a);

@@ -1749,6 +1749,57 @@ where
     }
 }
 
+const DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY: u32 = 3;
+
+/// Generate a narrow 3x3 -> 3x3 diagonal-refactorization family:
+/// A = D*X -> B = X*D or A = X*D -> B = D*X, where D is positive diagonal.
+///
+/// This deliberately stays small. It only tries tiny diagonal entries, skips
+/// scalar diagonals, and only emits nontrivial same-size moves whose factors
+/// stay within the standard entry bound.
+fn visit_diagonal_refactorizations_3x3<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY);
+    if diag_cap <= 1 {
+        return;
+    }
+
+    let mut cm = [[0u32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            cm[i][j] = c.get(i, j);
+        }
+    }
+
+    for d0 in 1..=diag_cap {
+        for d1 in 1..=diag_cap {
+            for d2 in 1..=diag_cap {
+                let diag = [d0, d1, d2];
+                if diag == [1, 1, 1] || (d0 == d1 && d1 == d2) {
+                    continue;
+                }
+
+                if let Some(x) = divide_rows_by_diag_3x3(&cm, &diag, max_entry) {
+                    if scale_cols_by_diag_3x3(&x, &diag) != cm {
+                        visit(diag3_to_dyn(diag), mat3_u32_to_dyn(&x));
+                    }
+                }
+
+                if let Some(x) = divide_cols_by_diag_3x3(&cm, &diag, max_entry) {
+                    if scale_rows_by_diag_3x3(&x, &diag) != cm {
+                        visit(mat3_u32_to_dyn(&x), diag3_to_dyn(diag));
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn identity_mat3_i64() -> [[i64; 3]; 3] {
     let mut m = [[0i64; 3]; 3];
     for idx in 0..3 {
@@ -1789,6 +1840,81 @@ fn max_entry_mat3_i64(m: &[[i64; 3]; 3]) -> i64 {
 fn mat3_i64_to_dyn(m: &[[i64; 3]; 3]) -> DynMatrix {
     let data: Vec<u32> = m.iter().flat_map(|r| r.iter()).map(|&e| e as u32).collect();
     DynMatrix::new(3, 3, data)
+}
+
+fn mat3_u32_to_dyn(m: &[[u32; 3]; 3]) -> DynMatrix {
+    let data: Vec<u32> = m.iter().flat_map(|r| r.iter()).copied().collect();
+    DynMatrix::new(3, 3, data)
+}
+
+fn diag3_to_dyn(diag: [u32; 3]) -> DynMatrix {
+    DynMatrix::new(3, 3, vec![diag[0], 0, 0, 0, diag[1], 0, 0, 0, diag[2]])
+}
+
+fn divide_rows_by_diag_3x3(
+    m: &[[u32; 3]; 3],
+    diag: &[u32; 3],
+    max_entry: u32,
+) -> Option<[[u32; 3]; 3]> {
+    let mut out = [[0u32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            let value = m[i][j];
+            let scale = diag[i];
+            if value % scale != 0 {
+                return None;
+            }
+            let quotient = value / scale;
+            if quotient > max_entry {
+                return None;
+            }
+            out[i][j] = quotient;
+        }
+    }
+    Some(out)
+}
+
+fn divide_cols_by_diag_3x3(
+    m: &[[u32; 3]; 3],
+    diag: &[u32; 3],
+    max_entry: u32,
+) -> Option<[[u32; 3]; 3]> {
+    let mut out = [[0u32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            let value = m[i][j];
+            let scale = diag[j];
+            if value % scale != 0 {
+                return None;
+            }
+            let quotient = value / scale;
+            if quotient > max_entry {
+                return None;
+            }
+            out[i][j] = quotient;
+        }
+    }
+    Some(out)
+}
+
+fn scale_rows_by_diag_3x3(m: &[[u32; 3]; 3], diag: &[u32; 3]) -> [[u32; 3]; 3] {
+    let mut out = [[0u32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i][j] = m[i][j] * diag[i];
+        }
+    }
+    out
+}
+
+fn scale_cols_by_diag_3x3(m: &[[u32; 3]; 3], diag: &[u32; 3]) -> [[u32; 3]; 3] {
+    let mut out = [[0u32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i][j] = m[i][j] * diag[j];
+        }
+    }
+    out
 }
 
 // --- Square 3×3 factorisation ---
@@ -2510,11 +2636,16 @@ const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 2] = 
     ),
 ];
 
-const THREE_BY_THREE_SAME_DIMENSION_FAMILIES: [FactorisationFamilyDescriptor; 5] = [
+const THREE_BY_THREE_SAME_DIMENSION_FAMILIES: [FactorisationFamilyDescriptor; 6] = [
     FactorisationFamilyDescriptor::new(
         "square_factorisation_3x3",
         enabled_square_factorisation_3x3,
         enumerate_square_factorisation_3x3_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "diagonal_refactorization_3x3",
+        enabled_three_by_three_same_dimension_family,
+        enumerate_diagonal_refactorization_3x3_family,
     ),
     FactorisationFamilyDescriptor::new(
         "elementary_conjugation_3x3",
@@ -2692,6 +2823,14 @@ fn enumerate_square_factorisation_3x3_family(
 ) {
     let sq3_cap = max_entry.min(4);
     visit_square_factorisations_3x3(a, sq3_cap, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_diagonal_refactorization_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_diagonal_refactorizations_3x3(a, max_entry, &mut |u, v| visit(u, v));
 }
 
 fn enumerate_elementary_conjugation_3x3_family(
@@ -3255,6 +3394,22 @@ mod tests {
     }
 
     #[test]
+    fn test_visit_all_factorisations_includes_diagonal_refactorization() {
+        let u = DynMatrix::new(3, 3, vec![3, 0, 0, 0, 1, 0, 0, 0, 2]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 2, 1, 1, 1, 0, 1]);
+        let c = u.mul(&v);
+        let mut found = false;
+
+        visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
+            if cand_u == u && cand_v == v {
+                found = true;
+            }
+        });
+
+        assert!(found, "expected diagonal refactorization factorisation");
+    }
+
+    #[test]
     fn test_graph_plus_structured_policy_excludes_square_factorisation_3x3() {
         let u = DynMatrix::new(3, 3, vec![5, 2, 0, 2, 1, 0, 0, 0, 1]);
         let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
@@ -3276,6 +3431,27 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_plus_structured_policy_exposes_diagonal_refactorization_witness() {
+        let u = DynMatrix::new(3, 3, vec![3, 0, 0, 0, 1, 0, 0, 0, 2]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 2, 1, 1, 1, 0, 1]);
+        let c = u.mul(&v);
+        let mut families = BTreeSet::new();
+
+        visit_factorisations_with_family_for_policy(
+            &c,
+            3,
+            6,
+            MoveFamilyPolicy::GraphPlusStructured,
+            |family, _, _| {
+                families.insert(family);
+            },
+        );
+
+        assert!(families.contains("diagonal_refactorization_3x3"));
+        assert!(!families.contains("square_factorisation_3x3"));
+    }
+
+    #[test]
     fn test_selected_family_labels_for_mixed_3x3_follow_group_order() {
         assert_eq!(
             selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::Mixed),
@@ -3283,6 +3459,7 @@ mod tests {
                 "rectangular_factorisation_3x3_to_2",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
                 "square_factorisation_3x3",
+                "diagonal_refactorization_3x3",
                 "elementary_conjugation_3x3",
                 "opposite_shear_conjugation_3x3",
                 "parallel_shear_conjugation_3x3",
@@ -3298,6 +3475,7 @@ mod tests {
             vec![
                 "rectangular_factorisation_3x3_to_2",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
+                "diagonal_refactorization_3x3",
                 "elementary_conjugation_3x3",
                 "opposite_shear_conjugation_3x3",
                 "parallel_shear_conjugation_3x3",
