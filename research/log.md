@@ -333,3 +333,6 @@
 
 - `loop31-cofactor-reuse-4x4` Added reusable 4x4 cofactor/determinant solving path and removed repeated solve allocations in structured `4x4<->5x5` sparse-factorisation loops.
   Kept. Correctness and score gates were unchanged (`24/24` required, hits `21`, points `3645`, telemetry-focus `45,802,619`), while harness elapsed improved (`16046 -> 13581 ms`). Hard k=3 plateau stayed at lag `7`, but attempts-176 now completed under a relaxed `260s` cap (still timed out under strict `240s`). Goal-3 k4 mixed-beam lag16 remained timeout at `120s`.
+
+- `loop32-dedup-signature-move` Removed `SameFuturePastSignature` clone churn in `deduplicate_expansions` by moving signatures into the representative set (`take()`), leaving behavior unchanged.
+  Kept as a micro-optimization. Gates/score were unchanged (`24/24` required, hits `21`, points `3645`, telemetry-focus `45,802,619`), harness elapsed improved slightly (`13581 -> 13535 ms`), and the hard k=3 attempts-168 surface stayed effectively neutral on lag/work.

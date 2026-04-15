@@ -5087,13 +5087,13 @@ fn deduplicate_expansions(
     let mut same_future_past_seen = HashSet::new();
     let mut deduped = Vec::with_capacity(expansions.len());
     let mut same_future_past_collisions = 0usize;
-    for expansion in expansions {
+    for mut expansion in expansions {
         if seen.contains(&expansion.next_canon) {
             continue;
         }
         if enable_same_future_past_representatives && expansion.next_canon.rows >= 3 {
-            if let Some(signature) = expansion.same_future_past_signature.as_ref() {
-                if !same_future_past_seen.insert(signature.clone()) {
+            if let Some(signature) = expansion.same_future_past_signature.take() {
+                if !same_future_past_seen.insert(signature) {
                     same_future_past_collisions += 1;
                     continue;
                 }
