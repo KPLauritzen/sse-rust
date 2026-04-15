@@ -5100,10 +5100,15 @@ fn deduplicate_expansions(
     mut expansions: Vec<FrontierExpansion>,
     enable_same_future_past_representatives: bool,
 ) -> (Vec<FrontierExpansion>, usize) {
-    if expansions
+    let needs_sort = expansions
         .windows(2)
-        .any(|window| window[0].order_key > window[1].order_key)
-    {
+        .any(|window| window[0].order_key > window[1].order_key);
+    #[cfg(not(test))]
+    debug_assert!(
+        !needs_sort,
+        "frontier expansions should already be emitted in nondecreasing order_key order"
+    );
+    if needs_sort {
         expansions.sort_unstable_by_key(|expansion| expansion.order_key);
     }
     let mut seen = HashSet::new();
@@ -7200,6 +7205,44 @@ mod tests {
         assert!(duplicate_frontier_expansions
             .iter()
             .all(|expansion| expansion.order_key.frontier_index == 0));
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_emits_non_decreasing_order_keys() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let a_dyn = DynMatrix::from_sq(&a);
+        let a_canon = a_dyn.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(a_canon.clone(), a_dyn);
+
+        let (expansions, _, _) =
+            expand_frontier_layer(&[a_canon], &orig, 3, 6, MoveFamilyPolicy::Mixed);
+
+        assert!(expansions.len() > 1);
+        assert!(expansions
+            .windows(2)
+            .all(|window| window[0].order_key <= window[1].order_key));
+    }
+
+    #[test]
+    fn test_search_telemetry_mixed_expand_case_repeats_cleanly() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let config = SearchConfig {
+            max_lag: 3,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+        };
+
+        for _ in 0..16 {
+            let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
+            assert!(!telemetry.layers.is_empty());
+            assert!(telemetry.frontier_nodes_expanded >= 1);
+            assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
+        }
     }
 
     #[test]
