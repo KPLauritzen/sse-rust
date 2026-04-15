@@ -30,7 +30,7 @@ use self::{
     execution::execute_case_for_harness,
     summary::{
         build_campaign_summaries, build_comparison_summaries, build_strategy_summaries,
-        derive_telemetry_summary, lag_score, stage_combination_label,
+        derive_telemetry_summary, lag_score, scheduled_cases, stage_combination_label,
     },
 };
 
@@ -54,6 +54,12 @@ enum OutputFormat {
 struct CaseCorpus {
     schema_version: u32,
     cases: Vec<ResearchCase>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RawCaseCorpus {
+    schema_version: u32,
+    cases: Vec<RawResearchCase>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -83,6 +89,52 @@ struct ResearchCase {
     campaign: Option<CampaignConfig>,
     #[serde(default)]
     measurement: Option<MeasurementConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RawResearchCase {
+    id: String,
+    description: String,
+    #[serde(default)]
+    a: Vec<Vec<u32>>,
+    #[serde(default)]
+    b: Vec<Vec<u32>>,
+    #[serde(default)]
+    endpoint_fixture: Option<String>,
+    #[serde(default)]
+    seeded_guide_ids: Vec<String>,
+    #[serde(default)]
+    guide_artifact_paths: Vec<String>,
+    #[serde(default = "default_case_required")]
+    required: bool,
+    config: JsonSearchConfig,
+    timeout_ms: u64,
+    allowed_outcomes: Vec<String>,
+    target_outcome: Option<String>,
+    points: OutcomePoints,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    campaign: Option<CampaignConfig>,
+    #[serde(default)]
+    measurement: Option<MeasurementConfig>,
+    #[serde(default)]
+    deepening_schedule: Option<DeepeningSchedule>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct DeepeningSchedule {
+    attempts: Vec<DeepeningAttempt>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+struct DeepeningAttempt {
+    #[serde(default)]
+    max_lag: Option<usize>,
+    #[serde(default)]
+    max_intermediate_dim: Option<usize>,
+    #[serde(default)]
+    max_entry: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -553,10 +605,95 @@ where
 fn load_corpus(path: &Path) -> Result<CaseCorpus, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    let corpus = serde_json::from_str(&raw)
+    let parsed: RawCaseCorpus = serde_json::from_str(&raw)
         .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+    let corpus = expand_corpus(parsed)?;
     validate_corpus(&corpus)?;
     Ok(corpus)
+}
+
+fn expand_corpus(corpus: RawCaseCorpus) -> Result<CaseCorpus, String> {
+    let mut cases = Vec::new();
+    for case in corpus.cases {
+        cases.extend(expand_case(case)?);
+    }
+    Ok(CaseCorpus {
+        schema_version: corpus.schema_version,
+        cases,
+    })
+}
+
+fn expand_case(case: RawResearchCase) -> Result<Vec<ResearchCase>, String> {
+    let schedule = case.deepening_schedule.clone();
+    let base_case = case.into_research_case();
+
+    let Some(schedule) = schedule else {
+        return Ok(vec![base_case]);
+    };
+
+    if schedule.attempts.is_empty() {
+        return Err(format!(
+            "case {} deepening_schedule.attempts must not be empty",
+            base_case.id
+        ));
+    }
+
+    let attempt_digits = schedule.attempts.len().to_string().len();
+    schedule
+        .attempts
+        .into_iter()
+        .enumerate()
+        .map(|(index, attempt)| {
+            if attempt.max_lag.is_none()
+                && attempt.max_intermediate_dim.is_none()
+                && attempt.max_entry.is_none()
+            {
+                return Err(format!(
+                    "case {} deepening_schedule attempt {} must override at least one bound",
+                    base_case.id,
+                    index + 1
+                ));
+            }
+
+            let mut derived_case = base_case.clone();
+            derived_case.config.max_lag = attempt.max_lag.unwrap_or(base_case.config.max_lag);
+            derived_case.config.max_intermediate_dim = attempt
+                .max_intermediate_dim
+                .unwrap_or(base_case.config.max_intermediate_dim);
+            derived_case.config.max_entry = attempt.max_entry.unwrap_or(base_case.config.max_entry);
+            derived_case.id = deepening_case_id(
+                &base_case.id,
+                index + 1,
+                attempt_digits,
+                &derived_case.config,
+            );
+            if let Some(campaign) = derived_case.campaign.as_mut() {
+                campaign.schedule_order = campaign
+                    .schedule_order
+                    .checked_add(index)
+                    .ok_or_else(|| {
+                        format!(
+                            "case {} deepening_schedule attempt {} overflowed campaign schedule_order",
+                            base_case.id,
+                            index + 1
+                        )
+                    })?;
+            }
+            Ok(derived_case)
+        })
+        .collect()
+}
+
+fn deepening_case_id(
+    base_id: &str,
+    attempt_number: usize,
+    attempt_digits: usize,
+    config: &JsonSearchConfig,
+) -> String {
+    format!(
+        "{base_id}__deepening_{attempt_number:0attempt_digits$}_lag{}_dim{}_entry{}",
+        config.max_lag, config.max_intermediate_dim, config.max_entry
+    )
 }
 
 fn validate_corpus(corpus: &CaseCorpus) -> Result<(), String> {
@@ -564,6 +701,29 @@ fn validate_corpus(corpus: &CaseCorpus) -> Result<(), String> {
         normalized_measurement_config(case)?;
     }
     Ok(())
+}
+
+impl RawResearchCase {
+    fn into_research_case(self) -> ResearchCase {
+        ResearchCase {
+            id: self.id,
+            description: self.description,
+            a: self.a,
+            b: self.b,
+            endpoint_fixture: self.endpoint_fixture,
+            seeded_guide_ids: self.seeded_guide_ids,
+            guide_artifact_paths: self.guide_artifact_paths,
+            required: self.required,
+            config: self.config,
+            timeout_ms: self.timeout_ms,
+            allowed_outcomes: self.allowed_outcomes,
+            target_outcome: self.target_outcome,
+            points: self.points,
+            tags: self.tags,
+            campaign: self.campaign,
+            measurement: self.measurement,
+        }
+    }
 }
 
 fn normalized_measurement_config(case: &ResearchCase) -> Result<Option<MeasurementConfig>, String> {
@@ -1034,8 +1194,83 @@ impl OutcomePoints {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_temp_corpus(prefix: &str, contents: &str) -> (PathBuf, PathBuf) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("{prefix}-{}-{timestamp}", std::process::id()));
+        fs::create_dir_all(&temp_dir).expect("temporary corpus directory should exist");
+        let corpus_path = temp_dir.join("cases.json");
+        fs::write(&corpus_path, contents).expect("temporary corpus file should be written");
+        (temp_dir, corpus_path)
+    }
+
+    fn summary_case(case: &ResearchCase, actual_outcome: &str, elapsed_ms: u128) -> CaseSummary {
+        let source_dim = case.a.len();
+        let target_dim = case.b.len();
+        let passed = case
+            .allowed_outcomes
+            .iter()
+            .any(|allowed| allowed == actual_outcome);
+        let hit_target = case
+            .target_outcome
+            .as_ref()
+            .is_some_and(|target| target == actual_outcome);
+
+        CaseSummary {
+            id: case.id.clone(),
+            description: case.description.clone(),
+            campaign: case.campaign.clone(),
+            measurement: None,
+            endpoint_fixture: case.endpoint_fixture.clone(),
+            seeded_guide_ids: case.seeded_guide_ids.clone(),
+            guide_artifact_paths: case.guide_artifact_paths.clone(),
+            endpoint: EndpointSummary {
+                source_dim,
+                target_dim,
+                a: case.a.clone(),
+                b: case.b.clone(),
+            },
+            config: case.config.clone(),
+            actual_outcome: actual_outcome.to_string(),
+            allowed_outcomes: case.allowed_outcomes.clone(),
+            target_outcome: case.target_outcome.clone(),
+            required: case.required,
+            passed,
+            hit_target,
+            points: case.points.for_outcome(actual_outcome),
+            elapsed_ms,
+            timeout_ms: case.timeout_ms,
+            steps: None,
+            reason: None,
+            result_model: ResultModel {
+                solver_path: if source_dim == 2 && target_dim == 2 {
+                    HarnessSolverPath::TwoByTwo
+                } else {
+                    HarnessSolverPath::SquareEndpoint
+                },
+                source_dim,
+                target_dim,
+                resolution_kind: ResultResolutionKind::SearchExhausted,
+                witness_lag: None,
+                path_matrix_count: None,
+                frontier_layers: 0,
+            },
+            best_known_witness: None,
+            improved_best_known_witness: false,
+            telemetry: SearchTelemetry::default(),
+            telemetry_summary: derive_telemetry_summary(
+                actual_outcome,
+                &SearchTelemetry::default(),
+                case.config.max_lag,
+            ),
+            tags: case.tags.clone(),
+        }
+    }
 
     #[test]
     fn run_case_handles_non_2x2_square_endpoints() {
@@ -1506,6 +1741,148 @@ mod tests {
     }
 
     #[test]
+    fn load_corpus_expands_deepening_schedule_into_derived_cases() {
+        let (temp_dir, corpus_path) = write_temp_corpus(
+            "research-harness-deepening-corpus",
+            r#"{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "deepening-probe",
+      "description": "ordered deepening probe",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "required": false,
+      "measurement": {
+        "repeat_runs": 2
+      },
+      "campaign": {
+        "id": "iterative-bounds",
+        "strategy": "mixed",
+        "schedule_order": 10
+      },
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 2,
+        "max_entry": 3
+      },
+      "deepening_schedule": {
+        "attempts": [
+          { "max_lag": 1 },
+          { "max_lag": 2, "max_intermediate_dim": 3 },
+          { "max_entry": 5 }
+        ]
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["unknown"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -100
+      },
+      "tags": ["deepening", "probe"]
+    }
+  ]
+}"#,
+        );
+
+        let corpus = load_corpus(&corpus_path).expect("deepening corpus should load");
+        assert_eq!(corpus.cases.len(), 3);
+        assert_eq!(
+            corpus
+                .cases
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "deepening-probe__deepening_1_lag1_dim2_entry3",
+                "deepening-probe__deepening_2_lag2_dim3_entry3",
+                "deepening-probe__deepening_3_lag6_dim2_entry5",
+            ]
+        );
+        assert_eq!(corpus.cases[0].config.max_lag, 1);
+        assert_eq!(corpus.cases[0].config.max_intermediate_dim, 2);
+        assert_eq!(corpus.cases[0].config.max_entry, 3);
+        assert_eq!(corpus.cases[1].config.max_lag, 2);
+        assert_eq!(corpus.cases[1].config.max_intermediate_dim, 3);
+        assert_eq!(corpus.cases[1].config.max_entry, 3);
+        assert_eq!(corpus.cases[2].config.max_lag, 6);
+        assert_eq!(corpus.cases[2].config.max_intermediate_dim, 2);
+        assert_eq!(corpus.cases[2].config.max_entry, 5);
+        assert_eq!(
+            corpus.cases[0].measurement,
+            Some(MeasurementConfig {
+                warmup_runs: 0,
+                repeat_runs: 2,
+            })
+        );
+        assert_eq!(
+            corpus
+                .cases
+                .iter()
+                .map(|case| {
+                    case.campaign
+                        .as_ref()
+                        .expect("deepening cases should retain campaign")
+                        .schedule_order
+                })
+                .collect::<Vec<_>>(),
+            vec![10, 11, 12]
+        );
+        assert_eq!(corpus.cases[2].tags, vec!["deepening", "probe"]);
+
+        fs::remove_dir_all(temp_dir).expect("temporary deepening corpus directory should go away");
+    }
+
+    #[test]
+    fn load_corpus_rejects_deepening_schedule_attempt_without_overrides() {
+        let (temp_dir, corpus_path) = write_temp_corpus(
+            "research-harness-invalid-deepening-corpus",
+            r#"{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "invalid-deepening",
+      "description": "deepening attempt must set at least one bound",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 2,
+        "max_entry": 2
+      },
+      "deepening_schedule": {
+        "attempts": [
+          {}
+        ]
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 1,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      }
+    }
+  ]
+}"#,
+        );
+
+        let err =
+            load_corpus(&corpus_path).expect_err("deepening attempt without bounds should fail");
+        assert!(err.contains("must override at least one bound"));
+
+        fs::remove_dir_all(temp_dir)
+            .expect("temporary invalid deepening corpus directory should go away");
+    }
+
+    #[test]
     fn load_corpus_rejects_measurement_on_required_case() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1901,6 +2278,156 @@ mod tests {
         let comparisons = build_comparison_summaries(&cases);
         assert_eq!(comparisons.len(), 1);
         assert_eq!(comparisons[0].variants.len(), 2);
+    }
+
+    #[test]
+    fn deepening_schedule_order_flows_through_campaign_summary_and_reporting() {
+        let (temp_dir, corpus_path) = write_temp_corpus(
+            "research-harness-deepening-reporting-corpus",
+            r#"{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "deepening-probe",
+      "description": "ordered deepening probe",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "campaign": {
+        "id": "iterative-bounds",
+        "strategy": "mixed",
+        "schedule_order": 10
+      },
+      "config": {
+        "max_lag": 3,
+        "max_intermediate_dim": 2,
+        "max_entry": 3
+      },
+      "deepening_schedule": {
+        "attempts": [
+          { "max_lag": 1 },
+          { "max_lag": 2 },
+          { "max_entry": 4 }
+        ]
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["unknown"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      }
+    },
+    {
+      "id": "fixed-followup",
+      "description": "fixed case after deepening schedule",
+      "a": [[1, 0], [0, 1]],
+      "b": [[1, 0], [0, 1]],
+      "campaign": {
+        "id": "iterative-bounds",
+        "strategy": "mixed",
+        "schedule_order": 20
+      },
+      "config": {
+        "max_lag": 4,
+        "max_intermediate_dim": 2,
+        "max_entry": 4
+      },
+      "timeout_ms": 100,
+      "allowed_outcomes": ["unknown"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      }
+    }
+  ]
+}"#,
+        );
+
+        let corpus = load_corpus(&corpus_path).expect("deepening reporting corpus should load");
+        let ordered = scheduled_cases(&corpus);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "deepening-probe__deepening_1_lag1_dim2_entry3",
+                "deepening-probe__deepening_2_lag2_dim2_entry3",
+                "deepening-probe__deepening_3_lag3_dim2_entry4",
+                "fixed-followup",
+            ]
+        );
+
+        let cases = ordered
+            .iter()
+            .enumerate()
+            .map(|(index, case)| summary_case(case, "unknown", (index + 1) as u128))
+            .collect::<Vec<_>>();
+        let campaigns = build_campaign_summaries(&cases);
+        assert_eq!(campaigns.len(), 1);
+        assert_eq!(
+            campaigns[0]
+                .scheduled_cases
+                .iter()
+                .map(|case| (case.schedule_order, case.case_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (10, "deepening-probe__deepening_1_lag1_dim2_entry3"),
+                (11, "deepening-probe__deepening_2_lag2_dim2_entry3"),
+                (12, "deepening-probe__deepening_3_lag3_dim2_entry4"),
+                (20, "fixed-followup"),
+            ]
+        );
+
+        let summary = HarnessSummary {
+            schema_version: 5,
+            cases_path: corpus_path.display().to_string(),
+            reused_history_sources: 0,
+            fitness: FitnessSummary {
+                required_cases: 0,
+                passed_required_cases: 0,
+                non_required_cases: cases.len(),
+                target_hits: 0,
+                total_points: 0,
+                total_elapsed_ms: 10,
+                current_witness_cases: 0,
+                current_witness_lag_total: 0,
+                current_lag_score: 0,
+                best_known_witness_cases: 0,
+                best_known_witness_lag_total: 0,
+                best_known_lag_score: 0,
+                best_known_improvements: 0,
+                generalized_cases: 0,
+                comparison_groups: 0,
+                campaign_groups: campaigns.len(),
+                strategy_groups: 0,
+                telemetry_focus_cases: 0,
+                telemetry_focus_score: 0,
+                telemetry_focus_reach_score: 0,
+                telemetry_focus_directed_score: 0,
+            },
+            comparisons: vec![],
+            campaigns,
+            strategies: vec![],
+            cases,
+        };
+
+        let pretty = format_pretty_summary(&summary);
+        assert!(pretty.contains("Campaigns"));
+        assert!(pretty.contains("order=10 deepening-probe__deepening_1_lag1_dim2_entry3"));
+        assert!(pretty.contains("order=11 deepening-probe__deepening_2_lag2_dim2_entry3"));
+        assert!(pretty.contains("order=12 deepening-probe__deepening_3_lag3_dim2_entry4"));
+        assert!(pretty.contains("order=20 fixed-followup"));
+
+        fs::remove_dir_all(temp_dir)
+            .expect("temporary deepening reporting corpus directory should go away");
     }
 
     #[test]

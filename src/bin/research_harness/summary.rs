@@ -408,7 +408,7 @@ pub(crate) fn derive_telemetry_summary(
     }
 }
 
-fn scheduled_cases(corpus: &CaseCorpus) -> Vec<&ResearchCase> {
+pub(crate) fn scheduled_cases(corpus: &CaseCorpus) -> Vec<&ResearchCase> {
     let mut scheduled_cases = corpus.cases.iter().collect::<Vec<_>>();
     scheduled_cases.sort_by_key(|case| {
         case.campaign
