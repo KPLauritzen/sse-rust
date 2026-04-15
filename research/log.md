@@ -315,3 +315,6 @@
 
 - `loop26-beam-timeout-ab` Measured beam frontier variants for timeout-bounded shortcut segment searches on the rebuilt hard-dim5 baseline.
   Failed to improve the active objective. Beam with timeout 5 reduced work counters but was slower on wall time than BFS and did not improve lag. Beam width 4 with timeout 1 was faster but under-produced and saturated local improvements (13 at attempts 160-192) versus BFS attempts-160 (20), with lag unchanged at 7. Decision: keep BFS baseline. Details in `research/notes/2026-04-14-k3-shortcut-beam-timeout1-ab.md`.
+
+- `loop27-lagcap-timeout-boundary` Re-measured lag-cap and segment-timeout tradeoffs on the rebuilt hard dim5 baseline.
+  Kept as evidence only. Lag-cap 4 was strictly worse than lag-cap 5 at attempts 160 (same lag/improvements, higher cost). Segment-timeout 3 improved tractability at fixed progress (attempts160 kept lag7/improved20/promoted3 while reducing work), and raised the feasible boundary to attempts168 (attempts176+ timed out). No lag<7 movement. Details in `research/notes/2026-04-14-k3-shortcut-lagcap-timeout-boundary-rebuild.md`.
