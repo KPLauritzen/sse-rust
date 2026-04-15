@@ -69,10 +69,10 @@ primary source. That is no longer the right status:
   is still relevant for the older module-level viewpoint and for the legacy
   naming still present in this code.
 
-So the repo is no longer blocked on source acquisition. The remaining work is
-implementation and integration.
+So the repo is no longer blocked on source acquisition. This note is about the
+current surface and terminology; implementation sequencing belongs in `bd`.
 
-## Remaining Gaps
+## Durable Caveats
 
 - Public naming is mixed. Several types and functions still say `module` even
   though the comments and verification logic now target the concrete
@@ -82,22 +82,18 @@ implementation and integration.
 - The top-level docs were written at different times, so `README.md`,
   `docs/TODO.md`, and this note need to stay consistent about what the code
   actually does.
-- The main solver still needs a clear strategy for when aligned, balanced, or
-  compatible search should serve as a direct proof path, a fallback, or a
-  proposal generator.
+- The main solver can use aligned, balanced, or compatible search as a direct
+  proof path, a fallback, or a proposal generator. Which role to emphasize
+  next is active roadmap work and should be tracked in `bd`.
 
-## Practical rollout
+## Practical Reading
 
-1. Keep the witness validators in [`src/aligned.rs`](../src/aligned.rs) as the
-   ground truth for the concrete relations.
-2. Continue using bounded concrete-shift search as an experimental sidecar and
-   focused proof aid for small `2x2` cases.
-3. Standardize terminology so `aligned shift` refers to the concrete
-   matrix-level relation and old `module` names are clearly marked as
-   compatibility shims.
-4. Decide which of aligned, balanced, or compatible search should be the
-   mainline bounded formulation in [`src/search.rs`](../src/search.rs).
-5. Only then expand the search surface or benchmark effort further.
+- Treat the witness validators in [`src/aligned.rs`](../src/aligned.rs) as the
+  ground truth for the concrete relations.
+- Treat bounded concrete-shift search as an implemented experimental surface
+  for small `2x2` cases, not as a complete main-solver rollout plan.
+- Treat older `module` names in the public API as compatibility shims until
+  the terminology cleanup tracked in `bd` lands.
 
 ## Benchmark Note
 

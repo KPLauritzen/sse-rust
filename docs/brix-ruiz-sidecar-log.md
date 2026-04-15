@@ -1,6 +1,8 @@
 # Brix-Ruiz Sidecar Log
 
-This file holds the detailed experiment log for the Brix-Ruiz family so that [TODO.md](TODO.md) can stay focused on current roadmap items.
+This file holds the detailed experiment log for the Brix-Ruiz family. It keeps
+family-specific evidence and local hypotheses; live follow-up work belongs in
+`bd`.
 
 ## Positive conjugacy paths for similar matrices
 
@@ -409,7 +411,11 @@ Interpretation:
 - allowing 6x6 states is now computationally viable per successor, but the state-space blow-up is the new bottleneck
 - raising caps blindly is unlikely to be the right next move; a useful `max_dim = 6` search probably needs dimension-aware scheduling, delayed 6x6 expansion, or a search mode for paths that genuinely require dimension `6`
 
-## Follow-up experiments
+## Historical Follow-up Experiments
+
+The open questions in this section were the local follow-up frame at the time
+of the experiment. Treat them as historical context; live follow-up work
+belongs in `bd`.
 
 Three follow-up questions are open after the depth-`16` `brix_ruiz_k3` result:
 

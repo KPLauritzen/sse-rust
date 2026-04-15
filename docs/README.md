@@ -11,11 +11,12 @@ This repo now uses three documentation layers with different jobs:
 
 ## Topic Notes
 
-- [`aligned-shift-equivalence.md`](aligned-shift-equivalence.md) tracks the
-  current status of aligned, balanced, and compatible concrete-shift work.
+- [`aligned-shift-equivalence.md`](aligned-shift-equivalence.md) records the
+  current aligned / balanced / compatible concrete-shift surface and the
+  terminology caveats around it. It is not a rollout checklist.
 - [`research-ideas.md`](research-ideas.md) is the long-horizon idea bank from
-  paper reading and code review. It should collect plausible directions, not
-  act as a checklist.
+  paper reading and code review. It should collect plausible directions and
+  synthesis, not a ranked backlog.
 - [`brix-ruiz-sidecar-log.md`](brix-ruiz-sidecar-log.md) is the family-specific
   experimental record for Brix-Ruiz sidecar work.
 - [`rfcs/rfc-001-main-search-shortcut-integration.md`](rfcs/rfc-001-main-search-shortcut-integration.md)
