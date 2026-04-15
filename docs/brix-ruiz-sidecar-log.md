@@ -10,7 +10,7 @@ The Brix-Ruiz family in [references/brix-ruiz-2025-2504.09889.pdf](../references
 - the explicit conjugating matrix is `P_k = [[k-1, k], [1, 1]]`
 - only `k = 2, 3` are currently confirmed SSE
 
-That makes `brix_ruiz_k3` a good candidate for a different attack than bounded ESSE BFS. The relevant local theory is Boyle-Kim-Roush's path-method paper [references/boyle-kim-roush-2013-1209.5096.pdf](../references/boyle-kim-roush-2013-1209.5096.pdf), which treats positive paths inside a conjugacy class as an SSE substrate.
+That makes `brix_ruiz_k3` a good candidate for a different attack than bounded ESSE BFS. The relevant local theory is Boyle-Kim-Roush's path-method paper [references/boyle-kim-roush-2013-1209.5096/paper.pdf](../references/boyle-kim-roush-2013-1209.5096/paper.pdf), which treats positive paths inside a conjugacy class as an SSE substrate.
 
 Concrete experiment:
 

@@ -286,9 +286,9 @@ the best answer is:
 - Eilers, Ruiz (2019), local source:
   [`references/eilers-ruiz-2019-1908.03714/xyz-paper-3-ix.tex`](../../references/eilers-ruiz-2019-1908.03714/xyz-paper-3-ix.tex)
 - Brix (2022), local PDF:
-  [`references/brix-2022-1912.05212.pdf`](../../references/brix-2022-1912.05212.pdf)
+  [`references/brix-2022-1912.05212/paper.pdf`](../../references/brix-2022-1912.05212/paper.pdf)
 - Boyle, Kim, Roush (2013), local PDF:
-  [`references/boyle-kim-roush-2013-1209.5096.pdf`](../../references/boyle-kim-roush-2013-1209.5096.pdf)
+  [`references/boyle-kim-roush-2013-1209.5096/paper.pdf`](../../references/boyle-kim-roush-2013-1209.5096/paper.pdf)
   and public PDF:
   <https://math.umd.edu/~mboyle/papers/bkr.pdf>
 - Eilers, Kiming (2008), local PDF:
