@@ -54,6 +54,42 @@ Follow-up harness sweep after adding the config seam:
 - `beam_bfs_handoff` at depths `0`, `2`, `4`, and `6`
 - same endpoint pair and graph-only bounds as the original probe
 
+Still-deeper seeding recheck on `HEAD e349c35`:
+
+```bash
+timeout -k 1s 5s target/dist/search 1,3,2,1 1,6,1,1 \
+  --max-lag 10 \
+  --max-intermediate-dim 5 \
+  --max-entry 6 \
+  --search-mode graph-only \
+  --frontier-mode beam \
+  --beam-width 10 \
+  --json --telemetry > tmp/sse-rust-9fv-beam-control.json
+
+timeout -k 1s 5s target/dist/search 1,3,2,1 1,6,1,1 \
+  --max-lag 10 \
+  --max-intermediate-dim 5 \
+  --max-entry 6 \
+  --search-mode graph-only \
+  --frontier-mode beam-bfs-handoff \
+  --beam-width 10 \
+  --beam-bfs-handoff-depth 8 \
+  --json --telemetry > tmp/sse-rust-9fv-handoff-depth8.json
+
+timeout -k 1s 5s target/dist/search 1,3,2,1 1,6,1,1 \
+  --max-lag 10 \
+  --max-intermediate-dim 5 \
+  --max-entry 6 \
+  --search-mode graph-only \
+  --frontier-mode beam-bfs-handoff \
+  --beam-width 10 \
+  --beam-bfs-handoff-depth 10 \
+  --json --telemetry > tmp/sse-rust-9fv-handoff-depth10.json
+```
+
+The plain-beam control completed in `0.07s`; the depth-`8` and depth-`10`
+handoff runs were each bounded by the same `5s` cap.
+
 ## Results
 
 ### Plain Beam
@@ -86,6 +122,18 @@ Follow-up harness sweep after adding the config seam:
 - `beam_bfs_handoff_depth = 4`: timed out under `5.0s`
 - `beam_bfs_handoff_depth = 6`: timed out under `5.0s`
 
+### Still-Deeper Seeding Recheck
+
+- plain `beam` control on `target/dist/search`:
+  - outcome: `unknown`
+  - wall time: `0.07s`
+  - `frontier_nodes_expanded = 182`
+  - `candidates_generated = 8334`
+  - `total_visited_nodes = 5372`
+  - `max_frontier_size = 10`
+- `beam_bfs_handoff_depth = 8`: timed out under `5.05s` (`tmp/sse-rust-9fv-handoff-depth8.json` remained empty)
+- `beam_bfs_handoff_depth = 10`: timed out under `5.05s` (`tmp/sse-rust-9fv-handoff-depth10.json` remained empty)
+
 These numbers were rechecked after fixing the handoff boundary to make depth
 `4` inclusive and after deferring beam-phase exact-meet returns until the BFS
 phase can recover shorter deferred paths.
@@ -100,6 +148,10 @@ phase can recover shorter deferred paths.
 - The new depth seam did not produce a viable graph-only harness setting in
   the first bounded sweep: even pushing the handoff out to depth `6` still
   timed out where plain `beam` returned in about half a second.
+- Still-deeper seeding through the same seam did not rescue the mode either:
+  even with `beam_bfs_handoff_depth = 10` (the full `max_lag` cap), the
+  retained-overflow BFS phase still failed to finish within `5s` while plain
+  `beam` completed in `0.07s` with unchanged telemetry.
 - The handoff mode is therefore a usable research surface, not yet a good
   default for the graph-only `k=3` benchmark.
 
@@ -107,5 +159,9 @@ phase can recover shorter deferred paths.
 
 - Keep the default unchanged for now; the bounded sweep does not justify moving
   away from the existing depth-`4` baseline.
-- If graph-only remains the target, try either still-deeper beam seeding
-  (`8+`) or a narrower deferred admission policy before the BFS phase begins.
+- Deeper beam seeding alone is no longer the most informative next probe on
+  this graph-only control; the existing seam already shows that `8` and `10`
+  still time out.
+- If graph-only remains the target, the next bounded experiment surface should
+  be a very narrow deferred-admission policy on retained overflow before the
+  BFS phase begins.
