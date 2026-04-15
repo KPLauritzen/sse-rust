@@ -70,7 +70,9 @@ fn run_expand_next_n(case: &ExpandNextNCase) -> usize {
 ///
 /// These are deterministic, telemetry-driven microbenches: each sample repeats
 /// the same endpoint search until expanded_nodes >= N, then reports throughput
-/// in expanded nodes. Heavy endpoint families remain in research_harness.
+/// in expanded nodes. Lag-sensitive literature families such as Riedel/Baker
+/// remain in research_harness because they are better treated as bounded
+/// scenario probes than low-noise Criterion surfaces.
 fn bench_expand_next_n(c: &mut Criterion) {
     let cases = [
         ExpandNextNCase {
