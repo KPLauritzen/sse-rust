@@ -10,20 +10,20 @@ use crate::graph_moves::{
 use crate::invariants::check_invariants_2x2;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
-    SearchRootRecord, SearchStartRecord,
+    SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, FrontierMode, GuidedRefinementConfig, MoveFamilyPolicy,
-    SearchConfig, SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry,
-    SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
-    ShortcutSearchConfig, ShortcutSearchRoundTelemetry, ShortcutSearchStopReason, SsePath,
-    SseResult, DEFAULT_BEAM_WIDTH,
+    DynSsePath, DynSseResult, EsseStep, FrontierMode, MoveFamilyPolicy, SearchConfig,
+    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
+    SearchRequest, SearchRunResult, SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
+#[cfg(test)]
+use crate::types::{SearchStage, ShortcutSearchConfig, ShortcutSearchStopReason};
 
 use rayon::prelude::*;
 
 mod beam;
+mod dispatch;
 mod frontier;
 mod path;
 mod shortcut;
@@ -34,6 +34,10 @@ use self::beam::{
     push_beam_bfs_handoff_entry, push_beam_frontier_entry, record_best_beam_bfs_handoff_exact_meet,
     should_use_beam_bfs_handoff_phase, BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier,
     BeamFrontier, DEFAULT_BEAM_BFS_HANDOFF_DEPTH,
+};
+use self::dispatch::{
+    emit_layer, emit_roots, emit_started, endpoint_search_request, finish_search_2x2,
+    finish_search_dyn,
 };
 use self::frontier::{
     choose_next_layer, expand_frontier_layer, expand_frontier_layer_dyn, FrontierExpansionSettings,
@@ -162,23 +166,6 @@ pub fn search_sse_2x2_with_telemetry(
     search_sse_2x2_with_telemetry_and_observer(a, b, config, None)
 }
 
-fn search_request(
-    a: &DynMatrix,
-    b: &DynMatrix,
-    config: &SearchConfig,
-    stage: SearchStage,
-) -> SearchRequest {
-    SearchRequest {
-        source: a.clone(),
-        target: b.clone(),
-        config: config.clone(),
-        stage,
-        guide_artifacts: Vec::new(),
-        guided_refinement: GuidedRefinementConfig::default(),
-        shortcut_search: ShortcutSearchConfig::default(),
-    }
-}
-
 /// Probe the best-gap graph proposal shortlist under a bounded graph-only search.
 ///
 /// This is a research-oriented seam: it leaves default frontier expansion alone
@@ -242,7 +229,7 @@ pub fn probe_graph_proposal_shortlist(
 pub fn execute_search_request(
     request: &SearchRequest,
 ) -> Result<(SearchRunResult, SearchTelemetry), String> {
-    stages::execute_search_request(request)
+    dispatch::execute_search_request(request)
 }
 
 /// Execute one search request and optionally stream observer events.
@@ -250,69 +237,7 @@ pub fn execute_search_request_and_observer(
     request: &SearchRequest,
     observer: Option<&mut dyn SearchObserver>,
 ) -> Result<(SearchRunResult, SearchTelemetry), String> {
-    stages::execute_search_request_and_observer(request, observer)
-}
-
-fn emit_started(
-    observer: &mut Option<&mut dyn SearchObserver>,
-    request: &SearchRequest,
-    a_canonical: &DynMatrix,
-    b_canonical: &DynMatrix,
-) {
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_event(&SearchEvent::Started(SearchStartRecord {
-            request: request.clone(),
-            source_canonical: a_canonical.clone(),
-            target_canonical: b_canonical.clone(),
-        }));
-    }
-}
-
-fn emit_roots(observer: &mut Option<&mut dyn SearchObserver>, roots: &[SearchRootRecord]) {
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_event(&SearchEvent::Roots(roots.to_vec()));
-    }
-}
-
-fn emit_layer(observer: &mut Option<&mut dyn SearchObserver>, records: &[SearchEdgeRecord]) {
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_event(&SearchEvent::Layer(records.to_vec()));
-    }
-}
-
-fn emit_finished(
-    observer: &mut Option<&mut dyn SearchObserver>,
-    request: &SearchRequest,
-    result: SearchRunResult,
-    telemetry: &SearchTelemetry,
-) {
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_event(&SearchEvent::Finished(SearchFinishedRecord {
-            request: request.clone(),
-            result,
-            telemetry: telemetry.clone(),
-        }));
-    }
-}
-
-fn finish_search_2x2(
-    mut observer: Option<&mut dyn SearchObserver>,
-    request: &SearchRequest,
-    result: SseResult<2>,
-    telemetry: SearchTelemetry,
-) -> (SseResult<2>, SearchTelemetry) {
-    emit_finished(&mut observer, request, result.clone().into(), &telemetry);
-    (result, telemetry)
-}
-
-fn finish_search_dyn(
-    mut observer: Option<&mut dyn SearchObserver>,
-    request: &SearchRequest,
-    result: DynSseResult,
-    telemetry: SearchTelemetry,
-) -> (DynSseResult, SearchTelemetry) {
-    emit_finished(&mut observer, request, result.clone().into(), &telemetry);
-    (result, telemetry)
+    dispatch::execute_search_request_and_observer(request, observer)
 }
 
 /// Search for a strong shift equivalence path between arbitrary square endpoints,
@@ -353,7 +278,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     deadline: Option<Instant>,
 ) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
-    let request = search_request(a, b, config, SearchStage::EndpointSearch);
+    let request = endpoint_search_request(a, b, config);
 
     if deadline_reached(deadline) {
         return finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry);
@@ -822,7 +747,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     let b_dyn = DynMatrix::from_sq(b);
     let a_canon = a_dyn.canonical_perm();
     let b_canon = b_dyn.canonical_perm();
-    let request = search_request(&a_dyn, &b_dyn, config, SearchStage::EndpointSearch);
+    let request = endpoint_search_request(&a_dyn, &b_dyn, config);
     emit_started(&mut observer, &request, &a_canon, &b_canon);
     emit_roots(
         &mut observer,
@@ -3804,6 +3729,22 @@ mod tests {
         }
     }
 
+    fn endpoint_request(
+        source: DynMatrix,
+        target: DynMatrix,
+        config: SearchConfig,
+    ) -> SearchRequest {
+        SearchRequest {
+            source,
+            target,
+            config,
+            stage: SearchStage::EndpointSearch,
+            guide_artifacts: Vec::new(),
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        }
+    }
+
     fn literature_row_split_fixture_2x2_to_5x5() -> (DynMatrix, DynMatrix, DynSsePath) {
         // Instantiates the generic elementary row-splitting template recorded in
         // research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md with
@@ -4016,6 +3957,55 @@ mod tests {
         };
         assert_valid_path(&path);
         assert_eq!(path.steps.len(), 1);
+    }
+
+    #[test]
+    fn test_execute_search_request_endpoint_search_preserves_2x2_result_shaping() {
+        let a = SqMatrix::new([[0, 1], [1, 2]]);
+        let b = SqMatrix::new([[1, 1], [2, 1]]);
+        let request = endpoint_request(
+            DynMatrix::from_sq(&a),
+            DynMatrix::from_sq(&b),
+            SearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                beam_width: None,
+            },
+        );
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::EquivalentByConcreteShift(proof) => {
+                assert_eq!(proof.relation, ConcreteShiftRelation2x2::Aligned);
+                assert_eq!(proof.witness.shift.lag, 1);
+            }
+            other => panic!(
+                "expected endpoint request dispatch to preserve concrete-shift result shaping, got {other:?}"
+            ),
+        }
+        assert!(telemetry.concrete_shift_shortcut);
+    }
+
+    #[test]
+    fn test_execute_search_request_endpoint_search_routes_dynamic_endpoints() {
+        let a = DynMatrix::new(3, 3, vec![2, 0, 0, 0, 1, 0, 0, 0, 0]);
+        let b = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 1, 0, 0, 0, 2]);
+        let request = endpoint_request(a.clone(), b.clone(), default_config());
+
+        let (result, telemetry) = execute_search_request(&request).unwrap();
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                assert_eq!(path.matrices, vec![a, b]);
+            }
+            other => panic!(
+                "expected endpoint request dispatch to route non-2x2 endpoints through dynamic search, got {other:?}"
+            ),
+        }
+        assert!(telemetry.permutation_shortcut || telemetry.canonical_shortcut);
     }
 
     #[test]

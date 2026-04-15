@@ -3,8 +3,15 @@ use std::time::{Duration, Instant};
 
 use ahash::AHashMap as HashMap;
 
+use super::dispatch::{emit_finished, emit_started};
 use super::path::{reanchor_dyn_sse_path, reverse_dyn_sse_path};
-use super::*;
+use super::{search_sse_with_telemetry_dyn_with_deadline, validate_sse_path_dyn};
+use crate::matrix::DynMatrix;
+use crate::search_observer::SearchObserver;
+use crate::types::{
+    DynSsePath, DynSseResult, GuidedRefinementConfig, SearchConfig, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, ShortcutSearchRoundTelemetry, ShortcutSearchStopReason,
+};
 use crate::types::{GuideArtifact, GuideArtifactPayload};
 
 #[derive(Clone, Debug)]
@@ -163,40 +170,7 @@ struct GuidedEdge {
     path: DynSsePath,
 }
 
-pub(super) fn execute_search_request(
-    request: &SearchRequest,
-) -> Result<(SearchRunResult, SearchTelemetry), String> {
-    execute_search_request_and_observer(request, None)
-}
-
-pub(super) fn execute_search_request_and_observer(
-    request: &SearchRequest,
-    observer: Option<&mut dyn SearchObserver>,
-) -> Result<(SearchRunResult, SearchTelemetry), String> {
-    match request.stage {
-        SearchStage::EndpointSearch => {
-            let a_sq = request.source.to_sq::<2>();
-            let b_sq = request.target.to_sq::<2>();
-            if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
-                let (result, telemetry) =
-                    search_sse_2x2_with_telemetry_and_observer(a, b, &request.config, observer);
-                Ok((result.into(), telemetry))
-            } else {
-                let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
-                    &request.source,
-                    &request.target,
-                    &request.config,
-                    observer,
-                );
-                Ok((result.into(), telemetry))
-            }
-        }
-        SearchStage::GuidedRefinement => search_guided_refinement_with_observer(request, observer),
-        SearchStage::ShortcutSearch => search_shortcut_search_with_observer(request, observer),
-    }
-}
-
-fn search_shortcut_search_with_observer(
+pub(super) fn search_shortcut_search_with_observer(
     request: &SearchRequest,
     mut observer: Option<&mut dyn SearchObserver>,
 ) -> Result<(SearchRunResult, SearchTelemetry), String> {
@@ -335,7 +309,7 @@ fn search_shortcut_search_with_observer(
     Ok((result, telemetry))
 }
 
-fn search_guided_refinement_with_observer(
+pub(super) fn search_guided_refinement_with_observer(
     request: &SearchRequest,
     mut observer: Option<&mut dyn SearchObserver>,
 ) -> Result<(SearchRunResult, SearchTelemetry), String> {
