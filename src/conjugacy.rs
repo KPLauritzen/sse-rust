@@ -45,6 +45,20 @@ impl Default for PositiveConjugacyProposalConfig2x2 {
     }
 }
 
+/// Configuration for ranking actual local move candidates against sampled
+/// positive-conjugacy proposals.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositiveConjugacySeedConfig2x2 {
+    /// Maximum number of ranked local seeds to return after deduplication.
+    pub max_candidates: usize,
+}
+
+impl Default for PositiveConjugacySeedConfig2x2 {
+    fn default() -> Self {
+        Self { max_candidates: 4 }
+    }
+}
+
 /// A 2x2 real matrix used to record sampled matrices along a positive path.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RealMatrix2x2 {
@@ -144,6 +158,20 @@ pub struct PositiveConjugacyProposal2x2 {
     pub endpoint_l1_distance: u32,
     pub preserves_endpoint_diagonal: bool,
     pub stays_within_endpoint_box: bool,
+}
+
+/// Ranked actual local move candidate scored against the sampled
+/// positive-conjugacy proposal surface.
+///
+/// Unlike [`PositiveConjugacyProposal2x2`], this is intended for genuine
+/// search-side candidates such as one-step SSE successors, not for treating the
+/// rounded sampled matrices as exact waypoint targets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositiveConjugacySeedCandidate2x2 {
+    pub matrix: SqMatrix<2>,
+    pub nearest_proposal_rank: usize,
+    pub proposal_l1_distance: u32,
+    pub target_l1_distance: u32,
 }
 
 /// Result of bounded positive-conjugacy search.
@@ -304,6 +332,67 @@ pub fn derive_positive_conjugacy_proposals_2x2(
     });
     proposals.truncate(config.max_proposals);
     proposals
+}
+
+/// Rank actual local 2x2 move candidates by proximity to sampled
+/// positive-conjugacy proposals.
+///
+/// This is the intended phase-3 reinterpretation of the proposal surface:
+/// proposals remain approximate evidence, while real one-step candidates are
+/// scored by how well they align with that surface.
+pub fn rank_positive_conjugacy_seed_candidates_2x2(
+    target: &SqMatrix<2>,
+    proposals: &[PositiveConjugacyProposal2x2],
+    candidates: &[SqMatrix<2>],
+    config: &PositiveConjugacySeedConfig2x2,
+) -> Vec<PositiveConjugacySeedCandidate2x2> {
+    if config.max_candidates == 0 || proposals.is_empty() || candidates.is_empty() {
+        return Vec::new();
+    }
+
+    #[derive(Clone, Copy)]
+    struct BestSeed {
+        nearest_proposal_rank: usize,
+        proposal_l1_distance: u32,
+    }
+
+    let mut best_by_matrix: BTreeMap<SqMatrix<2>, BestSeed> = BTreeMap::new();
+    for candidate in candidates {
+        let Some((nearest_proposal_rank, proposal_l1_distance)) = proposals
+            .iter()
+            .enumerate()
+            .map(|(index, proposal)| (index + 1, matrix_l1_distance(candidate, &proposal.matrix)))
+            .min_by(|left, right| left.1.cmp(&right.1).then(left.0.cmp(&right.0)))
+        else {
+            continue;
+        };
+
+        best_by_matrix.entry(candidate.clone()).or_insert(BestSeed {
+            nearest_proposal_rank,
+            proposal_l1_distance,
+        });
+    }
+
+    let mut ranked = best_by_matrix
+        .into_iter()
+        .map(|(matrix, best)| PositiveConjugacySeedCandidate2x2 {
+            target_l1_distance: matrix_l1_distance(&matrix, target),
+            matrix,
+            nearest_proposal_rank: best.nearest_proposal_rank,
+            proposal_l1_distance: best.proposal_l1_distance,
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_by(|left, right| {
+        left.proposal_l1_distance
+            .cmp(&right.proposal_l1_distance)
+            .then(left.nearest_proposal_rank.cmp(&right.nearest_proposal_rank))
+            .then(left.target_l1_distance.cmp(&right.target_l1_distance))
+            .then(left.matrix.max_entry().cmp(&right.matrix.max_entry()))
+            .then(left.matrix.cmp(&right.matrix))
+    });
+    ranked.truncate(config.max_candidates);
+    ranked
 }
 
 fn sample_affine_positive_path(
@@ -578,5 +667,103 @@ mod tests {
             &PositiveConjugacyProposalConfig2x2::default(),
         );
         assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn test_rank_positive_conjugacy_seed_candidates_prefers_nearest_top_proposals() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
+            &a,
+            &b,
+            &PositiveConjugacySearchConfig2x2 {
+                max_conjugator_entry: 4,
+                sample_points: 64,
+            },
+        ) else {
+            panic!("expected a witness for the k=3 pair");
+        };
+
+        let proposals = derive_positive_conjugacy_proposals_2x2(
+            &a,
+            &b,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2 {
+                max_proposals: 4,
+                include_endpoints: false,
+            },
+        );
+        let candidates = vec![
+            SqMatrix::new([[1, 4], [1, 1]]),
+            SqMatrix::new([[1, 5], [1, 1]]),
+            SqMatrix::new([[1, 4], [2, 1]]),
+            SqMatrix::new([[1, 6], [1, 1]]),
+            SqMatrix::new([[1, 5], [1, 1]]),
+        ];
+
+        let ranked = rank_positive_conjugacy_seed_candidates_2x2(
+            &b,
+            &proposals,
+            &candidates,
+            &PositiveConjugacySeedConfig2x2 { max_candidates: 4 },
+        );
+
+        assert_eq!(
+            ranked,
+            vec![
+                PositiveConjugacySeedCandidate2x2 {
+                    matrix: SqMatrix::new([[1, 5], [1, 1]]),
+                    nearest_proposal_rank: 1,
+                    proposal_l1_distance: 0,
+                    target_l1_distance: 1,
+                },
+                PositiveConjugacySeedCandidate2x2 {
+                    matrix: SqMatrix::new([[1, 4], [2, 1]]),
+                    nearest_proposal_rank: 2,
+                    proposal_l1_distance: 0,
+                    target_l1_distance: 3,
+                },
+                PositiveConjugacySeedCandidate2x2 {
+                    matrix: SqMatrix::new([[1, 4], [1, 1]]),
+                    nearest_proposal_rank: 3,
+                    proposal_l1_distance: 0,
+                    target_l1_distance: 2,
+                },
+                PositiveConjugacySeedCandidate2x2 {
+                    matrix: SqMatrix::new([[1, 6], [1, 1]]),
+                    nearest_proposal_rank: 1,
+                    proposal_l1_distance: 1,
+                    target_l1_distance: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_rank_positive_conjugacy_seed_candidates_handles_empty_inputs() {
+        let target = SqMatrix::new([[1, 6], [1, 1]]);
+        assert!(rank_positive_conjugacy_seed_candidates_2x2(
+            &target,
+            &[],
+            &[SqMatrix::new([[1, 5], [1, 1]])],
+            &PositiveConjugacySeedConfig2x2::default(),
+        )
+        .is_empty());
+        assert!(rank_positive_conjugacy_seed_candidates_2x2(
+            &target,
+            &[PositiveConjugacyProposal2x2 {
+                matrix: SqMatrix::new([[1, 5], [1, 1]]),
+                kind: PositiveConjugacyProposalKind2x2::RoundedSampleWaypoint,
+                nearest_sample_index: 0,
+                nearest_sample_t: 0.0,
+                shadow_l1_distance: 0.0,
+                endpoint_l1_distance: 1,
+                preserves_endpoint_diagonal: true,
+                stays_within_endpoint_box: true,
+            }],
+            &[],
+            &PositiveConjugacySeedConfig2x2::default(),
+        )
+        .is_empty());
     }
 }
