@@ -218,7 +218,7 @@ the literature but do different jobs in this codebase:
 
 - **Concrete shift** means the aligned concrete shift / balanced concrete shift
   / compatible concrete shift family implemented today in
-  `src/aligned.rs`.
+  `src/concrete_shift.rs`.
 - **Balanced elementary equivalence** means the separate `S, R_A, R_B` witness
   surface implemented in `src/balanced.rs`.
 - **Sampled positive conjugacy** means the proposal/evidence surface in
@@ -246,12 +246,12 @@ shift**.
 A graph/module-level witness involving fiberwise bijections
 sigma_g, sigma_h, omega_e, omega_f satisfying associator relations.
 
-This is the relation currently implemented in `src/aligned.rs` for the
+This is the relation currently implemented in `src/concrete_shift.rs` for the
 module-level search. At the module level it is *not known* whether aligned
 module shift equivalence implies SSE (Remark 5.5 in Brix-Dor-On-Hazrat-Ruiz
 2025). However, at the matrix level the question is settled: see "Concrete
-shift" below. Repo-facing docs should still describe `src/aligned.rs` as the
-current **concrete-shift surface**, even before any module rename lands.
+shift" below. Repo-facing docs should describe `src/concrete_shift.rs` as the
+current **concrete-shift surface**.
 
 **Source:** Brix, Dor-On, Hazrat & Ruiz (2025, Definitions 5.1 and 5.2).
 
@@ -392,7 +392,7 @@ waypoints, the resulting witness lag may be larger or smaller than `16`.
 | Is an amalgamation the reverse of a split? | Yes. Out-amalgamation reverses out-split; in-amalgamation reverses in-split. |
 | Is a conjugation a graph move? | No. It is a dimension-preserving factorisation, not a split or amalgamation. |
 | Are SE and SSE the same? | No. SE is necessary but not sufficient for SSE (Kim & Roush 1999). |
-| Is balanced concrete shift the same as balanced elementary equivalence? | No. Balanced concrete shift belongs to the concrete-shift family in `src/aligned.rs`; balanced elementary equivalence is the separate `S, R_A, R_B` witness surface in `src/balanced.rs`. |
+| Is balanced concrete shift the same as balanced elementary equivalence? | No. Balanced concrete shift belongs to the concrete-shift family in `src/concrete_shift.rs`; balanced elementary equivalence is the separate `S, R_A, R_B` witness surface in `src/balanced.rs`. |
 | Is balanced elementary equivalence the same as ESSE? | No. ESSE: A = UV, B = VU. Balanced elementary equivalence: A = SR_A, B = SR_B, R_A S = R_B S. Different shape. |
 | Is "graph-only mode" the same as "only splits"? | Not quite. It uses splits *and* amalgamations, which are both graph moves. |
 | Is sampled positive conjugacy the same as a proof of SSE? | No. In this repo it is a proposal/evidence surface, not an exact certified SSE proof path. |

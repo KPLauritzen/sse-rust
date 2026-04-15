@@ -9,7 +9,7 @@ Accepted
 Introduce one explicit vocabulary above the repo's three current structured
 `2x2` search surfaces:
 
-- concrete-shift search and verification in [`src/aligned.rs`](../../src/aligned.rs),
+- concrete-shift search and verification in [`src/concrete_shift.rs`](../../src/concrete_shift.rs),
 - balanced-elementary search in [`src/balanced.rs`](../../src/balanced.rs),
 - and sampled positive-conjugacy witness / proposal search in
   [`src/conjugacy.rs`](../../src/conjugacy.rs).
@@ -19,13 +19,13 @@ This RFC does **not** propose forcing all three into one proof interface.
 Instead, it proposes:
 
 - reserving **concrete shift** for the aligned / balanced / compatible family
-  implemented in `src/aligned.rs`,
+  implemented in `src/concrete_shift.rs`,
 - distinguishing **balanced concrete shift** from
   **balanced elementary equivalence**,
 - treating positive conjugacy as a proposal/evidence surface rather than as a
   proof shortcut,
-- renaming `src/aligned.rs` to a broader module name such as
-  `src/concrete_shift.rs` in a separate mechanical cleanup step,
+- aligning the module layout with that broader concrete-shift vocabulary via a
+  mechanical rename to `src/concrete_shift.rs`,
 - and adding a small shared vocabulary layer so the solver, harness, binaries,
   and documentation can describe these surfaces consistently.
 
@@ -45,7 +45,7 @@ updated to reflect the new distinctions explicitly.
 
 The repo currently has three nearby but semantically different modules:
 
-- [`src/aligned.rs`](../../src/aligned.rs)
+- [`src/concrete_shift.rs`](../../src/concrete_shift.rs)
   - verifies fixed-lag shift-equivalence witnesses,
   - verifies aligned / balanced / compatible concrete-shift witnesses,
   - and performs bounded concrete-shift search through
@@ -62,7 +62,7 @@ idea bank, but they do not currently play the same role in the product.
 
 Current integration status is asymmetrical:
 
-- `src/aligned.rs` is actively used by the main solver through the `2x2`
+- `src/concrete_shift.rs` is actively used by the main solver through the `2x2`
   concrete-shift fallback in [`src/search.rs`](../../src/search.rs), and its
   result is modeled directly in [`src/types.rs`](../../src/types.rs) as
   `EquivalentByConcreteShift`.
@@ -74,7 +74,7 @@ Current integration status is asymmetrical:
 
 This asymmetry is not obvious from the module names alone.
 
-The worst offender is `src/aligned.rs` itself.
+The worst offender was `src/aligned.rs` itself.
 
 That file now implements the broad concrete-shift family surface for:
 
@@ -91,7 +91,7 @@ So the repo currently has a mismatch between:
 
 There is also a naming collision:
 
-- `ConcreteShiftRelation2x2::Balanced` in `src/aligned.rs` means
+- `ConcreteShiftRelation2x2::Balanced` in `src/concrete_shift.rs` means
   **balanced concrete shift** in the Bilich-Dor-On-Ruiz sense.
 - `BalancedElementaryWitness2x2` in `src/balanced.rs` means
   **balanced elementary equivalence** in the Brix-style factor form.
@@ -125,7 +125,7 @@ actually is.
 
 Today, a phrase like **balanced search** can mean at least two different things:
 
-- balanced concrete shift inside `src/aligned.rs`,
+- balanced concrete shift inside `src/concrete_shift.rs`,
 - or balanced-elementary witnesses inside `src/balanced.rs`.
 
 That is bad for:
@@ -143,7 +143,7 @@ The repo currently mixes together:
 - bounded proof-search sidecars,
 - and proposal/evidence generators.
 
-`src/conjugacy.rs` should not look interchangeable with `src/aligned.rs`, but
+`src/conjugacy.rs` should not look interchangeable with `src/concrete_shift.rs`, but
 there is no shared vocabulary making that distinction explicit.
 
 ### 3. The Main Solver Uses One Surface But The Docs Talk About Three
@@ -179,7 +179,7 @@ The missing abstraction is first a semantic one, not an implementation one.
   - bounded sidecar proof searches,
   - or proposal/evidence sources.
 - Reserve **concrete shift** for the aligned / balanced / compatible family in
-  `src/aligned.rs`.
+  `src/concrete_shift.rs`.
 - Disambiguate **balanced concrete shift** from
   **balanced elementary equivalence** everywhere the repo reports or documents
   them.
@@ -190,7 +190,7 @@ The missing abstraction is first a semantic one, not an implementation one.
 
 ## Non-Goals
 
-- Do not merge `src/aligned.rs`, `src/balanced.rs`, and `src/conjugacy.rs`
+- Do not merge `src/concrete_shift.rs`, `src/balanced.rs`, and `src/conjugacy.rs`
   into one module.
 - Do not claim that positive conjugacy is a proof shortcut.
 - Do not force balanced-elementary search into the main solver in this RFC.
@@ -223,8 +223,8 @@ The repo should use:
 The repo should also prefer family-shaped names for modules and docs when a
 surface has already grown beyond one subtype.
 
-That means the codebase should talk about `src/aligned.rs` as the
-**concrete-shift surface** even before any mechanical rename lands.
+That means the codebase should talk about `src/concrete_shift.rs` as the
+**concrete-shift surface**.
 
 ### Shared Vocabulary, Not Forced Uniformity
 
@@ -289,30 +289,24 @@ The important part is that the repo gets one canonical way to say:
 - whether its outputs are proof-grade or proposal-grade,
 - and how the current product uses it.
 
-### 2. Make `src/aligned.rs` The Explicit Concrete-Shift Surface
+### 2. Make `src/concrete_shift.rs` The Explicit Concrete-Shift Surface
 
-Treat `src/aligned.rs` as the concrete-shift implementation surface, even if
-the file name remains in place for compatibility for a while.
+Treat `src/concrete_shift.rs` as the concrete-shift implementation surface.
 
-The preferred end state is to rename it to something like:
-
-- `src/concrete_shift.rs`
-
-so the module name matches the family it actually implements.
+The preferred end state is for the module name to match the family it actually
+implements.
 
 This rename should be treated as a mechanical terminology cleanup, not as a
 semantic redesign.
 
-Until that rename happens, docs, RFCs, beads, and review comments should avoid
-using the bare module name `aligned` as the family label.
+Docs, RFCs, beads, and review comments should avoid using the bare historical
+module name `aligned` as the family label.
 
 Prefer phrasing like:
 
-- concrete-shift surface in `src/aligned.rs`
+- concrete-shift surface in `src/concrete_shift.rs`
 - concrete-shift fallback
 - concrete-shift proof search
-
-This keeps the vocabulary stable before and after the file rename.
 
 Its descriptor mapping should be explicit:
 
@@ -322,14 +316,14 @@ Its descriptor mapping should be explicit:
 - `ConcreteShift(Compatible)` -> certified proof search, currently searched
   through the same bounded engine
 
-In other words, `src/aligned.rs` is already the common interface for the
+In other words, `src/concrete_shift.rs` is already the common interface for the
 concrete-shift family.
 The repo should acknowledge that directly instead of implying that
 `src/balanced.rs` is an equal peer inside the same family.
 
-If the rename is deferred, the repo should still document clearly that
-`aligned.rs` is a historical file name for the broader concrete-shift surface,
-not the name of one isolated relation.
+The repo should still document clearly that `aligned.rs` was a historical file
+name for the broader concrete-shift surface, not the name of one isolated
+relation.
 
 ### 3. Distinguish `BalancedElementary` From `BalancedConcreteShift`
 
@@ -424,7 +418,7 @@ generalize the main solver result enum.
 
 Update the documentation language over time so it says:
 
-- `src/aligned.rs` -> concrete shift,
+- `src/concrete_shift.rs` -> concrete shift,
 - `src/balanced.rs` -> balanced elementary,
 - `src/conjugacy.rs` -> positive conjugacy proposal surface.
 
@@ -445,7 +439,7 @@ Under this RFC, the repo's current surfaces would map like this:
 
 | Module | Family | Semantics | Current usage |
 | --- | --- | --- | --- |
-| `src/aligned.rs` | `ConcreteShift(Aligned/Balanced/Compatible)` | certified proof search | main-solver fallback plus direct bounded search |
+| `src/concrete_shift.rs` | `ConcreteShift(Aligned/Balanced/Compatible)` | certified proof search | main-solver fallback plus direct bounded search |
 | `src/balanced.rs` | `BalancedElementary` | certified proof search | sidecar proof search |
 | `src/conjugacy.rs` | `PositiveConjugacy` | proposal source | sidecar proposal/evidence search |
 
@@ -455,7 +449,7 @@ That table is the core of the proposal.
 
 ### It Matches The Current Code Reality
 
-The repo already treats `src/aligned.rs` differently from the other two
+The repo already treats `src/concrete_shift.rs` differently from the other two
 modules.
 The new vocabulary would make that explicit.
 
@@ -490,18 +484,14 @@ exists.
 - add the shared descriptor types or at least settle their naming,
 - update [`TERMINOLOGY.md`](../../TERMINOLOGY.md) so the canonical repo
   vocabulary reflects the new distinctions,
-- update docs and notes to describe `src/aligned.rs` as the concrete-shift
-  surface even before any file rename happens,
+- update docs and notes to describe `src/concrete_shift.rs` as the
+  concrete-shift surface,
 - and update affected docs and bead phrasing over time.
 
 ### Phase 2: Add A Concrete-Shift Facade If It Helps
 
-Prefer a direct rename of `src/aligned.rs` to `src/concrete_shift.rs` once the
-terminology is accepted.
-
-If that rename is too disruptive in the short term, add a small facade or
-re-export layer such as `src/concrete_shift.rs` that fronts `src/aligned.rs`
-until the old module name can be retired.
+The direct rename from `src/aligned.rs` to `src/concrete_shift.rs` is the
+mechanical cleanup that matches this accepted terminology.
 
 The important point is that the repo should move toward a module name that
 matches the broad concrete-shift family rather than preserving `aligned.rs` as
@@ -558,7 +548,7 @@ without a stable shared vocabulary.
 
 Adopt this RFC as a terminology and interface policy:
 
-- `src/aligned.rs` is the concrete-shift family surface,
+- `src/concrete_shift.rs` is the concrete-shift family surface,
 - `src/balanced.rs` is the balanced-elementary sidecar surface,
 - `src/conjugacy.rs` is the positive-conjugacy proposal surface,
 - and the repo should add shared descriptors and reporting vocabulary before it

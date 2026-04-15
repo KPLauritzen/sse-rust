@@ -1,4 +1,4 @@
-use crate::aligned::{ConcreteShiftRelation2x2, ConcreteShiftWitness2x2};
+use crate::concrete_shift::{ConcreteShiftRelation2x2, ConcreteShiftWitness2x2};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -550,7 +550,7 @@ mod tests {
         ShortcutGuideRankingPolicy, ShortcutPromotionPolicy, ShortcutSearchConfig, SsePath,
         DEFAULT_BEAM_WIDTH,
     };
-    use crate::aligned::{
+    use crate::concrete_shift::{
         canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
     };
     use crate::matrix::SqMatrix;

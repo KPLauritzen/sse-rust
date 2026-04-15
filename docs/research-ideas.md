@@ -12,7 +12,8 @@ and `research/notes/` for longer evolving dossiers.
 ## Major Corrections To The Local Picture
 
 - The repo now has matrix-level concrete-shift validators and bounded search
-  machinery in [`src/aligned.rs`](../src/aligned.rs), even though some public
+  machinery in [`src/concrete_shift.rs`](../src/concrete_shift.rs), even
+  though some public
   names still preserve the older local `module` terminology.
 - Bilich-Dor-On-Ruiz 2024 defines matrix-level aligned concrete shift,
   balanced concrete shift, and compatible concrete shift for finite essential
@@ -28,7 +29,7 @@ and `research/notes/` for longer evolving dossiers.
 - Bounded bidirectional integer SSE search in [`src/search.rs`](../src/search.rs).
 - Factorization enumeration in [`src/factorisation.rs`](../src/factorisation.rs).
 - `2x2` invariants in [`src/invariants.rs`](../src/invariants.rs), including Bowen-Franks, generalized Bowen-Franks, and an Eilers-Kiming ideal-class test.
-- Concrete-shift validation and bounded search in [`src/aligned.rs`](../src/aligned.rs).
+- Concrete-shift validation and bounded search in [`src/concrete_shift.rs`](../src/concrete_shift.rs).
 - Balanced elementary-equivalence one-step search in [`src/balanced.rs`](../src/balanced.rs).
 - Sampled positive-conjugacy proposal search in [`src/conjugacy.rs`](../src/conjugacy.rs).
 - Graph-move search experiments in [`src/graph_moves.rs`](../src/graph_moves.rs).
@@ -108,7 +109,7 @@ sequencing in `bd`. The main repo surfaces implicated by the literature are:
   integration of structured proposal sources.
 - [`src/graph_moves.rs`](../src/graph_moves.rs) for explicit move-family work
   such as splits, refinements, and canonical probes.
-- [`src/aligned.rs`](../src/aligned.rs) and [`src/balanced.rs`](../src/balanced.rs)
+- [`src/concrete_shift.rs`](../src/concrete_shift.rs) and [`src/balanced.rs`](../src/balanced.rs)
   for concrete-shift or balanced elementary-equivalence witness formulations.
 - [`src/conjugacy.rs`](../src/conjugacy.rs) for proposal-generation ideas
   driven by sampled positive-conjugacy data.

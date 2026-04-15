@@ -1,4 +1,4 @@
-use crate::aligned::{
+use crate::concrete_shift::{
     search_concrete_shift_equivalence_with_lag_2x2, ConcreteShiftRelation2x2,
     ConcreteShiftSearchResult2x2,
 };

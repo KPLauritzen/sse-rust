@@ -861,7 +861,7 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 mod tests {
     use super::{build_result_json, parse_cli, parse_matrix, run_with_args};
     use rusqlite::Connection;
-    use sse_core::aligned::{
+    use sse_core::concrete_shift::{
         canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
     };
     use sse_core::matrix::{DynMatrix, SqMatrix};

@@ -20,7 +20,7 @@ The current solver stack is:
 - factorisation enumeration in [`src/factorisation.rs`](../src/factorisation.rs),
 - invariant filtering in [`src/invariants.rs`](../src/invariants.rs),
 - graph-move search in [`src/graph_moves.rs`](../src/graph_moves.rs),
-- concrete-shift witness search in [`src/aligned.rs`](../src/aligned.rs),
+- concrete-shift witness search in [`src/concrete_shift.rs`](../src/concrete_shift.rs),
 - balanced elementary-equivalence witness search in [`src/balanced.rs`](../src/balanced.rs),
 - sampled positive-conjugacy proposal sidecar search in [`src/conjugacy.rs`](../src/conjugacy.rs),
 - research harness and telemetry in [`src/bin/research_harness.rs`](../src/bin/research_harness.rs).

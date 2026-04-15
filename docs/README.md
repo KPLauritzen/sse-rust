@@ -15,10 +15,10 @@ This repo now uses three documentation layers with different jobs:
   RFCs and topic notes should update it when they intentionally change or
   sharpen shared language.
 - [`aligned-shift-equivalence.md`](aligned-shift-equivalence.md) records the
-  current concrete-shift surface in `src/aligned.rs`, including aligned,
-  balanced concrete shift, and compatible concrete-shift witnesses, plus the
-  terminology caveats around the historical module name. It is not a rollout
-  checklist.
+  current concrete-shift surface in `src/concrete_shift.rs`, including
+  aligned, balanced concrete shift, and compatible concrete-shift witnesses,
+  plus the terminology caveats around older aligned-oriented public names. It
+  is not a rollout checklist.
 - [`search-parallelism-5b8.md`](search-parallelism-5b8.md) records the measured
   layer-timing breakdown for endpoint search and why dedup, not merge/commit,
   is the first plausible deeper-parallelism target.

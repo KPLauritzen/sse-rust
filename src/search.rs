@@ -60,7 +60,7 @@ use self::stages::{
     GuidedSegmentCacheKey, RankedGuide,
 };
 #[cfg(test)]
-use crate::aligned::{ConcreteShiftRelation2x2, ConcreteShiftSearchResult2x2};
+use crate::concrete_shift::{ConcreteShiftRelation2x2, ConcreteShiftSearchResult2x2};
 #[cfg(test)]
 use crate::graph_moves::same_future_past_signature;
 

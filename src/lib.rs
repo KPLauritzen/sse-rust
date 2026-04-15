@@ -1,5 +1,5 @@
-pub mod aligned;
 pub mod balanced;
+pub mod concrete_shift;
 pub mod conjugacy;
 pub mod factorisation;
 pub mod graph_moves;

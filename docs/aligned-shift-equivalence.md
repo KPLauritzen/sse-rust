@@ -3,7 +3,7 @@
 This note lives at `aligned-shift-equivalence.md` for historical reasons. It
 records the current concrete-shift surface in this repo: aligned concrete
 shift, balanced concrete shift, and compatible concrete shift, all currently
-implemented in [`src/aligned.rs`](../src/aligned.rs).
+implemented in [`src/concrete_shift.rs`](../src/concrete_shift.rs).
 
 ## Current Repo Status
 
@@ -20,7 +20,7 @@ BS = SA
 This is the algebraic substrate that aligned concrete shift, balanced concrete
 shift, and compatible concrete shift refine.
 
-The project now has a dedicated Rust module, [`src/aligned.rs`](../src/aligned.rs), for:
+The project now has a dedicated Rust module, [`src/concrete_shift.rs`](../src/concrete_shift.rs), for:
 
 - verifying a proposed fixed-lag `2x2` shift-equivalence witness,
 - verifying concrete-shift witnesses for the aligned concrete shift, balanced
@@ -47,8 +47,7 @@ Several public names still reflect the older local vocabulary:
 - `search_aligned_module_shift_equivalence_*`,
 - and several comments that still mention the older module-level viewpoint.
 
-Repo-facing docs should still describe this file as the **concrete-shift
-surface** even before any mechanical rename lands.
+Repo-facing docs should describe this file as the **concrete-shift surface**.
 
 ## What Changed
 
@@ -88,7 +87,7 @@ current surface and terminology; implementation sequencing belongs in `bd`.
 
 ## Practical Reading
 
-- Treat the witness validators in [`src/aligned.rs`](../src/aligned.rs) as the
+- Treat the witness validators in [`src/concrete_shift.rs`](../src/concrete_shift.rs) as the
   ground truth for the concrete relations.
 - Treat bounded concrete-shift search as an implemented experimental surface
   for small `2x2` cases, not as a complete main-solver rollout plan.
@@ -100,6 +99,6 @@ current surface and terminology; implementation sequencing belongs in `bd`.
 Any numeric comparison between BFS and the current concrete-shift search
 surface should be rerun from [`benches/search.rs`](../benches/search.rs)
 before citing it. The qualitative status is simpler: the current
-`src/aligned.rs` code is useful as an experimental search substrate, but the
+`src/concrete_shift.rs` code is useful as an experimental search substrate, but the
 next gains are more likely to come from better witness-space guidance than from
 pushing the current brute-force search much harder.

@@ -100,8 +100,9 @@ Long-lived project context currently sits in a few places:
 - [`docs/TODO.md`](docs/TODO.md) keeps durable solver/search context and the
   current stack shape without trying to be a task list.
 - [`docs/aligned-shift-equivalence.md`](docs/aligned-shift-equivalence.md)
-  records the current concrete-shift surface in [`src/aligned.rs`](src/aligned.rs)
-  and the terminology caveats around the historical `aligned` module name.
+  records the current concrete-shift surface in
+  [`src/concrete_shift.rs`](src/concrete_shift.rs) and the remaining
+  terminology caveats around older aligned-oriented API names.
 - Small-case cataloguing and path visualisation remain useful long-horizon
   directions, but they are not maintained here as a checklist.
 
@@ -136,11 +137,10 @@ frontier-level BFS parallelism.
 
 **Key source files:**
 
-- [`src/aligned.rs`](src/aligned.rs) — Fixed-lag SE witnesses, concrete-shift
-  witness verification, and bounded concrete-shift search. Despite the
-  historical file name, this is the current concrete-shift surface for
-  aligned concrete shift, balanced concrete shift, and compatible
-  concrete-shift witnesses.
+- [`src/concrete_shift.rs`](src/concrete_shift.rs) — Fixed-lag SE witnesses,
+  concrete-shift witness verification, and bounded concrete-shift search. This
+  is the current concrete-shift surface for aligned concrete shift, balanced
+  concrete shift, and compatible concrete-shift witnesses.
 - [`src/search.rs`](src/search.rs) — BFS search engine. Entry point: `search_sse_2x2`.
 - [`src/invariants.rs`](src/invariants.rs) — All invariant checks, called as pre-filters before search. Entry point: `check_invariants_2x2`.
 - [`src/quadratic.rs`](src/quadratic.rs) — Quadratic field arithmetic for the Eilers-Kiming ideal class invariant (binary quadratic form reduction, eigenvector ideal class computation).

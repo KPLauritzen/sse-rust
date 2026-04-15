@@ -651,7 +651,7 @@ mod tests {
     use super::*;
     use std::fs;
 
-    use crate::aligned::{
+    use crate::concrete_shift::{
         canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
     };
     use crate::matrix::SqMatrix;
