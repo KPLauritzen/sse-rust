@@ -342,3 +342,6 @@
 
 - `loop34-singular-alloc-trim` Reduced singular-solver allocation churn by filtering `solve_nonneg_3x3` fallback candidates in place and replacing per-iteration 4x4 column-subset vector allocations with static arrays.
   Kept. Required and objective metrics were unchanged (`24/24`, hits `21`, points `3645`, telemetry-focus `45,802,619`), while harness elapsed improved (`13535 -> 13461 ms`). Hard k=3 attempts-168 remained neutral on lag/work (`lag 7`, improvements/promoted `20/3`).
+
+- `loop35-attempt176-boundary-retest` Rechecked hard-surface strict boundary after loop34 runtime trims.
+  Evidence only. Attempts-176 still timed out under strict cap240 (`240.01s`) and completed only under cap260 (`240.87s`) with unchanged lag/work telemetry, so no Goal-2 boundary movement despite keeping loop34 for harness runtime gains.
