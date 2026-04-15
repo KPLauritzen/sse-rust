@@ -11,4 +11,5 @@ pub mod quadratic;
 pub mod search;
 pub mod search_observer;
 pub mod sqlite_graph;
+pub mod structured_surface;
 pub mod types;

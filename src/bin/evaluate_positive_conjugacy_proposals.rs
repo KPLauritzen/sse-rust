@@ -4,6 +4,7 @@ use sse_core::conjugacy::{
     PositiveConjugacySearchConfig2x2, PositiveConjugacySearchResult2x2,
 };
 use sse_core::matrix::SqMatrix;
+use sse_core::structured_surface::StructuredSurfaceDescriptor2x2;
 
 #[derive(Clone)]
 struct Case2x2 {
@@ -14,6 +15,7 @@ struct Case2x2 {
 }
 
 fn main() {
+    let descriptor = StructuredSurfaceDescriptor2x2::sampled_positive_conjugacy();
     let mut case = String::from("brix_k3");
     let mut max_conjugator_entry = 8u32;
     let mut sample_points = 64usize;
@@ -102,7 +104,7 @@ fn main() {
                 })
                 .count();
 
-            println!("Found positive conjugacy witness");
+            println!("Found {}", descriptor.reporting_label());
             println!("G = {:?}", witness.conjugator);
             println!("sampled matrices = {}", witness.sampled_path.len());
             println!("unique proposal candidates = {}", all_proposals.len());
@@ -127,7 +129,10 @@ fn main() {
             }
         }
         PositiveConjugacySearchResult2x2::Exhausted => {
-            println!("No positive conjugacy witness found under the requested bounds.");
+            println!(
+                "No {} found under the requested bounds.",
+                descriptor.reporting_label()
+            );
         }
     }
 }

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::matrix::{DynMatrix, SqMatrix};
+use crate::structured_surface::StructuredSurfaceDescriptor2x2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -353,8 +354,12 @@ pub struct ConcreteShiftProof2x2 {
 }
 
 impl ConcreteShiftProof2x2 {
+    pub fn descriptor(&self) -> StructuredSurfaceDescriptor2x2 {
+        StructuredSurfaceDescriptor2x2::concrete_shift(self.relation)
+    }
+
     pub fn description(&self) -> String {
-        format!("{} concrete-shift witness", self.relation.as_str())
+        self.descriptor().reporting_label().to_string()
     }
 }
 

@@ -2,8 +2,10 @@ use sse_core::conjugacy::{
     find_positive_conjugacy_2x2, PositiveConjugacySearchConfig2x2, PositiveConjugacySearchResult2x2,
 };
 use sse_core::matrix::SqMatrix;
+use sse_core::structured_surface::StructuredSurfaceDescriptor2x2;
 
 fn main() {
+    let descriptor = StructuredSurfaceDescriptor2x2::sampled_positive_conjugacy();
     let mut case = String::from("brix_k3");
     let mut max_conjugator_entry = 8u32;
     let mut sample_points = 64usize;
@@ -57,7 +59,7 @@ fn main() {
 
     match find_positive_conjugacy_2x2(&a, &b, &config) {
         PositiveConjugacySearchResult2x2::Equivalent(witness) => {
-            println!("Found positive conjugacy witness");
+            println!("Found {}", descriptor.reporting_label());
             println!("A = {:?}", a);
             println!("B = {:?}", b);
             println!("G = {:?}", witness.conjugator);
@@ -84,7 +86,7 @@ fn main() {
             );
         }
         PositiveConjugacySearchResult2x2::Exhausted => {
-            println!("No positive conjugacy witness found");
+            println!("No {} found", descriptor.reporting_label());
         }
     }
 }

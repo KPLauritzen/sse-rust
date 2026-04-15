@@ -7,6 +7,7 @@ use sse_core::conjugacy::{
 };
 use sse_core::matrix::SqMatrix;
 use sse_core::search::search_sse_2x2_with_telemetry;
+use sse_core::structured_surface::StructuredSurfaceDescriptor2x2;
 use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SearchTelemetry, SseResult};
 
 #[derive(Clone)]
@@ -74,6 +75,7 @@ struct TelemetrySummary {
 }
 
 fn main() {
+    let descriptor = StructuredSurfaceDescriptor2x2::sampled_positive_conjugacy();
     let mut case = String::from("brix_k3");
     let mut max_conjugator_entry = 8u32;
     let mut sample_points = 64usize;
@@ -235,7 +237,10 @@ fn main() {
     let witness = match find_positive_conjugacy_2x2(&case.source, &case.target, &witness_search) {
         PositiveConjugacySearchResult2x2::Equivalent(witness) => witness,
         PositiveConjugacySearchResult2x2::Exhausted => {
-            println!("No positive conjugacy witness found under the requested bounds.");
+            println!(
+                "No {} found under the requested bounds.",
+                descriptor.reporting_label()
+            );
             return;
         }
     };
@@ -258,7 +263,7 @@ fn main() {
         })
         .collect();
 
-    println!("Found positive conjugacy witness");
+    println!("Found {}", descriptor.reporting_label());
     println!("G = {:?}", witness.conjugator);
     println!("unique proposal candidates = {}", proposals.len());
     println!("selected top-ranked proposals = {}", top_proposals.len());

@@ -2,8 +2,10 @@ use sse_core::balanced::{
     find_balanced_elementary_equivalence_2x2, BalancedSearchConfig2x2, BalancedSearchResult2x2,
 };
 use sse_core::matrix::SqMatrix;
+use sse_core::structured_surface::StructuredSurfaceDescriptor2x2;
 
 fn main() {
+    let descriptor = StructuredSurfaceDescriptor2x2::balanced_elementary_equivalence();
     let mut case = String::from("brix_k3");
     let mut max_common_dim = 2usize;
     let mut max_entry = 8u32;
@@ -61,7 +63,7 @@ fn main() {
 
     match find_balanced_elementary_equivalence_2x2(&a, &b, &config) {
         BalancedSearchResult2x2::Equivalent(witness) => {
-            println!("Found balanced elementary witness");
+            println!("Found {}", descriptor.reporting_label());
             println!("A = {:?}", a);
             println!("B = {:?}", b);
             println!("S = {:?}", witness.s);
@@ -70,7 +72,7 @@ fn main() {
             println!("R_A S = {:?}", witness.r_a.mul(&witness.s));
         }
         BalancedSearchResult2x2::Exhausted => {
-            println!("No balanced elementary witness found");
+            println!("No {} found", descriptor.reporting_label());
             println!("A = {:?}", a);
             println!("B = {:?}", b);
             println!(
