@@ -25,20 +25,6 @@ The current solver stack is:
 - positive-conjugacy sidecar search in [`src/conjugacy.rs`](../src/conjugacy.rs),
 - research harness and telemetry in [`src/bin/research_harness.rs`](../src/bin/research_harness.rs).
 
-## Current Search Reality
-
-These points are easy to get wrong when reading older notes:
-
-- `graph-only` is already implemented in the main solver and should be treated
-  as an existing search mode, not a missing feature.
-- matrix-level concrete-shift search is already implemented for bounded `2x2`
-  aligned / balanced / compatible relations and is wired as a bounded fallback
-  in the main solver.
-- the search is no longer purely blind factorisation: structured graph moves,
-  `3x3` conjugation/shear families, guided refinement, and shortcut search are
-  all already present.
-- the hard empirical surface is still the Brix-Ruiz family, especially `k=3`
-  and above.
 
 ## Durable Research Themes
 
