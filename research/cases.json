@@ -1001,6 +1001,34 @@
         "strategy": "mixed_literature_probe",
         "schedule_order": 60
       }
+    },
+    {
+      "id": "full_2_shift_higher_block_1x1_to_4x4",
+      "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Boyle-Schmieding Remark `higherblockedgesfts`, using the full-2-shift higher-block presentations A^[1] = [[2]] and A^[3] as a 1x1 <-> 4x4 endpoint pair). Expected relation: Equivalent.",
+      "required": false,
+      "a": [[2]],
+      "b": [[1, 1, 0, 0], [0, 0, 1, 1], [1, 1, 0, 0], [0, 0, 1, 1]],
+      "config": {
+        "max_lag": 4,
+        "max_intermediate_dim": 4,
+        "max_entry": 2
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["literature-positive", "non-brix-ruiz", "benchmark-measurement", "mixed-dimension", "non-2x2", "higher-block"],
+      "campaign": {
+        "id": "non_brix_ruiz_literature",
+        "strategy": "mixed_literature_probe",
+        "schedule_order": 70
+      }
     }
   ]
 }
