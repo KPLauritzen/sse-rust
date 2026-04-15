@@ -7,7 +7,7 @@ use crate::graph_moves::{
     enumerate_graph_move_successors, enumerate_graph_proposals, GraphProposal,
     SameFuturePastSignatureGap,
 };
-use crate::invariants::check_invariants_2x2;
+use crate::invariants::{check_invariants_2x2, check_square_power_trace_invariants};
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
@@ -293,21 +293,12 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         );
     }
 
-    if trace_square(a) != trace_square(b) {
+    if let Some(reason) = check_square_power_trace_invariants(a, b) {
         telemetry.invariant_filtered = true;
         return finish_search_dyn(
             observer,
             &request,
-            DynSseResult::NotEquivalent("trace(M^2) invariant mismatch".to_string()),
-            telemetry,
-        );
-    }
-    if a.trace() != b.trace() {
-        telemetry.invariant_filtered = true;
-        return finish_search_dyn(
-            observer,
-            &request,
-            DynSseResult::NotEquivalent("trace invariant mismatch".to_string()),
+            DynSseResult::NotEquivalent(reason),
             telemetry,
         );
     }
@@ -3642,10 +3633,6 @@ fn is_spectrally_consistent(vu: &DynMatrix, source_trace: u64, source_det: i64) 
     }
 }
 
-fn trace_square(m: &DynMatrix) -> i64 {
-    m.mul(m).trace() as i64
-}
-
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
@@ -5654,6 +5641,23 @@ mod tests {
         // [[1,0,0],[0,1,0],[0,0,1]]: trace=3, det=1 (no zero eigenvalue)
         let m = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
         assert!(!is_spectrally_consistent(&m, 3, 1));
+    }
+
+    #[test]
+    fn test_search_sse_dyn_rejects_trace_cube_invariant_mismatch() {
+        let a = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 3, 0, 0, 0, 3]);
+        let b = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 4]);
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&a, &b, &default_config());
+
+        match result {
+            DynSseResult::NotEquivalent(reason) => {
+                assert_eq!(reason, "trace(M^3) invariant mismatch");
+            }
+            other => panic!("expected invariant rejection, got {other:?}"),
+        }
+        assert!(telemetry.invariant_filtered);
+        assert_eq!(telemetry.frontier_nodes_expanded, 0);
+        assert!(telemetry.layers.is_empty());
     }
 
     #[test]

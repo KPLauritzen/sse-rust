@@ -1,4 +1,6 @@
-use crate::matrix::SqMatrix;
+use crate::matrix::{DynMatrix, SqMatrix};
+
+const GENERIC_SQUARE_TRACE_INVARIANT_MAX_POWER: usize = 4;
 
 /// Check whether two 2x2 matrices pass all known SSE invariants.
 /// Returns `None` if all invariants match, `Some(reason)` on first mismatch.
@@ -42,6 +44,60 @@ pub fn check_invariants_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> 
     }
 
     None
+}
+
+/// Check a bounded generic power-trace surface for square endpoint matrices.
+///
+/// SSE preserves the nonzero spectrum, so `trace(M^k)` is invariant even when
+/// endpoint dimensions differ because extra zero eigenvalues contribute nothing.
+/// We compare the first few powers up to the current bounded square endpoint
+/// dimensions, keeping the check cheap and dimension-agnostic.
+pub fn check_square_power_trace_invariants(a: &DynMatrix, b: &DynMatrix) -> Option<String> {
+    debug_assert!(a.is_square());
+    debug_assert!(b.is_square());
+
+    let max_power = a
+        .rows
+        .max(b.rows)
+        .min(GENERIC_SQUARE_TRACE_INVARIANT_MAX_POWER);
+    if max_power == 0 {
+        return None;
+    }
+
+    let a_traces = square_power_traces(a, max_power);
+    let b_traces = square_power_traces(b, max_power);
+
+    for power in [2usize, 1, 3, 4] {
+        if power > max_power {
+            continue;
+        }
+        if a_traces[power - 1] != b_traces[power - 1] {
+            return Some(power_trace_mismatch_reason(power));
+        }
+    }
+
+    None
+}
+
+fn square_power_traces(m: &DynMatrix, max_power: usize) -> Vec<u64> {
+    debug_assert!(m.is_square());
+    let mut traces = Vec::with_capacity(max_power);
+    let mut power = m.clone();
+    for exponent in 1..=max_power {
+        traces.push(power.trace());
+        if exponent < max_power {
+            power = power.mul(m);
+        }
+    }
+    traces
+}
+
+fn power_trace_mismatch_reason(power: usize) -> String {
+    match power {
+        1 => "trace invariant mismatch".to_string(),
+        2 => "trace(M^2) invariant mismatch".to_string(),
+        _ => format!("trace(M^{power}) invariant mismatch"),
+    }
 }
 
 /// Compute the Bowen-Franks invariant for a 2x2 matrix.
@@ -212,6 +268,23 @@ fn check_eilers_kiming_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_square_power_trace_invariants_allow_zero_extended_spectrum() {
+        let a = DynMatrix::new(2, 2, vec![2, 0, 0, 1]);
+        let b = DynMatrix::new(3, 3, vec![2, 0, 0, 0, 1, 0, 0, 0, 0]);
+        assert_eq!(check_square_power_trace_invariants(&a, &b), None);
+    }
+
+    #[test]
+    fn test_square_power_trace_invariants_reject_trace_cube_mismatch() {
+        let a = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 3, 0, 0, 0, 3]);
+        let b = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 4]);
+        assert_eq!(
+            check_square_power_trace_invariants(&a, &b),
+            Some("trace(M^3) invariant mismatch".to_string())
+        );
+    }
 
     #[test]
     fn test_same_matrix_passes() {
