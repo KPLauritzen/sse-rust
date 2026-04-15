@@ -90,39 +90,26 @@ Before attempting the expensive search for an SSE path, we can check necessary c
 
 ---
 
-## Avenues for Exploration
+## Research Surfaces
 
-### Aligned shift equivalence
+This README is not the live roadmap. Use `bd` for active priorities, owners,
+statuses, and next actions.
 
-The repo now has bounded concrete-shift validation and aligned witness search
-for small `2x2` cases. The remaining work is to standardize the aligned,
-balanced, and compatible formulations, reduce the witness search space, and use
-those witnesses more effectively inside the main solver.
+Long-lived project context currently sits in a few places:
 
-### Visualisation of SSE paths
+- [`docs/TODO.md`](docs/TODO.md) keeps durable solver/search context and the
+  current stack shape without trying to be a task list.
+- [`docs/aligned-shift-equivalence.md`](docs/aligned-shift-equivalence.md)
+  records the aligned/balanced/compatible witness surface and its terminology
+  caveats.
+- The WASM bindings already power the
+  [SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend.
+- Small-case cataloguing and path visualisation remain useful long-horizon
+  directions, but they are not maintained here as a checklist.
 
-When a path is found, visualise the chain as directed graphs at each step, highlighting the in-split / out-split structure of each elementary SSE.
-
-### Database / catalogue
-
-Systematically enumerate SSE classes for small matrices (e.g. all irreducible 2×2 with entry sum ≤ 25, reproducing and extending Eilers & Kiming's experiment).
-
-### Interactive web tool
-
-The WASM bindings already power the
-[SSE Explorer](https://kplauritzen.dk/sse-explorer/) frontend. The remaining
-opportunity is to make the frontend expose more of the solver surface, such as
-telemetry, graph-only runs, and concrete-shift witness details.
-
-### Search improvements
-
-See [docs/TODO.md](docs/TODO.md) for roadmap context on concrete approaches:
-bidirectional BFS, iterative deepening, smarter factorisation pruning,
-spectral pruning, and aligned shift equivalence. Use `bd` for the live backlog.
-
-### Parallelism
-
-Native builds now expand each BFS frontier layer in parallel with `rayon`, using a collect-then-merge pass so collision detection and parent-map updates stay deterministic. The `wasm32` build keeps the same serial expansion path.
+Native builds expand each BFS frontier layer in parallel with `rayon`, using a
+collect-then-merge pass so collision detection and parent-map updates stay
+deterministic. The `wasm32` build keeps the same serial expansion path.
 
 ## Documentation Map
 
