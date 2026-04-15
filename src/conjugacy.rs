@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::matrix::SqMatrix;
 
 /// Configuration for bounded positive-conjugacy search on 2x2 matrices.
@@ -20,6 +22,25 @@ impl Default for PositiveConjugacySearchConfig2x2 {
         Self {
             max_conjugator_entry: 8,
             sample_points: 64,
+        }
+    }
+}
+
+/// Configuration for extracting bounded discrete proposals from a sampled
+/// positive-conjugacy witness.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositiveConjugacyProposalConfig2x2 {
+    /// Maximum number of ranked proposals to return after deduplication.
+    pub max_proposals: usize,
+    /// Whether to retain the endpoint matrices in the proposal set.
+    pub include_endpoints: bool,
+}
+
+impl Default for PositiveConjugacyProposalConfig2x2 {
+    fn default() -> Self {
+        Self {
+            max_proposals: 8,
+            include_endpoints: false,
         }
     }
 }
@@ -47,6 +68,16 @@ impl RealMatrix2x2 {
             .flat_map(|row| row.iter())
             .copied()
             .fold(f64::INFINITY, f64::min)
+    }
+
+    fn entrywise_l1_to_sq(&self, other: &SqMatrix<2>) -> f64 {
+        let mut total = 0.0;
+        for i in 0..2 {
+            for j in 0..2 {
+                total += (self.data[i][j] - other.data[i][j] as f64).abs();
+            }
+        }
+        total
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -92,6 +123,27 @@ impl RealMatrix2x2 {
 pub struct PositiveConjugacyWitness2x2 {
     pub conjugator: SqMatrix<2>,
     pub sampled_path: Vec<RealMatrix2x2>,
+}
+
+/// Current discrete proposal family derived from a sampled positive-conjugacy
+/// witness. Phase 1 uses entrywise floor/ceil shadows of sampled positive
+/// matrices as small nearby waypoint candidates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PositiveConjugacyProposalKind2x2 {
+    RoundedSampleWaypoint,
+}
+
+/// Ranked discrete proposal derived from a sampled positive-conjugacy witness.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PositiveConjugacyProposal2x2 {
+    pub matrix: SqMatrix<2>,
+    pub kind: PositiveConjugacyProposalKind2x2,
+    pub nearest_sample_index: usize,
+    pub nearest_sample_t: f64,
+    pub shadow_l1_distance: f64,
+    pub endpoint_l1_distance: u32,
+    pub preserves_endpoint_diagonal: bool,
+    pub stays_within_endpoint_box: bool,
 }
 
 /// Result of bounded positive-conjugacy search.
@@ -153,6 +205,107 @@ pub fn find_positive_conjugacy_2x2(
     PositiveConjugacySearchResult2x2::Exhausted
 }
 
+/// Turn a sampled positive-conjugacy witness into a small ranked set of nearby
+/// discrete waypoint proposals.
+///
+/// Phase 1 keeps the proposal object intentionally narrow: we round each
+/// sampled positive matrix entrywise via floor/ceil, keep the positive integer
+/// shadows, deduplicate them, and rank them by nearest-sample `L1` distance.
+/// This treats positive conjugacy as a proposal source rather than as a proof.
+pub fn derive_positive_conjugacy_proposals_2x2(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    witness: &PositiveConjugacyWitness2x2,
+    config: &PositiveConjugacyProposalConfig2x2,
+) -> Vec<PositiveConjugacyProposal2x2> {
+    if config.max_proposals == 0 || witness.sampled_path.is_empty() {
+        return Vec::new();
+    }
+
+    #[derive(Clone, Copy)]
+    struct BestShadow {
+        nearest_sample_index: usize,
+        shadow_l1_distance: f64,
+    }
+
+    let mut best_by_matrix: BTreeMap<SqMatrix<2>, BestShadow> = BTreeMap::new();
+
+    for (sample_index, sample) in witness.sampled_path.iter().enumerate() {
+        let choices = [
+            entry_rounding_choices(sample.data[0][0]),
+            entry_rounding_choices(sample.data[0][1]),
+            entry_rounding_choices(sample.data[1][0]),
+            entry_rounding_choices(sample.data[1][1]),
+        ];
+
+        for &m00 in &choices[0] {
+            for &m01 in &choices[1] {
+                for &m10 in &choices[2] {
+                    for &m11 in &choices[3] {
+                        let candidate = SqMatrix::new([[m00, m01], [m10, m11]]);
+                        if !candidate.data.iter().flatten().all(|entry| *entry > 0) {
+                            continue;
+                        }
+                        if !config.include_endpoints
+                            && (&candidate == source || &candidate == target)
+                        {
+                            continue;
+                        }
+
+                        let shadow_l1_distance = sample.entrywise_l1_to_sq(&candidate);
+                        match best_by_matrix.get_mut(&candidate) {
+                            Some(best) if shadow_l1_distance < best.shadow_l1_distance => {
+                                *best = BestShadow {
+                                    nearest_sample_index: sample_index,
+                                    shadow_l1_distance,
+                                };
+                            }
+                            None => {
+                                best_by_matrix.insert(
+                                    candidate,
+                                    BestShadow {
+                                        nearest_sample_index: sample_index,
+                                        shadow_l1_distance,
+                                    },
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let sample_count = witness.sampled_path.len();
+    let mut proposals = best_by_matrix
+        .into_iter()
+        .map(|(matrix, best)| PositiveConjugacyProposal2x2 {
+            endpoint_l1_distance: l1_distance_to_nearest_endpoint(&matrix, source, target),
+            preserves_endpoint_diagonal: matrix.data[0][0] == source.data[0][0]
+                && matrix.data[0][0] == target.data[0][0]
+                && matrix.data[1][1] == source.data[1][1]
+                && matrix.data[1][1] == target.data[1][1],
+            stays_within_endpoint_box: stays_within_endpoint_box(&matrix, source, target),
+            nearest_sample_index: best.nearest_sample_index,
+            nearest_sample_t: sample_parameter(best.nearest_sample_index, sample_count),
+            shadow_l1_distance: best.shadow_l1_distance,
+            kind: PositiveConjugacyProposalKind2x2::RoundedSampleWaypoint,
+            matrix,
+        })
+        .collect::<Vec<_>>();
+
+    proposals.sort_by(|left, right| {
+        left.shadow_l1_distance
+            .total_cmp(&right.shadow_l1_distance)
+            .then(left.endpoint_l1_distance.cmp(&right.endpoint_l1_distance))
+            .then(left.matrix.max_entry().cmp(&right.matrix.max_entry()))
+            .then(left.matrix.cmp(&right.matrix))
+    });
+    proposals.truncate(config.max_proposals);
+    proposals
+}
+
 fn sample_affine_positive_path(
     a: &RealMatrix2x2,
     conjugator: &SqMatrix<2>,
@@ -202,6 +355,60 @@ fn max_abs_diff(a: &RealMatrix2x2, b: &RealMatrix2x2) -> f64 {
         }
     }
     max
+}
+
+fn entry_rounding_choices(value: f64) -> Vec<u32> {
+    assert!(value.is_finite(), "sampled entries must be finite");
+    let floor = value.floor().max(0.0) as u32;
+    let ceil = value.ceil().max(0.0) as u32;
+    if floor == ceil {
+        vec![floor]
+    } else {
+        vec![floor, ceil]
+    }
+}
+
+fn sample_parameter(sample_index: usize, sample_count: usize) -> f64 {
+    if sample_count <= 1 {
+        0.0
+    } else {
+        sample_index as f64 / (sample_count - 1) as f64
+    }
+}
+
+fn l1_distance_to_nearest_endpoint(
+    matrix: &SqMatrix<2>,
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+) -> u32 {
+    matrix_l1_distance(matrix, source).min(matrix_l1_distance(matrix, target))
+}
+
+fn matrix_l1_distance(left: &SqMatrix<2>, right: &SqMatrix<2>) -> u32 {
+    let mut total = 0u32;
+    for i in 0..2 {
+        for j in 0..2 {
+            total += left.data[i][j].abs_diff(right.data[i][j]);
+        }
+    }
+    total
+}
+
+fn stays_within_endpoint_box(
+    matrix: &SqMatrix<2>,
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+) -> bool {
+    for i in 0..2 {
+        for j in 0..2 {
+            let min_entry = source.data[i][j].min(target.data[i][j]);
+            let max_entry = source.data[i][j].max(target.data[i][j]);
+            if matrix.data[i][j] < min_entry || matrix.data[i][j] > max_entry {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -269,5 +476,107 @@ mod tests {
             },
         );
         assert_eq!(result, PositiveConjugacySearchResult2x2::Exhausted);
+    }
+
+    #[test]
+    fn test_brix_ruiz_k3_generates_ranked_waypoint_proposals() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
+            &a,
+            &b,
+            &PositiveConjugacySearchConfig2x2 {
+                max_conjugator_entry: 4,
+                sample_points: 64,
+            },
+        ) else {
+            panic!("expected a witness for the k=3 pair");
+        };
+
+        let proposals = derive_positive_conjugacy_proposals_2x2(
+            &a,
+            &b,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2 {
+                max_proposals: 4,
+                include_endpoints: false,
+            },
+        );
+
+        let proposal_matrices = proposals
+            .iter()
+            .map(|proposal| proposal.matrix.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            proposal_matrices,
+            vec![
+                SqMatrix::new([[1, 5], [1, 1]]),
+                SqMatrix::new([[1, 4], [2, 1]]),
+                SqMatrix::new([[1, 4], [1, 1]]),
+                SqMatrix::new([[1, 5], [2, 1]]),
+            ]
+        );
+        assert!(proposals
+            .iter()
+            .all(|proposal| proposal.preserves_endpoint_diagonal));
+        assert!(proposals
+            .iter()
+            .all(|proposal| proposal.stays_within_endpoint_box));
+        assert!(proposals[0].shadow_l1_distance > 0.0);
+    }
+
+    #[test]
+    fn test_brix_ruiz_k4_generates_exact_interior_shadow() {
+        let a = SqMatrix::new([[1, 4], [3, 1]]);
+        let b = SqMatrix::new([[1, 12], [1, 1]]);
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
+            &a,
+            &b,
+            &PositiveConjugacySearchConfig2x2 {
+                max_conjugator_entry: 5,
+                sample_points: 64,
+            },
+        ) else {
+            panic!("expected a witness for the k=4 pair");
+        };
+
+        let proposals = derive_positive_conjugacy_proposals_2x2(
+            &a,
+            &b,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2 {
+                max_proposals: 4,
+                include_endpoints: false,
+            },
+        );
+
+        assert_eq!(proposals[0].matrix, SqMatrix::new([[1, 6], [2, 1]]));
+        assert_eq!(proposals[0].shadow_l1_distance, 0.0);
+        assert!(proposals
+            .iter()
+            .all(|proposal| proposal.preserves_endpoint_diagonal));
+    }
+
+    #[test]
+    fn test_constant_positive_witness_has_no_interior_waypoint_proposals() {
+        let a = SqMatrix::new([[1, 2], [2, 1]]);
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
+            &a,
+            &a,
+            &PositiveConjugacySearchConfig2x2 {
+                max_conjugator_entry: 1,
+                sample_points: 16,
+            },
+        ) else {
+            panic!("expected a witness for the constant positive pair");
+        };
+
+        let proposals = derive_positive_conjugacy_proposals_2x2(
+            &a,
+            &a,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2::default(),
+        );
+        assert!(proposals.is_empty());
     }
 }

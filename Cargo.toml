@@ -107,6 +107,11 @@ path = "src/bin/find_positive_conjugacy.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "evaluate_positive_conjugacy_proposals"
+path = "src/bin/evaluate_positive_conjugacy_proposals.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "find_rectangular_case"
 path = "src/bin/find_rectangular_case.rs"
 required-features = ["research-tools"]
