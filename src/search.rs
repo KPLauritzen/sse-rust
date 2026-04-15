@@ -7272,7 +7272,49 @@ mod tests {
         assert_eq!(deduped.len(), 2);
         assert!(deduped
             .iter()
+            .any(|expansion| expansion.move_family == "graph_a"));
+        assert!(!deduped
+            .iter()
+            .any(|expansion| expansion.move_family == "graph_b"));
+        assert!(deduped
+            .iter()
             .any(|expansion| expansion.move_family == "factorised"));
+    }
+
+    #[test]
+    fn test_deduplicate_expansions_keeps_first_canonical_representative() {
+        let parent_a = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let parent_b = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let next = DynMatrix::new(2, 2, vec![2, 1, 1, 1]);
+        let dummy_step = EsseStep {
+            u: DynMatrix::new(1, 1, vec![1]),
+            v: DynMatrix::new(1, 1, vec![1]),
+        };
+        let expansions = vec![
+            FrontierExpansion {
+                parent_canon: parent_a.clone(),
+                next_canon: next.clone(),
+                next_orig: next.clone(),
+                step: dummy_step.clone(),
+                move_family: "first",
+                same_future_past_signature: None,
+            },
+            FrontierExpansion {
+                parent_canon: parent_b,
+                next_canon: next.clone(),
+                next_orig: next,
+                step: dummy_step,
+                move_family: "second",
+                same_future_past_signature: None,
+            },
+        ];
+
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(expansions, false);
+
+        assert_eq!(same_future_past_collisions, 0);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].parent_canon, parent_a);
+        assert_eq!(deduped[0].move_family, "first");
     }
 
     // --- Literature examples ---

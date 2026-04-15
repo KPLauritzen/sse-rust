@@ -14,6 +14,12 @@ This repo now uses three documentation layers with different jobs:
 - [`aligned-shift-equivalence.md`](aligned-shift-equivalence.md) records the
   current aligned / balanced / compatible concrete-shift surface and the
   terminology caveats around it. It is not a rollout checklist.
+- [`search-parallelism-5b8.md`](search-parallelism-5b8.md) records the measured
+  layer-timing breakdown for endpoint search and why dedup, not merge/commit,
+  is the first plausible deeper-parallelism target.
+- [`search-parallelism-8h4.md`](search-parallelism-8h4.md) turns that timing
+  evidence into a concrete determinism, memory, and correctness risk assessment
+  for future deeper parallelism work in `src/search.rs`.
 - [`research-ideas.md`](research-ideas.md) is the long-horizon idea bank from
   paper reading and code review. It should collect plausible directions and
   synthesis, not a ranked backlog.
