@@ -217,6 +217,13 @@ Suggested baseline naming: `<YYYY-MM-DD>-<short-label>`.
 Use `cargo bench` or `just bench-search` without a baseline only for local
 sanity checks where no performance claim is being made.
 
+The Criterion suite in `benches/search.rs` now focuses on stable micro surfaces:
+fast endpoint sanity checks plus telemetry-driven `expand_next_n` throughput
+cases that run until a fixed expanded-node budget is reached.
+
+Keep heavy scenario-family evaluation and campaign comparisons in
+`research_harness` rather than moving those fixtures into Criterion.
+
 Baseline comparison is required when:
 
 - reporting a speedup or regression,

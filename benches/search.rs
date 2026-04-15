@@ -1,14 +1,10 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use sse_core::aligned::{
-    search_aligned_module_shift_equivalence_2x2, AlignedModuleSearchConfig2x2,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use sse_core::matrix::SqMatrix;
-use sse_core::search::search_sse_2x2;
+use sse_core::search::{search_sse_2x2, search_sse_2x2_with_telemetry};
 use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig};
 
-/// Elementary SSE pair: [[2,1],[1,1]] <-> [[1,1],[1,2]].
-/// Should be found in 1 step with small bounds.
-fn bench_elementary_pair(c: &mut Criterion) {
+/// Fast equivalent endpoint sanity check.
+fn bench_endpoint_equivalent_fast(c: &mut Criterion) {
     let a = SqMatrix::new([[2, 1], [1, 1]]);
     let b = SqMatrix::new([[1, 1], [1, 2]]);
     let config = SearchConfig {
@@ -19,31 +15,13 @@ fn bench_elementary_pair(c: &mut Criterion) {
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
     };
-    c.bench_function("elementary_pair", |bencher| {
+    c.bench_function("endpoint_equivalent_fast", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
     });
 }
 
-/// Pair requiring a 3x3 intermediate: [[2,1],[1,1]] <-> [[1,0],[1,2]].
-fn bench_rectangular_pair(c: &mut Criterion) {
-    let a = SqMatrix::new([[2, 1], [1, 1]]);
-    let b = SqMatrix::new([[1, 0], [1, 2]]);
-    let config = SearchConfig {
-        max_lag: 4,
-        max_intermediate_dim: 3,
-        max_entry: 5,
-        frontier_mode: FrontierMode::Bfs,
-        move_family_policy: MoveFamilyPolicy::Mixed,
-        beam_width: None,
-    };
-    c.bench_function("rectangular_pair", |bencher| {
-        bencher.iter(|| search_sse_2x2(&a, &b, &config));
-    });
-}
-
-/// Not-equivalent pair detected by Eilers-Kiming invariant.
-/// Measures invariant pre-filter speed.
-fn bench_not_equivalent_invariant(c: &mut Criterion) {
+/// Fast invariant rejection sanity check.
+fn bench_endpoint_invariant_reject_fast(c: &mut Criterion) {
     let a = SqMatrix::new([[14, 2], [1, 0]]);
     let b = SqMatrix::new([[13, 5], [3, 1]]);
     let config = SearchConfig {
@@ -54,114 +32,98 @@ fn bench_not_equivalent_invariant(c: &mut Criterion) {
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
     };
-    c.bench_function("not_equivalent_invariant", |bencher| {
+    c.bench_function("endpoint_invariant_reject_fast", |bencher| {
         bencher.iter(|| search_sse_2x2(&a, &b, &config));
     });
 }
 
-/// Hard known-SSE pair (Brix-Ruiz k=3). Search space is large.
-/// This is the target for optimisation work.
-fn bench_brix_ruiz_k3(c: &mut Criterion) {
-    let a = SqMatrix::new([[1, 3], [2, 1]]);
-    let b = SqMatrix::new([[1, 6], [1, 1]]);
-    let config = SearchConfig {
-        max_lag: 6,
-        max_intermediate_dim: 3,
-        max_entry: 6,
-        frontier_mode: FrontierMode::Bfs,
-        move_family_policy: MoveFamilyPolicy::Mixed,
-        beam_width: None,
-    };
-    let mut group = c.benchmark_group("brix_ruiz_k3");
-    group.sample_size(20);
-    group.bench_function("search", |bencher| {
-        bencher.iter(|| search_sse_2x2(&a, &b, &config));
-    });
-    group.finish();
+struct ExpandNextNCase {
+    name: &'static str,
+    a: SqMatrix<2>,
+    b: SqMatrix<2>,
+    config: SearchConfig,
+    target_expanded_nodes: usize,
 }
 
-/// Larger entry bound search to stress-test BFS frontier expansion.
-fn bench_large_entry_bound(c: &mut Criterion) {
-    let a = SqMatrix::new([[2, 1], [1, 1]]);
-    let b = SqMatrix::new([[1, 1], [1, 2]]);
-    let config = SearchConfig {
-        max_lag: 4,
-        max_intermediate_dim: 2,
-        max_entry: 25,
-        frontier_mode: FrontierMode::Bfs,
-        move_family_policy: MoveFamilyPolicy::Mixed,
-        beam_width: None,
-    };
-    c.bench_function("large_entry_bound", |bencher| {
-        bencher.iter(|| search_sse_2x2(&a, &b, &config));
-    });
+fn run_expand_next_n(case: &ExpandNextNCase) {
+    let mut expanded_nodes = 0usize;
+    while expanded_nodes < case.target_expanded_nodes {
+        let (_result, telemetry) = search_sse_2x2_with_telemetry(
+            black_box(&case.a),
+            black_box(&case.b),
+            black_box(&case.config),
+        );
+        let expanded = telemetry.frontier_nodes_expanded;
+        assert!(
+            expanded > 0,
+            "expand_next_n case '{}' must expand at least one node",
+            case.name
+        );
+        expanded_nodes = expanded_nodes.saturating_add(expanded);
+        black_box(telemetry.factorisations_enumerated);
+        black_box(telemetry.candidates_after_pruning);
+    }
+    black_box(expanded_nodes);
 }
 
-/// Compare BFS and aligned-module witness search on an easy pair.
-fn bench_elementary_pair_compare(c: &mut Criterion) {
-    let a = SqMatrix::new([[2, 1], [1, 1]]);
-    let b = SqMatrix::new([[1, 1], [1, 2]]);
-    let bfs = SearchConfig {
-        max_lag: 4,
-        max_intermediate_dim: 2,
-        max_entry: 10,
-        frontier_mode: FrontierMode::Bfs,
-        move_family_policy: MoveFamilyPolicy::Mixed,
-        beam_width: None,
-    };
-    let aligned = AlignedModuleSearchConfig2x2 {
-        max_lag: 1,
-        max_entry: 3,
-        max_module_witnesses: 500,
-    };
+/// Throughput benches for frontier expansion.
+///
+/// These are deterministic, telemetry-driven microbenches: each sample repeats
+/// the same endpoint search until expanded_nodes >= N, then reports throughput
+/// in expanded nodes. Heavy endpoint families remain in research_harness.
+fn bench_expand_next_n(c: &mut Criterion) {
+    let cases = [
+        ExpandNextNCase {
+            name: "mixed_k3_lag3_dim3_n2048",
+            a: SqMatrix::new([[1, 3], [2, 1]]),
+            b: SqMatrix::new([[1, 6], [1, 1]]),
+            config: SearchConfig {
+                max_lag: 3,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+                beam_width: None,
+            },
+            target_expanded_nodes: 2_048,
+        },
+        ExpandNextNCase {
+            name: "graph_only_k3_lag8_dim4_n8192",
+            a: SqMatrix::new([[1, 3], [2, 1]]),
+            b: SqMatrix::new([[1, 6], [1, 1]]),
+            config: SearchConfig {
+                max_lag: 8,
+                max_intermediate_dim: 4,
+                max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                beam_width: None,
+            },
+            target_expanded_nodes: 8_192,
+        },
+    ];
 
-    let mut group = c.benchmark_group("elementary_compare");
-    group.bench_function("bfs", |bencher| {
-        bencher.iter(|| search_sse_2x2(&a, &b, &bfs));
-    });
-    group.bench_function("aligned_module", |bencher| {
-        bencher.iter(|| search_aligned_module_shift_equivalence_2x2(&a, &b, &aligned));
-    });
-    group.finish();
-}
-
-/// Compare BFS and aligned-module witness search on the hard Brix-Ruiz k=3 example.
-fn bench_brix_ruiz_k3_compare(c: &mut Criterion) {
-    let a = SqMatrix::new([[1, 3], [2, 1]]);
-    let b = SqMatrix::new([[1, 6], [1, 1]]);
-    let bfs = SearchConfig {
-        max_lag: 6,
-        max_intermediate_dim: 3,
-        max_entry: 6,
-        frontier_mode: FrontierMode::Bfs,
-        move_family_policy: MoveFamilyPolicy::Mixed,
-        beam_width: None,
-    };
-    let aligned = AlignedModuleSearchConfig2x2 {
-        max_lag: 3,
-        max_entry: 6,
-        max_module_witnesses: 5_000,
-    };
-
-    let mut group = c.benchmark_group("brix_ruiz_k3_compare");
+    let mut group = c.benchmark_group("expand_next_n");
     group.sample_size(10);
-    group.bench_function("bfs", |bencher| {
-        bencher.iter(|| search_sse_2x2(&a, &b, &bfs));
-    });
-    group.bench_function("aligned_module", |bencher| {
-        bencher.iter(|| search_aligned_module_shift_equivalence_2x2(&a, &b, &aligned));
-    });
+
+    for case in &cases {
+        group.throughput(Throughput::Elements(case.target_expanded_nodes as u64));
+        group.bench_with_input(
+            BenchmarkId::new("frontier_expansion", case.name),
+            case,
+            |bencher, case| {
+                bencher.iter(|| run_expand_next_n(case));
+            },
+        );
+    }
+
     group.finish();
 }
 
 criterion_group!(
     benches,
-    bench_elementary_pair,
-    bench_rectangular_pair,
-    bench_not_equivalent_invariant,
-    bench_brix_ruiz_k3,
-    bench_large_entry_bound,
-    bench_elementary_pair_compare,
-    bench_brix_ruiz_k3_compare,
+    bench_endpoint_equivalent_fast,
+    bench_endpoint_invariant_reject_fast,
+    bench_expand_next_n,
 );
 criterion_main!(benches);

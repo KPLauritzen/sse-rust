@@ -38,6 +38,10 @@ move-policy/frontier-policy combinations, staged shortcut settings).
 Use dedicated bench surfaces for microbench/per-function timing where repeated,
 low-noise measurement and statistical summaries are the main goal.
 
+Current `benches/search.rs` coverage is intentionally micro/throughput oriented:
+fast endpoint sanity checks plus telemetry-driven `expand_next_n` expansion
+throughput probes. Keep heavier scenario-family runs in `research_harness`.
+
 For Criterion runs in `benches/search.rs`, keep baseline usage explicit:
 
 - create baseline: `just bench-search-save-baseline <name>` (or `cargo bench --bench search -- --save-baseline <name>`),
