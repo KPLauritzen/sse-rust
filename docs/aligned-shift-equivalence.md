@@ -85,6 +85,9 @@ current surface and terminology; implementation sequencing belongs in `bd`.
 - The main solver can use aligned, balanced, or compatible search as a direct
   proof path, a fallback, or a proposal generator. Which role to emphasize
   next is active roadmap work and should be tracked in `bd`.
+- Today the shipped `2x2` endpoint search uses bounded concrete-shift search as
+  a late fallback after either mixed or graph-only frontier search exhausts on
+  an essential pair within the small witness bounds.
 
 ## Practical Reading
 

@@ -2467,9 +2467,7 @@ fn try_concrete_shift_shortcut_2x2(
     b: &SqMatrix<2>,
     config: &SearchConfig,
 ) -> Option<ConcreteShiftProof2x2> {
-    if config.move_family_policy != MoveFamilyPolicy::Mixed
-        || !should_try_concrete_shift_fallback(a, b, config)
-    {
+    if !should_try_concrete_shift_fallback(a, b, config) {
         return None;
     }
 
@@ -4680,6 +4678,16 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         }
         *frontier = next_frontier;
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
+    }
+
+    if let Some(witness) = try_concrete_shift_shortcut_2x2(a, b, config) {
+        telemetry.concrete_shift_shortcut = true;
+        return finish_search_2x2(
+            observer,
+            request,
+            SseResult::EquivalentByConcreteShift(witness),
+            telemetry,
+        );
     }
 
     finish_search_2x2(observer, request, SseResult::Unknown, telemetry)
@@ -6967,14 +6975,15 @@ mod tests {
     }
 
     #[test]
-    fn test_try_concrete_shift_shortcut_skips_graph_only_policy() {
+    fn test_try_concrete_shift_shortcut_allows_graph_only_policy() {
         let a = SqMatrix::new([[1, 0], [0, 1]]);
         let config = SearchConfig {
+            max_entry: 1,
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             ..default_config()
         };
         let proof = try_concrete_shift_shortcut_2x2(&a, &a, &config);
-        assert!(proof.is_none());
+        assert!(proof.is_some());
     }
 
     #[test]
@@ -7117,6 +7126,35 @@ mod tests {
             SseResult::EquivalentByConcreteShift(_witness) => {}
             other => panic!("expected Equivalent path, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_graph_only_bfs_falls_back_to_concrete_shift_on_lag_one_pair() {
+        let a = SqMatrix::new([[0, 1], [1, 2]]);
+        let b = SqMatrix::new([[1, 1], [2, 1]]);
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+        };
+
+        let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
+        match result {
+            SseResult::EquivalentByConcreteShift(proof) => {
+                assert_eq!(proof.relation, ConcreteShiftRelation2x2::Aligned);
+                assert_eq!(proof.witness.shift.lag, 1);
+            }
+            other => panic!(
+                "expected graph-only search to fall back to a concrete-shift proof, got {:?}",
+                other
+            ),
+        }
+        assert!(telemetry.concrete_shift_shortcut);
+        assert_eq!(telemetry.frontier_nodes_expanded, 1);
+        assert_eq!(telemetry.factorisations_enumerated, 0);
     }
 
     #[test]
