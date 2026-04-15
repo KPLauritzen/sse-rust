@@ -833,6 +833,118 @@
         "strategy": "mixed_wide_probe",
         "schedule_order": 10
       }
+    },
+    {
+      "id": "riedel_baker_k2",
+      "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Riedel/Baker Example `riedelexample`, k=2 instance). Expected relation: Equivalent.",
+      "required": false,
+      "a": [[2, 2], [1, 2]],
+      "b": [[1, 1], [1, 3]],
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 2,
+        "max_entry": 2
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["literature-positive", "non-brix-ruiz", "benchmark-measurement", "lag-sensitive"],
+      "campaign": {
+        "id": "non_brix_ruiz_literature",
+        "strategy": "mixed_literature_probe",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k3",
+      "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Riedel/Baker Example `riedelexample`, k=3 instance). Expected relation: Equivalent.",
+      "required": false,
+      "a": [[3, 2], [1, 3]],
+      "b": [[2, 1], [1, 4]],
+      "config": {
+        "max_lag": 3,
+        "max_intermediate_dim": 3,
+        "max_entry": 3
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["literature-positive", "non-brix-ruiz", "benchmark-measurement", "lag-sensitive"],
+      "campaign": {
+        "id": "non_brix_ruiz_literature",
+        "strategy": "mixed_literature_probe",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "lind_marcus_a_to_c",
+      "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Lind-Marcus Example 7.2.2 via Bilich-Dor-on-Ruiz). Expected relation: Equivalent; the source note records a lag-2 SSE positive that is not ESSE.",
+      "required": false,
+      "a": [[1, 1, 0], [0, 0, 1], [1, 1, 1]],
+      "b": [[2]],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 2,
+        "max_entry": 2
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["literature-positive", "non-brix-ruiz", "benchmark-measurement", "non-2x2", "lag-2", "non-esse"],
+      "campaign": {
+        "id": "non_brix_ruiz_literature",
+        "strategy": "mixed_literature_probe",
+        "schedule_order": 40
+      }
+    },
+    {
+      "id": "riedel_baker_k4",
+      "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Riedel/Baker Example `riedelexample`, k=4 instance from the displayed family formula). Expected relation: Equivalent.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["literature-positive", "non-brix-ruiz", "benchmark-measurement", "lag-sensitive"],
+      "campaign": {
+        "id": "non_brix_ruiz_literature",
+        "strategy": "mixed_literature_probe",
+        "schedule_order": 30
+      }
     }
   ]
 }
