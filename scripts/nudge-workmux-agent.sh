@@ -44,7 +44,7 @@ fi
 
 for ((i = 1; i <= iterations; i++)); do
   timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-  status_line="$(workmux status "$handle" | awk 'NR == 2 { print $2 }')"
+  status_line="$(workmux status "$handle" --json | jq -r '.[0].status // empty')"
 
   if [[ -z "$status_line" ]]; then
     echo "[$timestamp] iteration $i/$iterations: could not determine status for '$handle'" >&2
