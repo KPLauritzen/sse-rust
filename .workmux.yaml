@@ -74,7 +74,7 @@ panes:
   - command: <agent>
     split: horizontal
     focus: true
-  - command: bash
+  - command: cargo build --quiet --bin search
     split: vertical
     target: 0
 
