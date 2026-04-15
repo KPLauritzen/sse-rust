@@ -555,10 +555,7 @@ fn print_profiles(profiles: &[SearchProfile]) {
                 )
             }
         };
-        let move_policy = match profile.config.move_family_policy {
-            MoveFamilyPolicy::Mixed => "mixed",
-            MoveFamilyPolicy::GraphOnly => "graph-only",
-        };
+        let move_policy = profile.config.move_family_policy.kebab_case_label();
         println!(
             "  {}: lag<= {}, dim<= {}, entry<= {}, frontier={}, moves={}",
             profile.name,

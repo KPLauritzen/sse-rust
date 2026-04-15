@@ -614,11 +614,10 @@ fn unix_timestamp_ms() -> i64 {
 }
 
 fn search_mode_label(config: &SearchConfig) -> &'static str {
-    match (config.frontier_mode, config.move_family_policy) {
-        (FrontierMode::Bfs, MoveFamilyPolicy::Mixed) => "mixed",
-        (FrontierMode::Bfs, MoveFamilyPolicy::GraphOnly) => "graph_only",
-        (FrontierMode::Beam, _) => "beam",
-        (FrontierMode::BeamBfsHandoff, _) => "beam_bfs_handoff",
+    match config.frontier_mode {
+        FrontierMode::Bfs => config.move_family_policy.snake_case_label(),
+        FrontierMode::Beam => "beam",
+        FrontierMode::BeamBfsHandoff => "beam_bfs_handoff",
     }
 }
 
@@ -631,10 +630,7 @@ fn frontier_mode_label(mode: FrontierMode) -> &'static str {
 }
 
 fn move_family_policy_label(policy: MoveFamilyPolicy) -> &'static str {
-    match policy {
-        MoveFamilyPolicy::Mixed => "mixed",
-        MoveFamilyPolicy::GraphOnly => "graph_only",
-    }
+    policy.snake_case_label()
 }
 
 fn search_stage_label(stage: SearchStage) -> &'static str {
@@ -771,6 +767,13 @@ mod tests {
             }),
             "graph_only"
         );
+        assert_eq!(
+            search_mode_label(&SearchConfig {
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+                ..SearchConfig::default()
+            }),
+            "graph_plus_structured"
+        );
         assert_eq!(search_mode_label(&beam_graph_only), "beam");
         assert_eq!(frontier_mode_label(beam_graph_only.frontier_mode), "beam");
         assert_eq!(search_mode_label(&beam_bfs_handoff), "beam_bfs_handoff");
@@ -781,6 +784,10 @@ mod tests {
         assert_eq!(
             move_family_policy_label(beam_graph_only.move_family_policy),
             "graph_only"
+        );
+        assert_eq!(
+            move_family_policy_label(MoveFamilyPolicy::GraphPlusStructured),
+            "graph_plus_structured"
         );
     }
 

@@ -251,6 +251,9 @@ where
                 let value = args.next().ok_or("--search-mode requires a value")?;
                 cli.search_mode = match value.as_str() {
                     "mixed" => MoveFamilyPolicy::Mixed,
+                    "graph-plus-structured" | "graph_plus_structured" => {
+                        MoveFamilyPolicy::GraphPlusStructured
+                    }
                     "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
@@ -268,7 +271,7 @@ where
                        --max-intermediate-dim N\n\
                                               search config bound for derived cases (default: 5)\n\
                        --max-entry N           search config entry bound (default: 6)\n\
-                       --search-mode MODE      mixed | graph-only (default: mixed)\n\
+                       --search-mode MODE      mixed | graph-plus-structured | graph-only (default: mixed)\n\
                      \n\
                      If no inputs are supplied and research/k3-graph-paths.sqlite exists,\n\
                      it is used as the default path source."

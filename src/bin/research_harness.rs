@@ -3303,7 +3303,7 @@ mod tests {
             max_entry: 4,
             frontier_mode: FrontierMode::Beam,
             beam_width: Some(16),
-            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
             stage: SearchStage::GuidedRefinement,
             guided_refinement: GuidedRefinementConfig::default(),
             shortcut_search: ShortcutSearchConfig::default(),
@@ -3317,7 +3317,7 @@ mod tests {
             object
                 .get("move_family_policy")
                 .and_then(serde_json::Value::as_str),
-            Some("graph_only")
+            Some("graph_plus_structured")
         );
         assert!(!object.contains_key("search_mode"));
         assert!(!object.contains_key("move_policy"));
@@ -3350,7 +3350,7 @@ mod tests {
         "max_lag": 1,
         "max_intermediate_dim": 2,
         "max_entry": 1,
-        "search_mode": "graph-only"
+        "search_mode": "graph-plus-structured"
       },
       "timeout_ms": 100,
       "allowed_outcomes": ["equivalent"],
@@ -3372,7 +3372,7 @@ mod tests {
         assert_eq!(corpus.cases.len(), 1);
         assert_eq!(
             corpus.cases[0].config.move_family_policy,
-            MoveFamilyPolicy::GraphOnly
+            MoveFamilyPolicy::GraphPlusStructured
         );
 
         fs::remove_dir_all(temp_dir).expect("temporary legacy corpus directory should be removed");

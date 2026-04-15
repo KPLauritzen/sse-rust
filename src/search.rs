@@ -8,7 +8,7 @@ use crate::aligned::{
     search_concrete_shift_equivalence_with_lag_2x2, ConcreteShiftRelation2x2,
     ConcreteShiftSearchResult2x2,
 };
-use crate::factorisation::visit_all_factorisations_with_family;
+use crate::factorisation::visit_factorisations_with_family_for_policy;
 use crate::graph_moves::{
     enumerate_graph_move_successors, enumerate_graph_proposals, same_future_past_signature,
     GraphProposal, SameFuturePastSignature, SameFuturePastSignatureGap,
@@ -5108,11 +5108,12 @@ fn expand_frontier_layer_dyn(
             });
         }
 
-        if move_family_policy == MoveFamilyPolicy::Mixed {
-            visit_all_factorisations_with_family(
+        if move_family_policy.permits_factorisations() {
+            visit_factorisations_with_family_for_policy(
                 current,
                 max_intermediate_dim,
                 max_entry,
+                move_family_policy,
                 |move_family, u, v| {
                     move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
                         .candidates_generated += 1;
@@ -5370,11 +5371,12 @@ fn expand_frontier_layer(
             });
         }
 
-        if move_family_policy == MoveFamilyPolicy::Mixed {
-            visit_all_factorisations_with_family(
+        if move_family_policy.permits_factorisations() {
+            visit_factorisations_with_family_for_policy(
                 current,
                 max_intermediate_dim,
                 max_entry,
+                move_family_policy,
                 |move_family, u, v| {
                     move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
                         .candidates_generated += 1;
@@ -7307,6 +7309,32 @@ mod tests {
             expand_frontier_layer(&[a_canon], &orig, 2, 10, MoveFamilyPolicy::GraphOnly);
 
         assert_eq!(stats.factorisations_enumerated, 0);
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_keeps_structured_telemetry() {
+        let u = DynMatrix::new(3, 3, vec![5, 2, 0, 2, 1, 0, 0, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
+        let current = u.mul(&v);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (_expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            3,
+            6,
+            MoveFamilyPolicy::GraphPlusStructured,
+        );
+
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(stats
+            .move_family_telemetry
+            .contains_key("opposite_shear_conjugation_3x3"));
+        assert!(!stats
+            .move_family_telemetry
+            .contains_key("square_factorisation_3x3"));
     }
 
     #[test]

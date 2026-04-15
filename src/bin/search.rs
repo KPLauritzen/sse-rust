@@ -184,8 +184,8 @@ where
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
                        --frontier-mode MODE     bfs | beam | beam-bfs-handoff (default: bfs)\n\
-                       --move-policy POLICY     mixed | graph-only (default: mixed)\n\
-                       --search-mode MODE       legacy shortcut: mixed | graph-only | beam\n\
+                       --move-policy POLICY     mixed | graph-plus-structured | graph-only (default: mixed)\n\
+                       --search-mode MODE       legacy shortcut: mixed | graph-plus-structured | graph-only | beam\n\
                        --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
                                               (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
@@ -356,6 +356,9 @@ fn parse_frontier_mode(value: &str) -> Result<FrontierMode, String> {
 fn parse_move_policy(value: &str) -> Result<MoveFamilyPolicy, String> {
     match value {
         "mixed" => Ok(MoveFamilyPolicy::Mixed),
+        "graph-plus-structured" | "graph_plus_structured" => {
+            Ok(MoveFamilyPolicy::GraphPlusStructured)
+        }
         "graph-only" | "graph_only" => Ok(MoveFamilyPolicy::GraphOnly),
         _ => Err(format!("unknown move policy: {value}")),
     }
@@ -366,6 +369,10 @@ fn apply_legacy_search_mode(config: &mut SearchConfig, value: &str) -> Result<()
         "mixed" => {
             config.frontier_mode = FrontierMode::Bfs;
             config.move_family_policy = MoveFamilyPolicy::Mixed;
+        }
+        "graph-plus-structured" | "graph_plus_structured" => {
+            config.frontier_mode = FrontierMode::Bfs;
+            config.move_family_policy = MoveFamilyPolicy::GraphPlusStructured;
         }
         "graph-only" | "graph_only" => {
             config.frontier_mode = FrontierMode::Bfs;
@@ -1015,11 +1022,25 @@ mod tests {
                 None,
             ),
             (
+                "bfs",
+                "graph-plus-structured",
+                FrontierMode::Bfs,
+                MoveFamilyPolicy::GraphPlusStructured,
+                None,
+            ),
+            (
                 "beam",
                 "mixed",
                 FrontierMode::Beam,
                 MoveFamilyPolicy::Mixed,
                 Some("7"),
+            ),
+            (
+                "beam",
+                "graph-plus-structured",
+                FrontierMode::Beam,
+                MoveFamilyPolicy::GraphPlusStructured,
+                Some("8"),
             ),
             (
                 "beam",
@@ -1079,6 +1100,26 @@ mod tests {
         assert_eq!(cli.config.frontier_mode, FrontierMode::Beam);
         assert_eq!(cli.config.move_family_policy, MoveFamilyPolicy::Mixed);
         assert_eq!(cli.config.beam_width, Some(7));
+    }
+
+    #[test]
+    fn parse_cli_accepts_legacy_search_mode_graph_plus_structured() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--search-mode".to_string(),
+                "graph-plus-structured".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.config.frontier_mode, FrontierMode::Bfs);
+        assert_eq!(
+            cli.config.move_family_policy,
+            MoveFamilyPolicy::GraphPlusStructured
+        );
     }
 
     #[test]

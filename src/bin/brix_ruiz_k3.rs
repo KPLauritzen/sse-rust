@@ -62,6 +62,10 @@ fn main() {
                         frontier_mode = FrontierMode::Bfs;
                         move_family_policy = MoveFamilyPolicy::Mixed;
                     }
+                    "graph-plus-structured" | "graph_plus_structured" => {
+                        frontier_mode = FrontierMode::Bfs;
+                        move_family_policy = MoveFamilyPolicy::GraphPlusStructured;
+                    }
                     "graph-only" => {
                         frontier_mode = FrontierMode::Bfs;
                         move_family_policy = MoveFamilyPolicy::GraphOnly;
@@ -84,7 +88,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam|beam-bfs-handoff] [--move-policy mixed|graph-only] [--graph-only] [--search-mode mixed|graph-only|beam] [--beam-width N]"
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam|beam-bfs-handoff] [--move-policy mixed|graph-plus-structured|graph-only] [--graph-only] [--search-mode mixed|graph-plus-structured|graph-only|beam] [--beam-width N]"
                 );
                 return;
             }
@@ -229,6 +233,9 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
 fn parse_move_family_policy(value: &str) -> MoveFamilyPolicy {
     match value {
         "mixed" => MoveFamilyPolicy::Mixed,
+        "graph-plus-structured" | "graph_plus_structured" => {
+            MoveFamilyPolicy::GraphPlusStructured
+        }
         "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
         _ => panic!("invalid --move-policy value: {value}"),
     }

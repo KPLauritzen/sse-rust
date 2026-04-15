@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sse_core::factorisation::visit_all_factorisations_with_family;
+use sse_core::factorisation::visit_factorisations_with_family_for_policy;
 use sse_core::graph_moves::enumerate_graph_move_successors;
 use sse_core::matrix::DynMatrix;
 use sse_core::types::{EsseStep, MoveFamilyPolicy};
@@ -78,6 +78,9 @@ fn main() {
                 let value = args.next().expect("--search-mode requires a value");
                 search_mode = match value.as_str() {
                     "mixed" => MoveFamilyPolicy::Mixed,
+                    "graph-plus-structured" | "graph_plus_structured" => {
+                        MoveFamilyPolicy::GraphPlusStructured
+                    }
                     "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
                     _ => panic!("unknown search mode: {value}"),
                 };
@@ -95,7 +98,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--segment-timeout SECS] [--refine-rounds N] [--search-mode mixed|graph-only] [--paths-db PATH]"
+                    "usage: find_brix_ruiz_path_shortcuts [--max-shortcut-lag N] [--max-dim N] [--max-entry N] [--min-gap N] [--max-gap N] [--segment-timeout SECS] [--refine-rounds N] [--search-mode mixed|graph-plus-structured|graph-only] [--paths-db PATH]"
                 );
                 return;
             }
@@ -647,25 +650,31 @@ fn expand_frontier(
             }
         }
 
-        if search_mode == MoveFamilyPolicy::Mixed {
-            visit_all_factorisations_with_family(current, max_dim, max_entry, |_family, u, v| {
-                let next = v.mul(&u);
-                if next.rows > max_dim {
-                    return;
-                }
-                if !is_trace_consistent(&next, source_trace, source_trace_square) {
-                    return;
-                }
-                let next_canon = next.canonical_perm();
-                if seen_successors.insert(next_canon.clone()) {
-                    expansions.push(FrontierExpansion {
-                        parent_canon: current_canon.clone(),
-                        next_canon,
-                        next_orig: next,
-                        step: EsseStep { u, v },
-                    });
-                }
-            });
+        if search_mode.permits_factorisations() {
+            visit_factorisations_with_family_for_policy(
+                current,
+                max_dim,
+                max_entry,
+                search_mode,
+                |_family, u, v| {
+                    let next = v.mul(&u);
+                    if next.rows > max_dim {
+                        return;
+                    }
+                    if !is_trace_consistent(&next, source_trace, source_trace_square) {
+                        return;
+                    }
+                    let next_canon = next.canonical_perm();
+                    if seen_successors.insert(next_canon.clone()) {
+                        expansions.push(FrontierExpansion {
+                            parent_canon: current_canon.clone(),
+                            next_canon,
+                            next_orig: next,
+                            step: EsseStep { u, v },
+                        });
+                    }
+                },
+            );
         }
 
         expansions
@@ -1453,10 +1462,7 @@ fn matrix_json(matrix: &DynMatrix) -> Result<String, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn search_mode_label(search_mode: MoveFamilyPolicy) -> &'static str {
-    match search_mode {
-        MoveFamilyPolicy::Mixed => "mixed",
-        MoveFamilyPolicy::GraphOnly => "graph_only",
-    }
+    search_mode.snake_case_label()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::matrix::{DynMatrix, SqMatrix};
+use crate::types::MoveFamilyPolicy;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -2665,6 +2666,28 @@ pub fn visit_all_factorisations_with_family<F>(
 ) where
     F: FnMut(&'static str, DynMatrix, DynMatrix),
 {
+    visit_factorisations_with_family_for_policy(
+        a,
+        max_intermediate_dim,
+        max_entry,
+        MoveFamilyPolicy::Mixed,
+        |family, u, v| visit(family, u, v),
+    );
+}
+
+pub fn visit_factorisations_with_family_for_policy<F>(
+    a: &DynMatrix,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    move_family_policy: MoveFamilyPolicy,
+    mut visit: F,
+) where
+    F: FnMut(&'static str, DynMatrix, DynMatrix),
+{
+    if !move_family_policy.permits_factorisations() {
+        return;
+    }
+
     assert!(a.is_square());
     let k = a.rows;
 
@@ -2695,10 +2718,12 @@ pub fn visit_all_factorisations_with_family<F>(
         // Factor entry bound is capped to keep enumeration tractable: the cost
         // is O((cap+1)^6) per node, so cap=4 gives ~15K iterations per node.
         if max_intermediate_dim >= 3 {
-            let sq3_cap = max_entry.min(4);
-            visit_square_factorisations_3x3(a, sq3_cap, &mut |u, v| {
-                visit("square_factorisation_3x3", u, v);
-            });
+            if move_family_policy.includes_square_factorisation_3x3() {
+                let sq3_cap = max_entry.min(4);
+                visit_square_factorisations_3x3(a, sq3_cap, &mut |u, v| {
+                    visit("square_factorisation_3x3", u, v);
+                });
+            }
             // Elementary conjugation moves C = P·(P⁻¹C), where P = I ± k·eᵢeⱼᵀ.
             // These are O(1) per move and reach 3×3 nodes that the capped
             // square enumeration misses (factor entries > cap).
@@ -2780,6 +2805,8 @@ fn div_ceil(a: i64, b: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::MoveFamilyPolicy;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_factorisations_identity() {
@@ -2959,6 +2986,27 @@ mod tests {
         });
 
         assert!(found, "expected convergent-shear conjugation factorisation");
+    }
+
+    #[test]
+    fn test_graph_plus_structured_policy_excludes_square_factorisation_3x3() {
+        let u = DynMatrix::new(3, 3, vec![5, 2, 0, 2, 1, 0, 0, 0, 1]);
+        let v = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 0, 0, 0, 1]);
+        let c = u.mul(&v);
+        let mut families = BTreeSet::new();
+
+        visit_factorisations_with_family_for_policy(
+            &c,
+            3,
+            6,
+            MoveFamilyPolicy::GraphPlusStructured,
+            |family, _, _| {
+                families.insert(family);
+            },
+        );
+
+        assert!(families.contains("opposite_shear_conjugation_3x3"));
+        assert!(!families.contains("square_factorisation_3x3"));
     }
 
     #[test]

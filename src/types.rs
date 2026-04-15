@@ -16,6 +16,8 @@ pub enum FrontierMode {
 #[serde(rename_all = "snake_case")]
 pub enum MoveFamilyPolicy {
     Mixed,
+    #[serde(alias = "graph-plus-structured")]
+    GraphPlusStructured,
     #[serde(alias = "graph-only")]
     GraphOnly,
 }
@@ -37,6 +39,32 @@ impl FrontierMode {
 impl Default for MoveFamilyPolicy {
     fn default() -> Self {
         Self::Mixed
+    }
+}
+
+impl MoveFamilyPolicy {
+    pub fn permits_factorisations(self) -> bool {
+        !matches!(self, Self::GraphOnly)
+    }
+
+    pub fn includes_square_factorisation_3x3(self) -> bool {
+        matches!(self, Self::Mixed)
+    }
+
+    pub fn snake_case_label(self) -> &'static str {
+        match self {
+            Self::Mixed => "mixed",
+            Self::GraphPlusStructured => "graph_plus_structured",
+            Self::GraphOnly => "graph_only",
+        }
+    }
+
+    pub fn kebab_case_label(self) -> &'static str {
+        match self {
+            Self::Mixed => "mixed",
+            Self::GraphPlusStructured => "graph-plus-structured",
+            Self::GraphOnly => "graph-only",
+        }
     }
 }
 
@@ -528,13 +556,19 @@ mod tests {
     use crate::matrix::SqMatrix;
 
     #[test]
-    fn test_move_family_policy_deserializes_snake_and_kebab_case_graph_only() {
+    fn test_move_family_policy_deserializes_supported_labels() {
         let snake: MoveFamilyPolicy = serde_json::from_str("\"graph_only\"").unwrap();
         let kebab: MoveFamilyPolicy = serde_json::from_str("\"graph-only\"").unwrap();
+        let structured_snake: MoveFamilyPolicy =
+            serde_json::from_str("\"graph_plus_structured\"").unwrap();
+        let structured_kebab: MoveFamilyPolicy =
+            serde_json::from_str("\"graph-plus-structured\"").unwrap();
         let mixed: MoveFamilyPolicy = serde_json::from_str("\"mixed\"").unwrap();
 
         assert_eq!(snake, MoveFamilyPolicy::GraphOnly);
         assert_eq!(kebab, MoveFamilyPolicy::GraphOnly);
+        assert_eq!(structured_snake, MoveFamilyPolicy::GraphPlusStructured);
+        assert_eq!(structured_kebab, MoveFamilyPolicy::GraphPlusStructured);
         assert_eq!(mixed, MoveFamilyPolicy::Mixed);
     }
 
