@@ -34,12 +34,28 @@ use rayon::prelude::*;
 
 #[derive(Clone)]
 struct FrontierExpansion {
+    order_key: LayerExpansionOrderKey,
     parent_canon: DynMatrix,
     next_canon: DynMatrix,
     next_orig: DynMatrix,
     step: EsseStep,
     move_family: &'static str,
     same_future_past_signature: Option<SameFuturePastSignature>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct LayerExpansionOrderKey {
+    frontier_index: usize,
+    successor_index: usize,
+}
+
+impl LayerExpansionOrderKey {
+    const fn new(frontier_index: usize, successor_index: usize) -> Self {
+        Self {
+            frontier_index,
+            successor_index,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -4954,7 +4970,7 @@ fn expand_frontier_layer_dyn(
     FrontierExpansionTiming,
     bool,
 ) {
-    let expand_node = |current_canon: &DynMatrix| {
+    let expand_node = |frontier_index: usize, current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
             .expect("frontier node should have an original matrix");
@@ -4981,6 +4997,7 @@ fn expand_frontier_layer_dyn(
             }
             let same_future_past_signature = same_future_past_signature(&next_canon);
             expansions.push(FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
                 parent_canon: current_canon.clone(),
                 next_canon,
                 next_orig: next,
@@ -5013,6 +5030,7 @@ fn expand_frontier_layer_dyn(
                     }
                     let step = EsseStep { u, v };
                     expansions.push(FrontierExpansion {
+                        order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
                         parent_canon: current_canon.clone(),
                         next_canon,
                         next_orig: next,
@@ -5031,20 +5049,32 @@ fn expand_frontier_layer_dyn(
     let mut stats = FrontierExpansionStats::default();
     let mut timing = FrontierExpansionTiming::default();
     let mut timed_out = false;
-    for chunk in current_frontier.chunks(frontier_chunk_size(current_frontier.len(), deadline)) {
+    let chunk_size = frontier_chunk_size(current_frontier.len(), deadline);
+    for (chunk_index, chunk) in current_frontier.chunks(chunk_size).enumerate() {
         if deadline_reached(deadline) {
             timed_out = true;
             break;
         }
+        let frontier_offset = chunk_index * chunk_size;
 
         let compute_started = Instant::now();
         #[cfg(not(target_arch = "wasm32"))]
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
-            chunk.par_iter().map(expand_node).collect();
+        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = chunk
+            .par_iter()
+            .enumerate()
+            .map(|(node_index, current_canon)| {
+                expand_node(frontier_offset + node_index, current_canon)
+            })
+            .collect();
 
         #[cfg(target_arch = "wasm32")]
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
-            chunk.iter().map(expand_node).collect();
+        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = chunk
+            .iter()
+            .enumerate()
+            .map(|(node_index, current_canon)| {
+                expand_node(frontier_offset + node_index, current_canon)
+            })
+            .collect();
         timing.expand_compute_nanos += elapsed_nanos(compute_started);
 
         let accumulate_started = Instant::now();
@@ -5067,9 +5097,15 @@ fn expand_frontier_layer_dyn(
 }
 
 fn deduplicate_expansions(
-    expansions: Vec<FrontierExpansion>,
+    mut expansions: Vec<FrontierExpansion>,
     enable_same_future_past_representatives: bool,
 ) -> (Vec<FrontierExpansion>, usize) {
+    if expansions
+        .windows(2)
+        .any(|window| window[0].order_key > window[1].order_key)
+    {
+        expansions.sort_unstable_by_key(|expansion| expansion.order_key);
+    }
     let mut seen = HashSet::new();
     let mut same_future_past_seen = HashSet::new();
     let mut deduped = Vec::with_capacity(expansions.len());
@@ -5191,7 +5227,7 @@ fn expand_frontier_layer(
     FrontierExpansionStats,
     FrontierExpansionTiming,
 ) {
-    let expand_node = |current_canon: &DynMatrix| {
+    let expand_node = |frontier_index: usize, current_canon: &DynMatrix| {
         let current = orig
             .get(current_canon)
             .expect("frontier node should have an original matrix");
@@ -5218,6 +5254,7 @@ fn expand_frontier_layer(
             }
             let same_future_past_signature = same_future_past_signature(&next_canon);
             expansions.push(FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
                 parent_canon: current_canon.clone(),
                 next_canon,
                 next_orig: next,
@@ -5251,6 +5288,7 @@ fn expand_frontier_layer(
                     }
                     let step = EsseStep { u, v };
                     expansions.push(FrontierExpansion {
+                        order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
                         parent_canon: current_canon.clone(),
                         next_canon,
                         next_orig: next,
@@ -5268,8 +5306,11 @@ fn expand_frontier_layer(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let compute_started = Instant::now();
-        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> =
-            current_frontier.par_iter().map(expand_node).collect();
+        let per_node: Vec<(Vec<FrontierExpansion>, FrontierExpansionStats)> = current_frontier
+            .par_iter()
+            .enumerate()
+            .map(|(frontier_index, current_canon)| expand_node(frontier_index, current_canon))
+            .collect();
         let expand_compute_nanos = elapsed_nanos(compute_started);
         let mut expansions = Vec::new();
         let mut stats = FrontierExpansionStats::default();
@@ -5303,7 +5344,8 @@ fn expand_frontier_layer(
         let mut expansions = Vec::new();
         let mut stats = FrontierExpansionStats::default();
         let compute_started = Instant::now();
-        for (node_expansions, node_stats) in current_frontier.iter().map(expand_node) {
+        for (frontier_index, current_canon) in current_frontier.iter().enumerate() {
+            let (node_expansions, node_stats) = expand_node(frontier_index, current_canon);
             expansions.extend(node_expansions);
             accumulate_frontier_stats(&mut stats, &node_stats);
         }
@@ -7155,6 +7197,9 @@ mod tests {
         );
 
         assert_eq!(duplicate_frontier_expansions.len(), single_expansions.len());
+        assert!(duplicate_frontier_expansions
+            .iter()
+            .all(|expansion| expansion.order_key.frontier_index == 0));
     }
 
     #[test]
@@ -7228,7 +7273,7 @@ mod tests {
     }
 
     #[test]
-    fn test_same_future_past_representative_selection_only_collapses_graph_moves() {
+    fn test_same_future_past_representative_selection_uses_lowest_order_key() {
         let parent = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
         let graph_a = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 1, 1]);
         let graph_b = DynMatrix::new(3, 3, vec![1, 0, 1, 1, 0, 1, 0, 1, 1]);
@@ -7241,14 +7286,7 @@ mod tests {
         };
         let expansions = vec![
             FrontierExpansion {
-                parent_canon: parent.clone(),
-                next_canon: graph_a.clone(),
-                next_orig: graph_a,
-                step: dummy_step.clone(),
-                move_family: "graph_a",
-                same_future_past_signature: graph_a_signature,
-            },
-            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 1),
                 parent_canon: parent.clone(),
                 next_canon: graph_b.clone(),
                 next_orig: graph_b.clone(),
@@ -7257,6 +7295,16 @@ mod tests {
                 same_future_past_signature: graph_b_signature,
             },
             FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 0),
+                parent_canon: parent.clone(),
+                next_canon: graph_a.clone(),
+                next_orig: graph_a,
+                step: dummy_step.clone(),
+                move_family: "graph_a",
+                same_future_past_signature: graph_a_signature,
+            },
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 2),
                 parent_canon: parent,
                 next_canon: factorised.clone(),
                 next_orig: factorised,
@@ -7279,10 +7327,11 @@ mod tests {
         assert!(deduped
             .iter()
             .any(|expansion| expansion.move_family == "factorised"));
+        assert_eq!(deduped[0].order_key, LayerExpansionOrderKey::new(0, 0));
     }
 
     #[test]
-    fn test_deduplicate_expansions_keeps_first_canonical_representative() {
+    fn test_deduplicate_expansions_keeps_lowest_order_key_canonical_representative() {
         let parent_a = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
         let parent_b = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
         let next = DynMatrix::new(2, 2, vec![2, 1, 1, 1]);
@@ -7292,6 +7341,16 @@ mod tests {
         };
         let expansions = vec![
             FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 1),
+                parent_canon: parent_b,
+                next_canon: next.clone(),
+                next_orig: next.clone(),
+                step: dummy_step.clone(),
+                move_family: "second",
+                same_future_past_signature: None,
+            },
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 0),
                 parent_canon: parent_a.clone(),
                 next_canon: next.clone(),
                 next_orig: next.clone(),
@@ -7300,11 +7359,12 @@ mod tests {
                 same_future_past_signature: None,
             },
             FrontierExpansion {
-                parent_canon: parent_b,
-                next_canon: next.clone(),
-                next_orig: next,
+                order_key: LayerExpansionOrderKey::new(1, 0),
+                parent_canon: parent_a,
+                next_canon: next,
+                next_orig: DynMatrix::new(2, 2, vec![2, 1, 1, 1]),
                 step: dummy_step,
-                move_family: "second",
+                move_family: "third",
                 same_future_past_signature: None,
             },
         ];
@@ -7313,7 +7373,7 @@ mod tests {
 
         assert_eq!(same_future_past_collisions, 0);
         assert_eq!(deduped.len(), 1);
-        assert_eq!(deduped[0].parent_canon, parent_a);
+        assert_eq!(deduped[0].order_key, LayerExpansionOrderKey::new(0, 0));
         assert_eq!(deduped[0].move_family, "first");
     }
 
