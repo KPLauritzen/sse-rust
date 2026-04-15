@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ahash::AHashMap as HashMap;
 
-use super::path::{reanchor_dyn_sse_path, reverse_dyn_sse_path, validate_sse_path_dyn};
+use super::path::{reanchor_dyn_sse_path, reverse_dyn_sse_path};
 use super::*;
 use crate::types::{GuideArtifact, GuideArtifactPayload};
 
