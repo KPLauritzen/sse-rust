@@ -252,7 +252,6 @@ struct LayerContrastArtifact {
     family_benchmark_path: Option<PathBuf>,
     config: ArtifactConfig,
     summary: ArtifactSummary,
-    matrix_catalog: Vec<MatrixCatalogEntry>,
     cases: Vec<ArtifactCaseAnalysis>,
 }
 
@@ -285,16 +284,8 @@ struct ArtifactSummary {
     exported_cases: usize,
     exported_rankable_cases: usize,
     exported_rankable_layers: usize,
-    exported_layer_candidates: usize,
     exported_matched_candidates: usize,
-    matrix_catalog_size: usize,
     exported_families: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct MatrixCatalogEntry {
-    matrix_id: usize,
-    matrix_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -318,13 +309,12 @@ struct ArtifactLayerContrast {
     matched_witness_candidates: usize,
     best_remaining_witness_lag: usize,
     dedup_scope_key: String,
-    candidate_ids: Vec<usize>,
     matched_candidates: Vec<ArtifactMatchedCandidate>,
 }
 
 #[derive(Debug, Serialize)]
 struct ArtifactMatchedCandidate {
-    candidate_id: usize,
+    candidate_key: String,
     continuation_label: ContinuationLabel,
     remaining_witness_lag: usize,
     solution_path_index: usize,
@@ -1104,11 +1094,9 @@ fn write_layer_contrast_artifact(
         return Ok(());
     };
 
-    let mut matrix_ids = BTreeMap::new();
-    let mut matrix_catalog = Vec::new();
     let artifact_cases = analyzed_cases
         .iter()
-        .map(|case| compact_case_analysis(case, &mut matrix_ids, &mut matrix_catalog))
+        .map(compact_case_analysis)
         .collect::<Vec<_>>();
     let exported_rankable_cases = analyzed_cases
         .iter()
@@ -1117,11 +1105,6 @@ fn write_layer_contrast_artifact(
     let exported_rankable_layers = analyzed_cases
         .iter()
         .map(|case| case.rankable_layers.len())
-        .sum::<usize>();
-    let exported_layer_candidates = artifact_cases
-        .iter()
-        .flat_map(|case| case.rankable_layers.iter())
-        .map(|layer| layer.candidate_ids.len())
         .sum::<usize>();
     let exported_matched_candidates = artifact_cases
         .iter()
@@ -1166,12 +1149,9 @@ fn write_layer_contrast_artifact(
             exported_cases: analyzed_cases.len(),
             exported_rankable_cases,
             exported_rankable_layers,
-            exported_layer_candidates,
             exported_matched_candidates,
-            matrix_catalog_size: matrix_catalog.len(),
             exported_families,
         },
-        matrix_catalog,
         cases: artifact_cases,
     };
     let json = serde_json::to_string_pretty(&artifact)
@@ -1180,11 +1160,7 @@ fn write_layer_contrast_artifact(
         .map_err(|err| format!("failed to write {}: {err}", path.display()))
 }
 
-fn compact_case_analysis(
-    case: &CaseAnalysis,
-    matrix_ids: &mut BTreeMap<String, usize>,
-    matrix_catalog: &mut Vec<MatrixCatalogEntry>,
-) -> ArtifactCaseAnalysis {
+fn compact_case_analysis(case: &CaseAnalysis) -> ArtifactCaseAnalysis {
     ArtifactCaseAnalysis {
         label: case.label.clone(),
         budget_lag: case.budget_lag,
@@ -1197,37 +1173,12 @@ fn compact_case_analysis(
         rankable_layers: case
             .rankable_layers
             .iter()
-            .map(|layer| compact_layer_contrast(layer, matrix_ids, matrix_catalog))
+            .map(compact_layer_contrast)
             .collect(),
     }
 }
 
-fn compact_layer_contrast(
-    layer: &LayerContrast,
-    matrix_ids: &mut BTreeMap<String, usize>,
-    matrix_catalog: &mut Vec<MatrixCatalogEntry>,
-) -> ArtifactLayerContrast {
-    let mut candidate_ids = Vec::with_capacity(layer.candidate_labels.len());
-    let mut matched_candidates = Vec::new();
-
-    for candidate in &layer.candidate_labels {
-        let candidate_id = intern_matrix(&candidate.candidate_key, matrix_ids, matrix_catalog);
-        candidate_ids.push(candidate_id);
-        if candidate.continuation_label == ContinuationLabel::NonContinuation {
-            continue;
-        }
-        matched_candidates.push(ArtifactMatchedCandidate {
-            candidate_id,
-            continuation_label: candidate.continuation_label,
-            remaining_witness_lag: candidate
-                .remaining_witness_lag
-                .expect("matched candidate should carry remaining lag"),
-            solution_path_index: candidate
-                .solution_path_index
-                .expect("matched candidate should carry a solution-path index"),
-        });
-    }
-
+fn compact_layer_contrast(layer: &LayerContrast) -> ArtifactLayerContrast {
     ArtifactLayerContrast {
         layer_index: layer.layer_index,
         direction: layer.direction,
@@ -1235,26 +1186,22 @@ fn compact_layer_contrast(
         matched_witness_candidates: layer.matched_witness_candidates,
         best_remaining_witness_lag: layer.best_remaining_witness_lag,
         dedup_scope_key: layer.dedup_scope_key.clone(),
-        candidate_ids,
-        matched_candidates,
+        matched_candidates: layer
+            .candidate_labels
+            .iter()
+            .filter(|candidate| candidate.continuation_label != ContinuationLabel::NonContinuation)
+            .map(|candidate| ArtifactMatchedCandidate {
+                candidate_key: candidate.candidate_key.clone(),
+                continuation_label: candidate.continuation_label,
+                remaining_witness_lag: candidate
+                    .remaining_witness_lag
+                    .expect("matched candidate should carry remaining lag"),
+                solution_path_index: candidate
+                    .solution_path_index
+                    .expect("matched candidate should carry a solution-path index"),
+            })
+            .collect(),
     }
-}
-
-fn intern_matrix(
-    matrix_key: &str,
-    matrix_ids: &mut BTreeMap<String, usize>,
-    matrix_catalog: &mut Vec<MatrixCatalogEntry>,
-) -> usize {
-    if let Some(id) = matrix_ids.get(matrix_key).copied() {
-        return id;
-    }
-    let matrix_id = matrix_catalog.len();
-    matrix_catalog.push(MatrixCatalogEntry {
-        matrix_id,
-        matrix_key: matrix_key.to_string(),
-    });
-    matrix_ids.insert(matrix_key.to_string(), matrix_id);
-    matrix_id
 }
 
 fn manifest_matrix(matrix: &ManifestMatrix) -> Result<DynMatrix, String> {

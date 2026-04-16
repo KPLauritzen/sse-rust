@@ -94,22 +94,22 @@ The first artifact is:
 Shape:
 
 - top-level `config` and `summary`
-- `matrix_catalog`
-  - stable `matrix_id -> matrix_key` catalog for all candidate states in the
-    pass
 - `cases[*]`
   - case label, pair metadata, and `contrast_source_kind`
 - `rankable_layers[*]`
-  - direction, candidate id list, dedup scope key, and only the matched witness
+  - direction, `layer_size`, dedup scope key, and only the matched witness
     candidates with their continuation labels and remaining witness lag
 
-`non_continuation` is implicit:
+`non_continuation` remains implicit at the manifest level:
 
-- every `candidate_id` in a rankable layer that is not listed under
-  `matched_candidates` is a negative sibling for that layer.
+- the durable artifact records which sibling won inside a rankable layer and how
+  large the sibling set was;
+- when a later experiment needs the full negative sibling pool, it should rerun
+  `analyze_path_signal_corpus` on the same bounded case surface and recover that
+  exact layer by `(case label, direction, layer_index)`.
 
-This keeps the sibling set intact while avoiding a much larger durable artifact
-full of repeated negative-row payloads.
+This is intentionally a small **anchor manifest** over the existing analyzer
+surface rather than a fully materialized training table.
 
 ## First bounded extraction pass
 
