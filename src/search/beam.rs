@@ -100,14 +100,21 @@ impl BeamFrontier {
 #[derive(Clone, Debug)]
 pub(super) struct BeamBfsHandoffFrontier {
     active: BeamFrontier,
-    deferred: VecDeque<BeamFrontierEntry>,
+    deferred: VecDeque<DeferredBeamFrontierEntry>,
     deferred_cap: Option<usize>,
+    deferred_overflow_len: usize,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct BeamBfsHandoffExactMeet {
     pub(super) canonical: DynMatrix,
     pub(super) path_depth: usize,
+}
+
+#[derive(Clone, Debug)]
+struct DeferredBeamFrontierEntry {
+    entry: BeamFrontierEntry,
+    retained_overflow: bool,
 }
 
 pub(super) const DEFAULT_BEAM_BFS_HANDOFF_DEPTH: usize = 4;
@@ -125,31 +132,60 @@ impl BeamBfsHandoffFrontier {
             active: BeamFrontier::new(beam_width),
             deferred: VecDeque::new(),
             deferred_cap,
+            deferred_overflow_len: 0,
         }
     }
 
     pub(super) fn push_beam(&mut self, entry: BeamFrontierEntry) {
         if let Some(overflow) = self.active.push(entry) {
-            self.defer_entry(overflow);
-            if let Some(cap) = self.deferred_cap {
-                while self.deferred.len() > cap {
-                    self.deferred.pop_back();
-                }
-            }
+            self.defer_entry(overflow, true);
+            self.enforce_deferred_overflow_cap();
         }
     }
 
     pub(super) fn push_bfs(&mut self, entry: BeamFrontierEntry) {
-        self.defer_entry(entry);
+        self.defer_entry(entry, false);
     }
 
-    fn defer_entry(&mut self, entry: BeamFrontierEntry) {
+    fn defer_entry(&mut self, entry: BeamFrontierEntry, retained_overflow: bool) {
         let insert_at = self
             .deferred
             .iter()
-            .position(|pending| compare_deferred_beam_entries(&entry, pending) == Ordering::Less)
+            .position(|pending| {
+                compare_deferred_beam_entries(&entry, &pending.entry) == Ordering::Less
+            })
             .unwrap_or(self.deferred.len());
-        self.deferred.insert(insert_at, entry);
+        self.deferred.insert(
+            insert_at,
+            DeferredBeamFrontierEntry {
+                entry,
+                retained_overflow,
+            },
+        );
+        if retained_overflow {
+            self.deferred_overflow_len += 1;
+        }
+    }
+
+    fn enforce_deferred_overflow_cap(&mut self) {
+        let Some(cap) = self.deferred_cap else {
+            return;
+        };
+        while self.deferred_overflow_len > cap {
+            let Some(index) = self
+                .deferred
+                .iter()
+                .rposition(|pending| pending.retained_overflow)
+            else {
+                break;
+            };
+            let removed = self
+                .deferred
+                .remove(index)
+                .expect("overflow entry index should be valid");
+            debug_assert!(removed.retained_overflow);
+            self.deferred_overflow_len -= 1;
+        }
     }
 
     pub(super) fn pop_beam_batch(&mut self) -> Vec<BeamFrontierEntry> {
@@ -161,15 +197,21 @@ impl BeamBfsHandoffFrontier {
         let Some(first) = self.deferred.pop_front() else {
             return Vec::new();
         };
-        let target_depth = first.depth;
-        let mut batch = vec![first];
+        if first.retained_overflow {
+            self.deferred_overflow_len -= 1;
+        }
+        let target_depth = first.entry.depth;
+        let mut batch = vec![first.entry];
         while self
             .deferred
             .front()
-            .is_some_and(|entry| entry.depth == target_depth)
+            .is_some_and(|entry| entry.entry.depth == target_depth)
         {
             if let Some(entry) = self.deferred.pop_front() {
-                batch.push(entry);
+                if entry.retained_overflow {
+                    self.deferred_overflow_len -= 1;
+                }
+                batch.push(entry.entry);
             }
         }
         batch
@@ -180,16 +222,16 @@ impl BeamBfsHandoffFrontier {
     }
 
     fn peek_deferred(&self) -> Option<&BeamFrontierEntry> {
-        self.deferred.front()
+        self.deferred.front().map(|entry| &entry.entry)
     }
 
     pub(super) fn refresh_approximate_hits(&mut self, other_signatures: &HashSet<ApproxSignature>) {
         self.active.refresh_approximate_hits(other_signatures);
         for entry in &mut self.deferred {
-            if !entry.approximate_hit
-                && other_signatures.contains(&approx_signature(&entry.canonical))
+            if !entry.entry.approximate_hit
+                && other_signatures.contains(&approx_signature(&entry.entry.canonical))
             {
-                entry.approximate_hit = true;
+                entry.entry.approximate_hit = true;
             }
         }
     }
@@ -496,6 +538,30 @@ mod tests {
         assert_eq!(third_batch.len(), 1);
         assert_eq!(third_batch[0].canonical, DynMatrix::new(1, 1, vec![5]));
         assert_eq!(third_batch[0].depth, 3);
+
+        assert!(frontier.pop_bfs_batch().is_empty());
+    }
+
+    #[test]
+    fn test_beam_bfs_handoff_overflow_cap_does_not_evict_bfs_entries() {
+        let mut frontier = BeamBfsHandoffFrontier::new(1, Some(1));
+        frontier.push_beam(beam_entry(1, 1, 1, false, 0));
+        frontier.push_beam(beam_entry(2, 1, 2, false, 1));
+        frontier.push_bfs(beam_entry(3, 2, 3, false, 2));
+        frontier.push_beam(beam_entry(4, 1, 4, false, 3));
+
+        assert_eq!(frontier.active_len(), 1);
+        assert_eq!(frontier.pending_len(), 3);
+
+        let first_batch = frontier.pop_bfs_batch();
+        assert_eq!(first_batch.len(), 1);
+        assert_eq!(first_batch[0].canonical, DynMatrix::new(1, 1, vec![2]));
+        assert_eq!(first_batch[0].depth, 1);
+
+        let second_batch = frontier.pop_bfs_batch();
+        assert_eq!(second_batch.len(), 1);
+        assert_eq!(second_batch[0].canonical, DynMatrix::new(1, 1, vec![3]));
+        assert_eq!(second_batch[0].depth, 2);
 
         assert!(frontier.pop_bfs_batch().is_empty());
     }
