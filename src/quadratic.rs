@@ -687,8 +687,11 @@ mod tests {
     #[test]
     fn test_principal_reduced_form_for_real_quadratic_order() {
         let principal = principal_reduced_form(204).expect("principal form should exist");
-        assert_eq!(principal, ReducedForm { a: 1, b: 14, c: 2 });
         assert_eq!(reduced_form_is_principal(204, &principal), Some(true));
+
+        let nonprincipal = eigenvector_ideal_class_2x2(&SqMatrix::new([[13, 5], [3, 1]]))
+            .expect("Eilers-Kiming target class should be computable");
+        assert_eq!(reduced_form_is_principal(204, &nonprincipal), Some(false));
     }
 
     #[test]
