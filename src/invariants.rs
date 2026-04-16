@@ -1,6 +1,175 @@
 use crate::matrix::{DynMatrix, SqMatrix};
+use crate::quadratic::ReducedForm;
 
 const GENERIC_SQUARE_TRACE_INVARIANT_MAX_POWER: usize = 4;
+
+/// Determinant-band classification for the narrow 2x2 positive literature
+/// territory around Baker (1983) and Choe-Shin (1997).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeterminantBand2x2 {
+    Baker,
+    ChoeShin,
+    Neither,
+}
+
+impl DeterminantBand2x2 {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Baker => "baker",
+            Self::ChoeShin => "choe_shin",
+            Self::Neither => "neither",
+        }
+    }
+}
+
+/// Cheap arithmetic dossier for one 2x2 endpoint matrix.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ArithmeticProfile2x2 {
+    pub trace: i64,
+    pub determinant: i64,
+    pub discriminant: i64,
+    pub determinant_band: DeterminantBand2x2,
+}
+
+/// Exact GL(2,Z)-similarity analysis used by [`gl2z_similarity_profile_2x2`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Gl2zSimilarityAnalysis2x2 {
+    CharacteristicPolynomialMismatch,
+    Scalar {
+        eigenvalue: i64,
+    },
+    Split {
+        low_eigenvalue: i64,
+        high_eigenvalue: i64,
+        source_content: i64,
+        target_content: i64,
+    },
+    Irreducible {
+        source_order_ideal_class: ReducedForm,
+        target_order_ideal_class: ReducedForm,
+    },
+}
+
+/// Reporting-oriented exact 2x2 dossier for integer similarity and the
+/// Baker/Choe-Shin determinant bands.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Gl2zSimilarityProfile2x2 {
+    pub source: ArithmeticProfile2x2,
+    pub target: ArithmeticProfile2x2,
+    pub pair_determinant_band: Option<DeterminantBand2x2>,
+    pub gl2z_similar: bool,
+    pub analysis: Gl2zSimilarityAnalysis2x2,
+}
+
+impl Gl2zSimilarityProfile2x2 {
+    pub fn shares_characteristic_polynomial(&self) -> bool {
+        self.pair_determinant_band.is_some()
+    }
+}
+
+/// Arithmetic-only 2x2 dossier used by the GL(2,Z)-similarity profile.
+pub fn arithmetic_profile_2x2(matrix: &SqMatrix<2>) -> ArithmeticProfile2x2 {
+    let trace = matrix.trace() as i64;
+    let determinant = matrix.det();
+    let discriminant = trace * trace - 4 * determinant;
+    ArithmeticProfile2x2 {
+        trace,
+        determinant,
+        discriminant,
+        determinant_band: determinant_band_2x2(trace, determinant),
+    }
+}
+
+/// Classify the Baker/Choe-Shin determinant territory for one 2x2 endpoint.
+pub fn determinant_band_2x2(trace: i64, determinant: i64) -> DeterminantBand2x2 {
+    if determinant >= -trace {
+        DeterminantBand2x2::Baker
+    } else if determinant >= -2 * trace
+        && determinant < -trace
+        && is_composite(determinant.unsigned_abs())
+    {
+        DeterminantBand2x2::ChoeShin
+    } else {
+        DeterminantBand2x2::Neither
+    }
+}
+
+/// Exact 2x2 integer-similarity profile.
+///
+/// For irreducible characteristic polynomials, this uses the quadratic-order
+/// ideal class in `Z[λ]` (Latimer-MacDuffee/Taussky). For split cases, it uses
+/// the standard divisor/content normal form given by `gcd(A - λI)`.
+pub fn gl2z_similarity_profile_2x2(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+) -> Gl2zSimilarityProfile2x2 {
+    let source_profile = arithmetic_profile_2x2(source);
+    let target_profile = arithmetic_profile_2x2(target);
+
+    if source_profile.trace != target_profile.trace
+        || source_profile.determinant != target_profile.determinant
+    {
+        return Gl2zSimilarityProfile2x2 {
+            source: source_profile,
+            target: target_profile,
+            pair_determinant_band: None,
+            gl2z_similar: false,
+            analysis: Gl2zSimilarityAnalysis2x2::CharacteristicPolynomialMismatch,
+        };
+    }
+
+    let pair_determinant_band = Some(source_profile.determinant_band);
+    let discriminant = source_profile.discriminant;
+
+    if let Some(sqrt_discriminant) = exact_square_root(discriminant) {
+        debug_assert_eq!((source_profile.trace + sqrt_discriminant) % 2, 0);
+        debug_assert_eq!((source_profile.trace - sqrt_discriminant) % 2, 0);
+
+        let low_eigenvalue = (source_profile.trace - sqrt_discriminant) / 2;
+        let high_eigenvalue = (source_profile.trace + sqrt_discriminant) / 2;
+        let source_content = split_similarity_content_2x2(source, low_eigenvalue);
+        let target_content = split_similarity_content_2x2(target, low_eigenvalue);
+        let gl2z_similar = source_content == target_content;
+
+        let analysis = if source_content == 0 && target_content == 0 {
+            Gl2zSimilarityAnalysis2x2::Scalar {
+                eigenvalue: low_eigenvalue,
+            }
+        } else {
+            Gl2zSimilarityAnalysis2x2::Split {
+                low_eigenvalue,
+                high_eigenvalue,
+                source_content,
+                target_content,
+            }
+        };
+
+        return Gl2zSimilarityProfile2x2 {
+            source: source_profile,
+            target: target_profile,
+            pair_determinant_band,
+            gl2z_similar,
+            analysis,
+        };
+    }
+
+    let source_class = crate::quadratic::eigenvector_ideal_class_2x2(source)
+        .expect("irreducible 2x2 endpoint should yield a quadratic-order ideal class");
+    let target_class = crate::quadratic::eigenvector_ideal_class_2x2(target)
+        .expect("irreducible 2x2 endpoint should yield a quadratic-order ideal class");
+    let gl2z_similar = source_class == target_class;
+
+    Gl2zSimilarityProfile2x2 {
+        source: source_profile,
+        target: target_profile,
+        pair_determinant_band,
+        gl2z_similar,
+        analysis: Gl2zSimilarityAnalysis2x2::Irreducible {
+            source_order_ideal_class: source_class,
+            target_order_ideal_class: target_class,
+        },
+    }
+}
 
 /// Check whether two 2x2 matrices pass all known SSE invariants.
 /// Returns `None` if all invariants match, `Some(reason)` on first mismatch.
@@ -148,6 +317,47 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
+fn exact_square_root(n: i64) -> Option<i64> {
+    if n < 0 {
+        return None;
+    }
+    let mut root = (n as f64).sqrt() as u64;
+    let target = n as u64;
+    while root * root > target {
+        root -= 1;
+    }
+    while (root + 1) * (root + 1) <= target {
+        root += 1;
+    }
+    if root * root == target {
+        Some(root as i64)
+    } else {
+        None
+    }
+}
+
+fn split_similarity_content_2x2(matrix: &SqMatrix<2>, eigenvalue: i64) -> i64 {
+    let [[a, b], [c, d]] = matrix.data;
+    gcd(
+        gcd((a as i64 - eigenvalue).unsigned_abs(), b as u64),
+        gcd(c as u64, (d as i64 - eigenvalue).unsigned_abs()),
+    ) as i64
+}
+
+fn is_composite(n: u64) -> bool {
+    if n < 4 {
+        return false;
+    }
+    let mut factor = 2u64;
+    while factor * factor <= n {
+        if n % factor == 0 {
+            return true;
+        }
+        factor += 1;
+    }
+    false
+}
+
 /// Evaluate a polynomial p(x) = coeffs[0] + coeffs[1]*x + coeffs[2]*x^2 + ...
 /// at a 2x2 matrix A, returning a 2x2 i64 matrix.
 fn eval_poly_at_matrix_2x2(coeffs: &[i64], a: &SqMatrix<2>) -> [[i64; 2]; 2] {
@@ -290,6 +500,134 @@ mod tests {
     fn test_same_matrix_passes() {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         assert_eq!(check_invariants_2x2(&a, &a), None);
+    }
+
+    #[test]
+    fn test_determinant_band_classification() {
+        assert_eq!(determinant_band_2x2(6, 7), DeterminantBand2x2::Baker);
+        assert_eq!(determinant_band_2x2(4, -6), DeterminantBand2x2::ChoeShin);
+        assert_eq!(determinant_band_2x2(4, -5), DeterminantBand2x2::Neither);
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_rejects_characteristic_polynomial_mismatch() {
+        let a = SqMatrix::new([[2, 1], [1, 1]]);
+        let b = SqMatrix::new([[3, 1], [1, 1]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &b);
+
+        assert!(!profile.gl2z_similar);
+        assert_eq!(profile.pair_determinant_band, None);
+        assert_eq!(
+            profile.analysis,
+            Gl2zSimilarityAnalysis2x2::CharacteristicPolynomialMismatch
+        );
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_irreducible_baker_case() {
+        let a = SqMatrix::new([[3, 2], [1, 3]]);
+        let b = SqMatrix::new([[2, 1], [1, 4]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &b);
+
+        assert!(profile.gl2z_similar);
+        assert_eq!(
+            profile.pair_determinant_band,
+            Some(DeterminantBand2x2::Baker)
+        );
+        match profile.analysis {
+            Gl2zSimilarityAnalysis2x2::Irreducible {
+                source_order_ideal_class,
+                target_order_ideal_class,
+            } => assert_eq!(source_order_ideal_class, target_order_ideal_class),
+            other => panic!("expected irreducible similarity analysis, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_irreducible_non_similar_pair() {
+        let a = SqMatrix::new([[14, 2], [1, 0]]);
+        let b = SqMatrix::new([[13, 5], [3, 1]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &b);
+
+        assert!(!profile.gl2z_similar);
+        assert_eq!(
+            profile.pair_determinant_band,
+            Some(DeterminantBand2x2::Baker)
+        );
+        match profile.analysis {
+            Gl2zSimilarityAnalysis2x2::Irreducible {
+                source_order_ideal_class,
+                target_order_ideal_class,
+            } => assert_ne!(source_order_ideal_class, target_order_ideal_class),
+            other => panic!("expected irreducible similarity analysis, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_split_cases_use_content_invariant() {
+        let similar_a = SqMatrix::new([[1, 1], [0, 3]]);
+        let similar_b = SqMatrix::new([[2, 1], [1, 2]]);
+        let similar_profile = gl2z_similarity_profile_2x2(&similar_a, &similar_b);
+        assert!(similar_profile.gl2z_similar);
+        match similar_profile.analysis {
+            Gl2zSimilarityAnalysis2x2::Split {
+                low_eigenvalue,
+                high_eigenvalue,
+                source_content,
+                target_content,
+            } => {
+                assert_eq!((low_eigenvalue, high_eigenvalue), (1, 3));
+                assert_eq!(source_content, 1);
+                assert_eq!(target_content, 1);
+            }
+            other => panic!("expected split similarity analysis, got {other:?}"),
+        }
+
+        let not_similar_a = SqMatrix::new([[1, 1], [0, 3]]);
+        let not_similar_b = SqMatrix::new([[1, 2], [0, 3]]);
+        let not_similar_profile = gl2z_similarity_profile_2x2(&not_similar_a, &not_similar_b);
+        assert!(!not_similar_profile.gl2z_similar);
+        match not_similar_profile.analysis {
+            Gl2zSimilarityAnalysis2x2::Split {
+                source_content,
+                target_content,
+                ..
+            } => {
+                assert_eq!(source_content, 1);
+                assert_eq!(target_content, 2);
+            }
+            other => panic!("expected split similarity analysis, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_repeated_eigenvalue_distinguishes_scalar_case() {
+        let scalar = SqMatrix::new([[2, 0], [0, 2]]);
+        let same_scalar = SqMatrix::new([[2, 0], [0, 2]]);
+        let scalar_profile = gl2z_similarity_profile_2x2(&scalar, &same_scalar);
+        assert!(scalar_profile.gl2z_similar);
+        assert_eq!(
+            scalar_profile.analysis,
+            Gl2zSimilarityAnalysis2x2::Scalar { eigenvalue: 2 }
+        );
+
+        let jordan = SqMatrix::new([[2, 1], [0, 2]]);
+        let larger_jordan = SqMatrix::new([[2, 2], [0, 2]]);
+        let repeated_profile = gl2z_similarity_profile_2x2(&jordan, &larger_jordan);
+        assert!(!repeated_profile.gl2z_similar);
+        match repeated_profile.analysis {
+            Gl2zSimilarityAnalysis2x2::Split {
+                low_eigenvalue,
+                high_eigenvalue,
+                source_content,
+                target_content,
+            } => {
+                assert_eq!((low_eigenvalue, high_eigenvalue), (2, 2));
+                assert_eq!(source_content, 1);
+                assert_eq!(target_content, 2);
+            }
+            other => panic!("expected repeated-eigenvalue split analysis, got {other:?}"),
+        }
     }
 
     #[test]

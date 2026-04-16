@@ -1,13 +1,18 @@
-//! Quadratic field arithmetic for the Eilers-Kiming ideal class invariant.
+//! Quadratic-order arithmetic for 2x2 integer similarity and the Eilers-Kiming
+//! ideal-class invariant.
 //!
 //! For a 2×2 matrix with characteristic polynomial x² - tx + d, the Perron
 //! eigenvalue λ lives in the quadratic field K = Q(√Δ) where Δ = t² - 4d.
-//! The invariant computes the ideal class of the eigenvector ideal in O_K.
+//! For irreducible characteristic polynomials, the order `Z[λ]` has
+//! discriminant Δ, and reduced binary quadratic forms of discriminant Δ encode
+//! its ideal classes. That gives an exact `GL(2,Z)`-similarity classifier via
+//! the Latimer-MacDuffee/Taussky correspondence, and also supplies the same
+//! order-ideal-class datum used by the current Eilers-Kiming obstruction.
 //!
 //! We represent ideal classes via binary quadratic forms, which are equivalent
-//! to ideal classes in quadratic fields. For negative discriminant (imaginary
-//! quadratic), we use Gauss reduction. For positive discriminant (real quadratic),
-//! we use continued-fraction reduction.
+//! to ideal classes in quadratic orders. For negative discriminant (imaginary
+//! quadratic), we use Gauss reduction. For positive discriminant (real
+//! quadratic), we use continued-fraction reduction.
 
 use crate::matrix::SqMatrix;
 
@@ -291,13 +296,14 @@ fn is_perfect_square(n: u64) -> bool {
     s * s == n
 }
 
-/// Compute the ideal class of the Perron eigenvector ideal for a 2×2 matrix.
+/// Compute the class of the Perron eigenvector ideal in the quadratic order
+/// `Z[λ]` for a 2×2 matrix.
 ///
 /// For A = [[a,b],[c,d]] with characteristic polynomial x² - tx + det where
 /// t = a+d, the Perron eigenvector is v = (λ - d, c) where λ is the larger root.
 ///
-/// The ideal I = O_K · (λ - d) + O_K · c in O_K corresponds to a binary
-/// quadratic form which we reduce to a canonical representative.
+/// The ideal `I = Z[λ] · (λ - d) + Z[λ] · c` corresponds to a binary quadratic
+/// form of discriminant Δ, which we reduce to a canonical representative.
 ///
 /// Returns None if the invariant doesn't apply (rational eigenvalues, zero
 /// eigenvector component, etc.).

@@ -366,3 +366,13 @@
   and research-only triangle-collapsible path telemetry, not a broader move-set
   widening. Details in
   `research/notes/2026-04-16-missing-references-and-solver-ideas.md`.
+
+- `x53` Added a reporting-only `gl2z_similarity_profile_2x2` seam and a bounded
+  research binary to inspect it.
+  Kept. `src/invariants.rs` now reports exact `GL(2,Z)` similarity for `2x2`
+  pairs via quadratic-order ideal classes in the irreducible case and the
+  `gcd(A-\lambda I)` split invariant in the rational-eigenvalue case, while
+  also classifying the Baker and Choe-Shin determinant bands. The new
+  `profile_gl2z_similarity_2x2` binary exposes this as a research-facing dossier
+  for named or explicit pairs without touching the main search. Focused tests
+  cover irreducible, split, repeated-eigenvalue, and band-classification cases.
