@@ -93,6 +93,79 @@ The harness remains lexicographic, with required cases as the correctness gate:
 
 Never accept a change that regresses required-case correctness for runtime gain.
 
+## Keep Or Revert Policy
+
+Do **not** collapse keep/revert decisions into one scalar beyond the existing
+required-case gate. The right question is:
+
+- does this change buy more **useful search per unit budget**?
+
+Read the evidence in three ledgers:
+
+- goal ledger:
+  - new witness,
+  - lower best lag,
+  - broader bounded completion region,
+  - new exact positive or negative classification.
+- useful-reach ledger:
+  - `collisions_with_other_frontier`,
+  - `approximate_other_side_hits`,
+  - `discovered_nodes`,
+  - `guided_segments_improved`,
+  - `promoted_guides`,
+  - other bounded continuity signals tied to the active round.
+- budget ledger:
+  - `elapsed_ms`,
+  - memory and frontier size,
+  - `factorisations_enumerated`,
+  - other work counters.
+
+Raw work counters by themselves are **not** success metrics. Fewer candidates,
+more pruning, or lower factorisation counts are only good if they preserve or
+improve useful reach.
+
+Use this decision order:
+
+1. Hard gate:
+   - never keep a change that regresses required-case correctness.
+2. Direct project win:
+   - keep immediately if it moves a project goal directly.
+3. Otherwise judge by round type:
+   - throughput round:
+     - keep if useful reach stays flat and budget improves.
+   - pruning round:
+     - keep if useful reach improves, or stays flat while budget improves.
+   - widening round:
+     - keep if useful reach improves under the same cap, even if raw work rises.
+   - ranking or admission round:
+     - keep if productive continuity signals improve under the same cap.
+4. Revert if the change only improves vanity counters:
+   - fewer candidates,
+   - more pruning,
+   - lower factorisation count,
+   - or lower runtime achieved by obviously cutting away productive search.
+
+### Exact Vs Heuristic Pruning
+
+Treat pruning changes differently depending on what they claim.
+
+- exact prune:
+  - theorem-backed necessary condition;
+  - allowed to reduce raw exploration aggressively;
+  - keep it if required positives still pass and fixed-budget runs improve
+    overall.
+- heuristic prune:
+  - ranking guess, admission filter, or "this looks bad" signal;
+  - do **not** default it to a hard prune;
+  - first use it as a score term, penalty, ordering feature, or shortlist
+    preference;
+  - only upgrade it to a hard prune after repeated evidence that it does not
+    kill productive branches.
+
+When an expensive prune helps only part of the search, gate it narrowly by
+dimension, frontier policy, or stage rather than paying its overhead on every
+path.
+
 ## Benchmark-Style Measurements Through Harness
 
 Decision:

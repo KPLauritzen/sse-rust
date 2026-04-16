@@ -45,6 +45,10 @@ running warmups/repeats. The detailed measurement block in JSON/pretty output
 includes the repeat samples plus `median` and `p90` so noise can be compared
 without distorting harness fitness tie-break semantics.
 
+For keep/revert decisions, do not read repeated timing in isolation. Compare it
+alongside the useful-reach fields from the same run rather than treating lower
+runtime, lower candidate counts, or higher prune rates as automatic wins.
+
 Use `deepening_schedule` on non-required cases when the measurement is really a
 bounded ramp or cliff map over lag, dimension, or entry caps rather than a
 single fixed scenario.

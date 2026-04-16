@@ -406,3 +406,12 @@
   diagnostic baseline, and added a lightweight `k=4` deepening ramp case to
   exercise `deepening_schedule` without putting the heavyweight beam64+dim5
   boundary map into the shared corpus.
+
+- `working tree` Added explicit keep/revert policy guidance for autoresearch
+  rounds.
+  Updated `research/program.md` to say that keep/revert decisions should be
+  based on useful search per unit budget rather than one scalar, with separate
+  goal, useful-reach, and budget ledgers plus different treatment for exact
+  versus heuristic pruning. Added matching wording in
+  `docs/research-harness-benchmark-policy.md` so repeated timing is not read in
+  isolation from the reach signals.
