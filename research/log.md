@@ -138,6 +138,13 @@
 
 ## 2026-04-16 Arithmetic Follow-up
 
+- `working tree` Classified extra matrix-characterization ideas by solver role.
+  Kept quotient-style same-future/same-past signals as the main ranking lane,
+  kept concrete-shift and narrow `2x2` arithmetic as exact pairwise or endpoint
+  classification only, and demoted raw endpoint-distance, generic norm, and
+  path-quotient ideas out of default beam use. Durable note:
+  `research/notes/2026-04-16-matrix-characterization-classification.md`.
+
 - `working tree` Checked the deferred `2x2` ideal-quotient / colon-ideal follow-up.
   Kept as evidence. Eilers-Kiming Theorem 1 reduces the colon-ideal equation to
   class congruence only modulo primes dividing `lambda`, so it is weaker than
