@@ -277,8 +277,7 @@ where
         let bridge = v
             .mul(&u)
             .to_sq::<2>()
-            .expect("3x3-to-2 factorisation should produce a 2x2 bridge")
-            .canonical();
+            .expect("3x3-to-2 factorisation should produce a 2x2 bridge");
         source_bridges.insert(bridge);
     }
 
@@ -903,9 +902,11 @@ mod tests {
         let a = SqMatrix::new([[1, 0], [1, 0]]);
         let b = SqMatrix::new([[0, 1], [0, 1]]);
         let a_source_states = canonical_insplit_states_3x3(&a);
+        let b_source_states = canonical_insplit_states_3x3(&b);
+        let a_target_states = canonical_outsplit_states_3x3(&a);
         let b_target_states = canonical_outsplit_states_3x3(&b);
 
-        let hits = collect_balanced_bridge_return_hits_3x3(
+        let a_hits = collect_balanced_bridge_return_hits_3x3(
             &a_source_states,
             &b_target_states,
             1,
@@ -915,9 +916,32 @@ mod tests {
             },
         );
 
-        assert_eq!(hits.len(), 4);
-        for (_, hit) in hits {
+        assert_eq!(a_hits.len(), 4);
+        for (_, hit) in a_hits {
             assert!(b_target_states.contains(&hit.matrix));
+            assert_eq!(hit.matrix.rows, 3);
+            assert_eq!(hit.matrix.cols, 3);
+            assert!(verify_balanced_elementary_witness_2x2(
+                &hit.source_bridge,
+                &hit.target_bridge,
+                &hit.witness
+            )
+            .is_ok());
+        }
+
+        let b_hits = collect_balanced_bridge_return_hits_3x3(
+            &b_source_states,
+            &a_target_states,
+            1,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 1,
+                max_entry: 1,
+            },
+        );
+
+        assert_eq!(b_hits.len(), 4);
+        for (_, hit) in b_hits {
+            assert!(a_target_states.contains(&hit.matrix));
             assert_eq!(hit.matrix.rows, 3);
             assert_eq!(hit.matrix.cols, 3);
             assert!(verify_balanced_elementary_witness_2x2(
@@ -934,9 +958,11 @@ mod tests {
         let a = SqMatrix::new([[1, 3], [2, 1]]);
         let b = SqMatrix::new([[1, 6], [1, 1]]);
         let a_source_states = canonical_insplit_states_3x3(&a);
+        let b_source_states = canonical_insplit_states_3x3(&b);
+        let a_target_states = canonical_outsplit_states_3x3(&a);
         let b_target_states = canonical_outsplit_states_3x3(&b);
 
-        let hits = collect_balanced_bridge_return_hits_3x3(
+        let a_hits = collect_balanced_bridge_return_hits_3x3(
             &a_source_states,
             &b_target_states,
             8,
@@ -946,7 +972,19 @@ mod tests {
             },
         );
 
-        assert!(hits.is_empty());
+        assert!(a_hits.is_empty());
+
+        let b_hits = collect_balanced_bridge_return_hits_3x3(
+            &b_source_states,
+            &a_target_states,
+            8,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(b_hits.is_empty());
     }
 
     #[test]
@@ -954,9 +992,11 @@ mod tests {
         let a = SqMatrix::new([[1, 4], [3, 1]]);
         let b = SqMatrix::new([[1, 12], [1, 1]]);
         let a_source_states = canonical_insplit_states_3x3(&a);
+        let b_source_states = canonical_insplit_states_3x3(&b);
+        let a_target_states = canonical_outsplit_states_3x3(&a);
         let b_target_states = canonical_outsplit_states_3x3(&b);
 
-        let hits = collect_balanced_bridge_return_hits_3x3(
+        let a_hits = collect_balanced_bridge_return_hits_3x3(
             &a_source_states,
             &b_target_states,
             8,
@@ -966,7 +1006,19 @@ mod tests {
             },
         );
 
-        assert!(hits.is_empty());
+        assert!(a_hits.is_empty());
+
+        let b_hits = collect_balanced_bridge_return_hits_3x3(
+            &b_source_states,
+            &a_target_states,
+            8,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(b_hits.is_empty());
     }
 
     #[test]
