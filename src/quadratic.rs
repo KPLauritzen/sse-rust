@@ -243,7 +243,7 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> Option<ReducedForm> {
     let mut best = ReducedForm {
         a: cur_a.abs(),
         b: cur_b,
-        c: cur_c.abs(),
+        c: cur_c,
     };
 
     let mut seen_cycle = HashSet::new();
@@ -259,7 +259,7 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> Option<ReducedForm> {
         let candidate = ReducedForm {
             a: cur_a.abs(),
             b: cur_b,
-            c: cur_c.abs(),
+            c: cur_c,
         };
         if candidate.a < best.a
             || (candidate.a == best.a && candidate.b < best.b)
