@@ -388,3 +388,21 @@
   concrete suggestions for `research/program.md`, `research/cases.json`,
   harness-case tuning, supporting doc wording, and which fresh ideas should be
   elevated into program-level guidance.
+
+- `working tree` Updated the autoresearch program and harness docs to match the
+  current repo state.
+  Refreshed `research/program.md`, `research/README.md`, and
+  `docs/research-harness-benchmark-policy.md` so they explicitly distinguish
+  required, measurement, and evidence lanes; point workers at
+  `graph_plus_structured`, `deepening_schedule`, and the current frontier and
+  proposal notes; and document why heavyweight boundary ramps should stay out of
+  the shared default corpus unless they are cheap enough for normal runs.
+
+- `working tree` Applied the first obvious corpus updates from the
+  autoresearch recommendations.
+  Promoted `lind_marcus_a_to_c` into the required correctness lane, added
+  `brix_ruiz_k3_graph_plus_structured_probe`, added a deferred-cap-10
+  `beam_bfs_handoff` diagnostic probe, reworded the depth-4 handoff case as a
+  diagnostic baseline, and added a lightweight `k=4` deepening ramp case to
+  exercise `deepening_schedule` without putting the heavyweight beam64+dim5
+  boundary map into the shared corpus.

@@ -10,10 +10,19 @@ repo. It is not the active backlog; use `bd` for actionable tasks.
 - [`cases.json`](cases.json) is the ground-truth benchmark set for
   `research_harness`.
   Required cases (`"required": true`, default) gate correctness; non-required
-  cases (`"required": false`) are for benchmark-style measurement probes.
+  cases (`"required": false`) are for benchmark-style measurement probes or
+  evidence-only diagnostic campaigns.
 - [`log.md`](log.md) is the terse chronological ledger. Keep entries short.
 - [`notes/README.md`](notes/README.md) defines the structure for longer-form
   notes that do not fit cleanly in the log.
+
+Case metadata conventions:
+
+- use `measurement` on non-required cases when repeated timing matters;
+- use `deepening_schedule` on non-required cases when a bounded lag/dimension
+  or entry ramp is more informative than isolated one-off probes;
+- keep the distinction clear between required gates, measurement probes, and
+  evidence campaigns.
 
 Local artifacts:
 
@@ -36,6 +45,11 @@ for repository changes to that policy.
 
 Benchmark-style case policy is documented in
 [`../docs/research-harness-benchmark-policy.md`](../docs/research-harness-benchmark-policy.md).
+
+When a run emits JSON, each case result includes a case-level summary plus
+`result_model`, aggregate telemetry, and per-layer telemetry. Use that shape to
+separate correctness, runtime, and search-shape effects when deciding whether a
+change is worth keeping.
 
 ## Supported Entry Points
 

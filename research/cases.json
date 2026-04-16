@@ -683,7 +683,7 @@
     },
     {
       "id": "brix_ruiz_k3_graph_only_beam_probe",
-      "description": "Benchmark-style measurement probe: graph-only endpoint search with the beam frontier on the hard k=3 family target.",
+      "description": "Benchmark-style measurement baseline: graph-only endpoint search with the plain beam frontier on the hard k=3 family target.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -717,7 +717,7 @@
     },
     {
       "id": "brix_ruiz_k3_graph_only_beam_bfs_handoff_probe",
-      "description": "Benchmark-style measurement probe: graph-only endpoint search with beam-to-BFS handoff on the hard k=3 family target.",
+      "description": "Benchmark-style diagnostic baseline: graph-only endpoint search with the known-losing depth-4 beam-to-BFS handoff shape on the hard k=3 family target.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -746,8 +746,76 @@
       "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement"],
       "campaign": {
         "id": "brix_ruiz_k3_frontier",
-        "strategy": "graph_only_beam_bfs_handoff_probe",
+        "strategy": "graph_only_beam_bfs_handoff_depth4_baseline",
         "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_graph_only_beam_bfs_handoff_cap10_probe",
+      "description": "Benchmark-style diagnostic probe: graph-only endpoint search with beam-to-BFS handoff plus a deferred-cap of 10 on the hard k=3 family target.",
+      "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 5
+      },
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 10,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "move_family_policy": "graph-only",
+        "frontier_mode": "beam_bfs_handoff",
+        "beam_width": 10,
+        "beam_bfs_handoff_depth": 4,
+        "beam_bfs_handoff_deferred_cap": 10
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement"],
+      "campaign": {
+        "id": "brix_ruiz_k3_frontier",
+        "strategy": "graph_only_beam_bfs_handoff_cap10_probe",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_graph_plus_structured_probe",
+      "description": "Benchmark-style measurement probe: endpoint search on the hard k=3 family target using the intermediate graph-plus-structured move-family policy.",
+      "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 3
+      },
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 4,
+        "max_entry": 6,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "move-policy-measurement", "benchmark-measurement"],
+      "campaign": {
+        "id": "brix_ruiz_k3_move_policy",
+        "strategy": "graph_plus_structured_probe",
+        "schedule_order": 10
       }
     },
     {
@@ -845,6 +913,40 @@
         "id": "brix_ruiz_k4",
         "strategy": "mixed_wide_probe",
         "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k4_boundary_ramp",
+      "description": "Evidence-only k=4 diagnostic ramp: a lightweight ordered lag sweep on the current cheap mixed family probe surface. Use heavier beam64+dim5 boundary maps from dedicated local corpora rather than the shared default corpus.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8
+      },
+      "deepening_schedule": {
+        "attempts": [
+          { "max_lag": 4 },
+          { "max_lag": 6 },
+          { "max_lag": 8 }
+        ]
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "family-probe", "deepening", "evidence"],
+      "campaign": {
+        "id": "brix_ruiz_k4_boundary",
+        "strategy": "mixed_wide_probe_deepening",
+        "schedule_order": 20
       }
     },
     {
@@ -990,7 +1092,6 @@
     {
       "id": "lind_marcus_a_to_c",
       "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Lind-Marcus Example 7.2.2 via Bilich-Dor-on-Ruiz). Expected relation: Equivalent; the source note records a lag-2 SSE positive that is not ESSE.",
-      "required": false,
       "a": [[1, 1, 0], [0, 0, 1], [1, 1, 1]],
       "b": [[2]],
       "config": {
@@ -1000,19 +1101,19 @@
       },
       "timeout_ms": 1000,
       "allowed_outcomes": ["equivalent"],
-      "target_outcome": null,
+      "target_outcome": "equivalent",
       "points": {
-        "equivalent": 0,
-        "not_equivalent": 0,
-        "unknown": 0,
-        "timeout": 0,
+        "equivalent": 150,
+        "not_equivalent": -1500,
+        "unknown": -1500,
+        "timeout": -2500,
         "panic": -2000
       },
-      "tags": ["literature-positive", "non-brix-ruiz", "benchmark-measurement", "non-2x2", "lag-2", "non-esse"],
+      "tags": ["correctness", "literature-positive", "non-brix-ruiz", "non-2x2", "lag-2", "non-esse"],
       "campaign": {
-        "id": "non_brix_ruiz_literature",
-        "strategy": "mixed_literature_probe",
-        "schedule_order": 60
+        "id": "literature_correctness",
+        "strategy": "mixed_literature_required",
+        "schedule_order": 10
       }
     },
     {

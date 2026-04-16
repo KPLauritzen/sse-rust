@@ -19,6 +19,26 @@ first and keep the change set explicitly scoped.
 - Required-case correctness is the hard gate; runtime is secondary.
 - Keep `research/log.md` terse; put longer evidence in `research/notes/`.
 
+## Experiment Lanes
+
+Treat harness work as three distinct lanes:
+
+- required correctness lane:
+  - required cases are the hard gate;
+  - these should stay cheap, stable, and source-backed where possible.
+- measurement lane:
+  - non-required cases used to compare frontier policy, move-family policy,
+    staged search settings, or other scenario-level performance surfaces;
+  - use `measurement` blocks when repeat timing matters.
+- evidence lane:
+  - non-required cases or campaigns that improve bounded understanding of a
+    family without belonging in the correctness gate;
+  - use this for literature ladders, diagnostic ramps, and other
+    decision-support probes.
+
+When a round wants more than graph-only but less than fully mixed search,
+prefer `graph_plus_structured` before inventing a new widened baseline.
+
 ## Baseline Setup
 
 1. Check backlog and claim/update your issue:
@@ -38,14 +58,28 @@ Prioritize work that moves one of these weak spots:
    - generic staged shortcut search repeatedly converges to lag `7` on
      `brix_ruiz_k3` when seeded from the normalized guide pool.
    - open objective remains lag `< 7`.
-2. Frontier growth on hard probes:
-   - mixed `k=3`/`k=4` telemetry-focus probes still spend most effort in broad
-     candidate generation and pruning churn.
-3. Frontier strategy quality:
-   - beam and beam-to-BFS-handoff are now implemented surfaces, but ranking and
-     handoff policies are still unstable on hard graph-only controls.
-4. Missing short structured vocabulary around the `4x4` family region:
+2. Waypoint quality on structured research seams:
+   - graph-proposal shortlists now look promising on bounded waypoint probes,
+     but sampled positive-conjugacy proposals do not yet survive exact
+     invariants as literal intermediate targets.
+   - current positive-conjugacy work should be treated as seed or reprojection
+     material, not exact waypoint guidance.
+3. Search-shape quality under fixed budget:
+   - mixed telemetry-focus probes still spend most effort in broad candidate
+     generation and pruning churn.
+   - the main question is not "can we widen more?" but "can we spend the same
+     budget on better-ranked or better-targeted work?"
+4. Frontier diagnostics are ahead of frontier defaults:
+   - plain beam is still the cheap graph-only control on the hard `k=3` pair.
+   - `beam_bfs_handoff` is useful as a measurement surface, but should remain
+     research-only until deferred-cap sizing beats plain beam on the same
+     bounded control.
+5. Missing short structured vocabulary around the `4x4` family region:
    - the remaining short-path gap is structural, not just deeper brute force.
+6. Generic square-endpoint parity beyond `2x2`:
+   - dynamic square endpoints now get power-trace screening through `trace(M^4)`
+     when available, but Goal 4 still lacks fuller same-dimension parity in
+     filters, shortcut surfaces, and endpoint handling.
 
 ## Harness Scoring Contract
 
@@ -76,12 +110,20 @@ Usage rules for measurement cases:
 - keep points neutral (typically `0` across normal outcomes),
 - use an optional `measurement` block (`warmup_runs`, `repeat_runs`) only on
   those non-required cases when repeat timing is needed,
+- use `deepening_schedule` on non-required cases when the point is to map a
+  lag/dimension/entry boundary with one ordered harness surface instead of a
+  pile of unrelated one-off commands,
 - treat repeated-case `elapsed_ms` / `total_elapsed_ms` as representative median
   timing, not accumulated warmup/repeat wall time,
 - use campaign IDs/strategies that clearly label them as measurement probes.
 
 Microbench-level timing of isolated hot loops still belongs in dedicated bench
 surfaces, not in harness pass/fail logic.
+
+Keep heavyweight boundary ramps out of the shared canonical corpus unless they
+are cheap enough to remain a normal full-corpus run. If the realistic surface
+is much heavier, encode the policy in the program/docs and run it from a
+dedicated local corpus or explicit worker-case branch instead.
 
 See `docs/research-harness-benchmark-policy.md` for tradeoffs and follow-up.
 
@@ -116,11 +158,21 @@ For frontier-strategy work, include:
 
 - `research/notes/2026-04-13-beam-k3-executor-retune.md`
 - `research/notes/2026-04-14-beam-bfs-handoff-graph-only-k3.md`
+- `research/notes/2026-04-15-k4-mixed-beam-low-lag-ramp.md`
+
+For waypoint-quality and proposal work, include:
+
+- `research/notes/2026-04-15-graph-move-proposal-slice.md`
+- `research/notes/2026-04-15-positive-conjugacy-phase2-usefulness.md`
 
 For shortcut plateau work, include:
 
 - `research/notes/2026-04-12-baker-k3-factor-shape.md`
 - `research/notes/2026-04-14-k3-normalized-guide-pool-shortcutting.md`
+
+For literature-driven research refresh work, include:
+
+- `research/notes/2026-04-16-missing-references-and-solver-ideas.md`
 
 ## Profiling Guidance
 

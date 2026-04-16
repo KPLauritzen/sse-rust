@@ -45,6 +45,10 @@ running warmups/repeats. The detailed measurement block in JSON/pretty output
 includes the repeat samples plus `median` and `p90` so noise can be compared
 without distorting harness fitness tie-break semantics.
 
+Use `deepening_schedule` on non-required cases when the measurement is really a
+bounded ramp or cliff map over lag, dimension, or entry caps rather than a
+single fixed scenario.
+
 ## Boundary
 
 Use `research_harness` for scenario-level measurements (search policies,
@@ -56,6 +60,11 @@ low-noise measurement and statistical summaries are the main goal.
 Current `benches/search.rs` coverage is intentionally micro/throughput oriented:
 fast endpoint sanity checks plus telemetry-driven `expand_next_n` expansion
 throughput probes. Keep heavier scenario-family runs in `research_harness`.
+
+Known-losing or currently inferior frontier configurations can still belong in
+the harness when they serve as stable diagnostic baselines. Keep them only as
+long as they still differentiate changes; replace or retire them once they stop
+adding decision value.
 
 For Criterion runs in `benches/search.rs`, keep baseline usage explicit:
 
@@ -73,3 +82,6 @@ decision or reported as a regression/speedup, compare against a named baseline.
 - Warmup runs are excluded from reported elapsed samples.
 - Repeated measurement is for scenario-level harness probes; keep dedicated
   bench surfaces for microbench-style statistical work.
+- Heavy boundary ramps that would make the canonical corpus much slower should
+  live in dedicated local corpora or explicit branch-local experiments rather
+  than in the default shared case set.
