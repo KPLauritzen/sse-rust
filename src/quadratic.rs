@@ -15,6 +15,7 @@
 //! quadratic), we use continued-fraction reduction.
 
 use crate::matrix::SqMatrix;
+use std::collections::HashSet;
 
 /// A reduced binary quadratic form (a, b, c) representing ax² + bxy + cy²
 /// with discriminant b² - 4ac = D.
@@ -51,11 +52,15 @@ pub fn quadratic_order_profile(discriminant: i64) -> Option<QuadraticOrderProfil
     if discriminant == 0 {
         return None;
     }
+    let discriminant_mod4 = discriminant.rem_euclid(4);
+    if discriminant_mod4 != 0 && discriminant_mod4 != 1 {
+        return None;
+    }
     if discriminant > 0 && is_perfect_square(discriminant as u64) {
         return None;
     }
 
-    let (field_discriminant, conductor) = fundamental_discriminant(discriminant);
+    let (field_discriminant, conductor) = fundamental_discriminant(discriminant)?;
     Some(QuadraticOrderProfile {
         order_discriminant: discriminant,
         field_discriminant,
@@ -73,7 +78,7 @@ pub fn principal_reduced_form(discriminant: i64) -> Option<ReducedForm> {
     if discriminant < 0 {
         Some(reduce_form_negative(1, principal_b, principal_c))
     } else {
-        Some(reduce_form_positive(1, principal_b, principal_c))
+        reduce_form_positive(1, principal_b, principal_c)
     }
 }
 
@@ -88,9 +93,9 @@ pub fn reduced_form_is_principal(discriminant: i64, form: &ReducedForm) -> Optio
 /// Factors out perfect squares: if Δ = f²·D_K where D_K is squarefree
 /// (times 1 or 4 depending on D_K mod 4), returns (D_K_fund, f) where
 /// D_K_fund is the fundamental discriminant of K.
-fn fundamental_discriminant(delta: i64) -> (i64, i64) {
+fn fundamental_discriminant(delta: i64) -> Option<(i64, i64)> {
     if delta == 0 {
-        return (0, 0);
+        return None;
     }
     let sign = if delta > 0 { 1 } else { -1 };
     let abs_delta = delta.unsigned_abs();
@@ -142,17 +147,13 @@ fn fundamental_discriminant(delta: i64) -> (i64, i64) {
     let d_mod4 = ((d_signed % 4) + 4) % 4;
     if d_mod4 == 1 {
         // D_K = d_signed, g = f
-        (d_signed, f as i64)
+        Some((d_signed, f as i64))
     } else {
         // D_K = 4 * d_signed, g = f / 2
-        // f must be even (see above)
-        debug_assert!(
-            f % 2 == 0,
-            "f={} should be even when d_signed={} mod 4 != 1",
-            f,
-            d_mod4
-        );
-        (4 * d_signed, (f / 2) as i64)
+        if f % 2 != 0 {
+            return None;
+        }
+        Some((4 * d_signed, (f / 2) as i64))
     }
 }
 
@@ -208,7 +209,7 @@ fn reduce_form_negative(mut a: i64, mut b: i64, mut c: i64) -> ReducedForm {
 ///
 /// For real quadratic fields, "reduced" means: 0 < b < √D and √D - b < 2|a| < √D + b.
 /// Reduced forms are not unique but cycle; we pick the lexicographic minimum in the cycle.
-fn reduce_form_positive(a: i64, b: i64, c: i64) -> ReducedForm {
+fn reduce_form_positive(a: i64, b: i64, c: i64) -> Option<ReducedForm> {
     let disc = b * b - 4 * a * c;
     debug_assert!(disc > 0);
     let sqrt_d = isqrt(disc as u64) as i64;
@@ -230,87 +231,30 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> ReducedForm {
     // More precisely: (a,b,c) -> (c, b', a') where b' = -b + 2c*k, k chosen
     // so that |b'| < sqrt(D) and b' has same parity as b (i.e., b' ≡ b mod 2c).
 
-    // First, reduce to a "nearly reduced" form.
-    for _ in 0..1000 {
-        // Apply rho: (a, b, c) -> (c, b', a')
-        // Choose k so that b' = -cur_b + 2*cur_c*k is closest to sqrt_d (and same sign)
-        // We want 0 < b' and sqrt_d - b' < 2|cur_c|
-        if cur_c == 0 {
-            break;
+    let mut seen_pre_reduction = HashSet::new();
+    while !is_positive_reduced(cur_a, cur_b, sqrt_d) {
+        if !seen_pre_reduction.insert((cur_a, cur_b, cur_c)) {
+            return None;
         }
-        // Standard approach: b' such that b' ≡ -cur_b mod 2|cur_c|
-        // and sqrt_d - 2|cur_c| < b' ≤ sqrt_d
-        let two_c = 2 * cur_c.abs();
-        if two_c == 0 {
-            break;
-        }
-        let neg_b_mod = ((-cur_b) % two_c + two_c) % two_c;
-        // b' = neg_b_mod + 2|c| * m, we want sqrt_d - 2|c| < b' <= sqrt_d
-        // so m = floor((sqrt_d - neg_b_mod) / two_c)
-        let m = if sqrt_d >= neg_b_mod {
-            (sqrt_d - neg_b_mod) / two_c
-        } else {
-            -((neg_b_mod - sqrt_d + two_c - 1) / two_c)
-        };
-        let b_prime = neg_b_mod + two_c * m;
-
-        // Check: is it reduced? 0 < b_prime and sqrt_d - b_prime < 2|c|
-        // If b_prime <= 0, try m+1
-        let b_prime = if b_prime <= 0 {
-            b_prime + two_c
-        } else {
-            b_prime
-        };
-
-        let new_a = cur_c.abs();
-        let new_c = (b_prime * b_prime - disc) / (4 * new_a);
-        // Check reduced condition
-        let is_reduced =
-            b_prime > 0 && sqrt_d - b_prime < 2 * new_a && 2 * new_a < sqrt_d + b_prime;
-
-        cur_a = new_a;
-        cur_b = b_prime;
-        cur_c = if new_c < 0 { new_c } else { new_c };
-
-        if is_reduced {
-            break;
-        }
+        (cur_a, cur_b, cur_c) = reduce_form_positive_step(cur_b, cur_c, disc, sqrt_d)?;
     }
 
     // Now cycle through reduced forms to find the lex-min representative.
-    // The cycle has finite length (bounded by class number).
-    let start_a = cur_a;
-    let start_b = cur_b;
-    let start_c = cur_c;
     let mut best = ReducedForm {
         a: cur_a.abs(),
         b: cur_b,
         c: cur_c.abs(),
     };
 
-    for _ in 0..1000 {
-        // Apply rho: (a, b, c) -> (|c|, b', ...)
-        let two_c = 2 * cur_c.abs();
-        if two_c == 0 {
+    let mut seen_cycle = HashSet::new();
+    seen_cycle.insert((cur_a, cur_b, cur_c));
+
+    loop {
+        (cur_a, cur_b, cur_c) = reduce_form_positive_step(cur_b, cur_c, disc, sqrt_d)?;
+
+        if !seen_cycle.insert((cur_a, cur_b, cur_c)) {
             break;
         }
-        let neg_b_mod = ((-cur_b) % two_c + two_c) % two_c;
-        let m = if sqrt_d >= neg_b_mod {
-            (sqrt_d - neg_b_mod) / two_c
-        } else {
-            -((neg_b_mod - sqrt_d + two_c - 1) / two_c)
-        };
-        let mut b_prime = neg_b_mod + two_c * m;
-        if b_prime <= 0 {
-            b_prime += two_c;
-        }
-
-        let new_a = cur_c.abs();
-        let new_c = (b_prime * b_prime - disc) / (4 * new_a);
-
-        cur_a = new_a;
-        cur_b = b_prime;
-        cur_c = new_c;
 
         let candidate = ReducedForm {
             a: cur_a.abs(),
@@ -323,13 +267,38 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> ReducedForm {
         {
             best = candidate;
         }
-
-        if cur_a == start_a && cur_b == start_b && cur_c == start_c {
-            break;
-        }
     }
 
-    best
+    Some(best)
+}
+
+fn is_positive_reduced(a: i64, b: i64, sqrt_d: i64) -> bool {
+    a > 0 && b > 0 && sqrt_d - b < 2 * a && 2 * a < sqrt_d + b
+}
+
+fn reduce_form_positive_step(b: i64, c: i64, disc: i64, sqrt_d: i64) -> Option<(i64, i64, i64)> {
+    if c == 0 {
+        return None;
+    }
+    let two_c = 2 * c.abs();
+    if two_c == 0 {
+        return None;
+    }
+
+    let neg_b_mod = ((-b) % two_c + two_c) % two_c;
+    let m = if sqrt_d >= neg_b_mod {
+        (sqrt_d - neg_b_mod) / two_c
+    } else {
+        -((neg_b_mod - sqrt_d + two_c - 1) / two_c)
+    };
+    let mut b_prime = neg_b_mod + two_c * m;
+    if b_prime <= 0 {
+        b_prime += two_c;
+    }
+
+    let new_a = c.abs();
+    let new_c = (b_prime * b_prime - disc) / (4 * new_a);
+    Some((new_a, b_prime, new_c))
 }
 
 /// Integer square root (floor).
@@ -494,7 +463,7 @@ pub fn eigenvector_ideal_class_2x2(mat: &SqMatrix<2>) -> Option<ReducedForm> {
     if delta < 0 {
         Some(reduce_form_negative(a_form, v_lambda_coeff, c_form))
     } else {
-        Some(reduce_form_positive(a_form, v_lambda_coeff, c_form))
+        reduce_form_positive(a_form, v_lambda_coeff, c_form)
     }
 }
 
@@ -587,7 +556,7 @@ fn eigenvector_ideal_class_via_hnf(
         if delta < 0 {
             Some(reduce_form_negative(a_ideal, b_form, c_form))
         } else {
-            Some(reduce_form_positive(a_ideal, b_form, c_form))
+            reduce_form_positive(a_ideal, b_form, c_form)
         }
     } else {
         // Δ ≡ 0 mod 4, ω = √Δ / 2 = √(Δ/4)
@@ -611,7 +580,7 @@ fn eigenvector_ideal_class_via_hnf(
         if delta < 0 {
             Some(reduce_form_negative(a_ideal, b_form, c_form))
         } else {
-            Some(reduce_form_positive(a_ideal, b_form, c_form))
+            reduce_form_positive(a_ideal, b_form, c_form)
         }
     }
 }
@@ -658,16 +627,22 @@ mod tests {
     #[test]
     fn test_fundamental_discriminant() {
         // Δ = 5: squarefree, 5 ≡ 1 mod 4 → D_K = 5, f = 1
-        assert_eq!(fundamental_discriminant(5), (5, 1));
+        assert_eq!(fundamental_discriminant(5), Some((5, 1)));
         // Δ = 12 = 4*3: 3 ≡ 3 mod 4 → D_K = 12, f = 1
-        assert_eq!(fundamental_discriminant(12), (12, 1));
+        assert_eq!(fundamental_discriminant(12), Some((12, 1)));
         // Δ = 20 = 4*5: 5 ≡ 1 mod 4 → D_K = 5, f = 2
-        assert_eq!(fundamental_discriminant(20), (5, 2));
+        assert_eq!(fundamental_discriminant(20), Some((5, 2)));
         // Δ = -4: |Δ| = 4 = 2²·1, d=1, sign=-1, d_signed=-1, -1 mod 4 = 3 → D_K = -4, f = 1
-        assert_eq!(fundamental_discriminant(-4), (-4, 1));
+        assert_eq!(fundamental_discriminant(-4), Some((-4, 1)));
         // Δ = -20: |Δ| = 20 = 2²·5, d=5, sign=-1, d_signed=-5, -5 mod 4 = 3 → D_K = -20, f = 1
         // Wait: -5 mod 4 = -1 mod 4 = 3. So D_K = 4*(-5) = -20, f = 2/2 = 1
-        assert_eq!(fundamental_discriminant(-20), (-20, 1));
+        assert_eq!(fundamental_discriminant(-20), Some((-20, 1)));
+    }
+
+    #[test]
+    fn test_quadratic_order_profile_rejects_invalid_discriminants() {
+        assert_eq!(quadratic_order_profile(2), None);
+        assert_eq!(quadratic_order_profile(-2), None);
     }
 
     #[test]
