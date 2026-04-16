@@ -828,6 +828,51 @@
       }
     },
     {
+      "id": "brix_ruiz_k3_shortcut_quotient_retained_pool_probe",
+      "description": "Benchmark-style staged-search comparison: shortcut search over the quotient-retained k=3 guide pool under the same bounded lag-7 plateau configuration.",
+      "required": false,
+      "measurement": {
+        "warmup_runs": 1,
+        "repeat_runs": 5
+      },
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "guide_artifact_paths": ["research/guide_artifacts/k3_quotient_retained_guide_pool.json"],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 4,
+        "max_entry": 5,
+        "move_family_policy": "mixed",
+        "stage": "shortcut_search",
+        "guided_refinement": {
+          "max_shortcut_lag": 3,
+          "min_gap": 2,
+          "max_gap": 4,
+          "rounds": 1
+        },
+        "shortcut_search": {
+          "max_guides": 6,
+          "rounds": 1,
+          "max_total_segment_attempts": 48
+        }
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "shortcut-stage", "guide-pool", "quotient", "benchmark-measurement"],
+      "campaign": {
+        "id": "brix_ruiz_k3_shortcut_pool",
+        "strategy": "shortcut_search_quotient_retained_pool_probe",
+        "schedule_order": 11
+      }
+    },
+    {
       "id": "brix_ruiz_k3_wide_probe",
       "description": "Evidence-lane mixed wide smoke probe for the same hard known-SSE pair. Keep this for progress diagnostics only; it is not a correctness gate or scored target.",
       "required": false,

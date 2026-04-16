@@ -3,8 +3,41 @@ use std::path::{Path, PathBuf};
 
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
-use sse_core::path_quotient::{analyze_guide_pool_quotient, NamedPath, PathQuotientConfig};
-use sse_core::types::GuideArtifactPayload;
+use sse_core::path_quotient::{
+    analyze_guide_pool_quotient, GuidePoolQuotientAnalysis, NamedPath, PathQuotientConfig,
+};
+use sse_core::types::{DynSsePath, GuideArtifact, GuideArtifactPayload};
+
+#[derive(Clone, Debug)]
+struct LoadedGuide {
+    label: String,
+    artifact: GuideArtifact,
+    canonical_matrices: Vec<DynMatrix>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RetainedGuideArtifactEnvelope {
+    artifacts: Vec<GuideArtifact>,
+    quotient_materialization: RetainedGuideMaterializationMetadata,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RetainedGuideMaterializationMetadata {
+    source_guide_artifact_paths: Vec<String>,
+    selection_policy: String,
+    analysis: GuidePoolQuotientAnalysis,
+    retained_classes: Vec<RetainedGuideClassMaterialization>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RetainedGuideClassMaterialization {
+    retained_label: String,
+    retained_artifact_id: Option<String>,
+    retained_lag: usize,
+    canonical_lag: usize,
+    source_labels: Vec<String>,
+    canonical_matrices: Vec<DynMatrix>,
+}
 
 fn main() {
     if let Err(err) = run() {
@@ -15,10 +48,17 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let cli = parse_cli(std::env::args().skip(1))?;
-    let paths = load_paths(&cli)?;
-    if paths.is_empty() {
+    let guides = load_guides(&cli)?;
+    if guides.is_empty() {
         return Err("no guide artifacts were loaded; pass --guide-artifacts".to_string());
     }
+    let paths = guides
+        .iter()
+        .map(|guide| NamedPath {
+            label: guide.label.clone(),
+            matrices: guide.canonical_matrices.clone(),
+        })
+        .collect::<Vec<_>>();
 
     let analysis = analyze_guide_pool_quotient(
         &paths,
@@ -28,6 +68,12 @@ fn run() -> Result<(), String> {
             max_samples: cli.max_samples,
         },
     );
+
+    let retained_envelope = cli
+        .retained_guide_artifacts_out
+        .as_ref()
+        .map(|_| build_retained_guide_artifact_envelope(&cli, &guides, &analysis))
+        .transpose()?;
 
     println!("Guide-pool quotient shrinkage");
     println!(
@@ -120,17 +166,25 @@ fn run() -> Result<(), String> {
     }
 
     if let Some(path) = &cli.json_out {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
-            }
-        }
+        ensure_parent_dir(path)?;
         let json = serde_json::to_string_pretty(&analysis)
             .map_err(|err| format!("failed to serialize analysis JSON: {err}"))?;
         fs::write(path, format!("{json}\n"))
             .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
         println!("  wrote {}", path.display());
+    }
+
+    if let (Some(path), Some(envelope)) = (&cli.retained_guide_artifacts_out, retained_envelope) {
+        ensure_parent_dir(path)?;
+        let json = serde_json::to_string_pretty(&envelope)
+            .map_err(|err| format!("failed to serialize retained guide artifact JSON: {err}"))?;
+        fs::write(path, format!("{json}\n"))
+            .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
+        println!(
+            "  wrote retained guide artifacts {} representative(s) to {}",
+            envelope.artifacts.len(),
+            path.display()
+        );
     }
 
     Ok(())
@@ -143,6 +197,7 @@ struct Cli {
     max_rewrite_states: usize,
     max_samples: usize,
     json_out: Option<PathBuf>,
+    retained_guide_artifacts_out: Option<PathBuf>,
 }
 
 fn parse_cli<I>(mut args: I) -> Result<Cli, String>
@@ -155,6 +210,7 @@ where
         max_rewrite_states: 1024,
         max_samples: 12,
         json_out: None,
+        retained_guide_artifacts_out: None,
     };
 
     while let Some(arg) = args.next() {
@@ -190,6 +246,12 @@ where
                     args.next().ok_or("--json-out requires a path")?,
                 ));
             }
+            "--retained-guide-artifacts-out" => {
+                cli.retained_guide_artifacts_out = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--retained-guide-artifacts-out requires a path")?,
+                ));
+            }
             "--help" | "-h" => {
                 return Err(
                     "usage: analyze_guide_pool_quotient [options]\n\n\
@@ -199,6 +261,8 @@ where
                        --max-rewrite-states N    cap local rewrite exploration states per unique path/window (default: 1024)\n\
                        --max-samples N           cap printed/json guide samples (default: 12)\n\
                        --json-out PATH           write the full comparison as pretty JSON\n\
+                       --retained-guide-artifacts-out PATH\n\
+                                                 write one existing witness artifact per quotient class, plus quotient metadata\n\
                      \n\
                      If no explicit inputs are given, the tool loads\n\
                      research/guide_artifacts/k3_normalized_guide_pool.json when present."
@@ -227,42 +291,325 @@ where
     Ok(cli)
 }
 
-fn load_paths(cli: &Cli) -> Result<Vec<NamedPath>, String> {
-    let mut paths = Vec::new();
+fn load_guides(cli: &Cli) -> Result<Vec<LoadedGuide>, String> {
+    let mut artifacts = Vec::new();
     for path in &cli.guide_artifact_paths {
-        paths.extend(load_paths_from_guide_artifacts(path)?);
+        artifacts.extend(load_guide_artifacts_from_path(path)?);
     }
-    Ok(paths)
+    label_loaded_guides(artifacts)
 }
 
-fn load_paths_from_guide_artifacts(path: &Path) -> Result<Vec<NamedPath>, String> {
-    let mut paths = Vec::new();
+fn label_loaded_guides(artifacts: Vec<GuideArtifact>) -> Result<Vec<LoadedGuide>, String> {
+    let mut base_counts = std::collections::BTreeMap::<String, usize>::new();
+    for (index, artifact) in artifacts.iter().enumerate() {
+        let base = base_guide_label(index, artifact);
+        *base_counts.entry(base).or_default() += 1;
+    }
+
+    let mut seen_counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut guides = Vec::new();
     let mut unsupported_labels = Vec::new();
-    for artifact in load_guide_artifacts_from_path(path)? {
-        let label = artifact
-            .artifact_id
-            .or(artifact.provenance.label)
-            .unwrap_or_else(|| "guide_artifact_path".to_string());
+    for (index, artifact) in artifacts.into_iter().enumerate() {
+        let base = base_guide_label(index, &artifact);
+        let seen = seen_counts.entry(base.clone()).or_default();
+        *seen += 1;
+        let label = if base_counts.get(&base).copied().unwrap_or(0) > 1 {
+            format!("{base}#{}", *seen)
+        } else {
+            base
+        };
         #[allow(unreachable_patterns)]
-        let matrices = match artifact.payload {
+        let matrices = match &artifact.payload {
             GuideArtifactPayload::FullPath { path } => canonicalize_path(&path.matrices),
             _ => {
-                unsupported_labels.push(label);
+                unsupported_labels.push(label.clone());
                 continue;
             }
         };
-        paths.push(NamedPath { label, matrices });
+        guides.push(LoadedGuide {
+            label,
+            artifact,
+            canonical_matrices: matrices,
+        });
     }
     if !unsupported_labels.is_empty() {
         return Err(format!(
-            "unsupported guide artifact payloads in {}: {}",
-            path.display(),
+            "unsupported guide artifact payloads: {}",
             unsupported_labels.join(", ")
         ));
     }
-    Ok(paths)
+    Ok(guides)
+}
+
+fn base_guide_label(index: usize, artifact: &GuideArtifact) -> String {
+    artifact
+        .artifact_id
+        .clone()
+        .or_else(|| artifact.provenance.label.clone())
+        .unwrap_or_else(|| format!("guide_artifact_{index:03}"))
 }
 
 fn canonicalize_path(path: &[DynMatrix]) -> Vec<DynMatrix> {
     path.iter().map(DynMatrix::canonical_perm).collect()
+}
+
+fn build_retained_guide_artifact_envelope(
+    cli: &Cli,
+    guides: &[LoadedGuide],
+    analysis: &GuidePoolQuotientAnalysis,
+) -> Result<RetainedGuideArtifactEnvelope, String> {
+    let by_label = guides
+        .iter()
+        .map(|guide| (guide.label.as_str(), guide))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut artifacts = Vec::new();
+    let mut retained_classes = Vec::new();
+
+    for retained in &analysis.retained_guides {
+        let mut candidates = retained
+            .source_labels
+            .iter()
+            .map(|label| {
+                by_label
+                    .get(label.as_str())
+                    .copied()
+                    .ok_or_else(|| format!("missing source artifact for retained label {label}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        candidates.sort_by(|left, right| compare_loaded_guides_for_retention(left, right));
+        let selected = candidates
+            .into_iter()
+            .next()
+            .expect("retained guide should have at least one source candidate");
+
+        artifacts.push(selected.artifact.clone());
+        retained_classes.push(RetainedGuideClassMaterialization {
+            retained_label: selected.label.clone(),
+            retained_artifact_id: selected.artifact.artifact_id.clone(),
+            retained_lag: loaded_guide_effective_lag(selected),
+            canonical_lag: retained.lag,
+            source_labels: retained.source_labels.clone(),
+            canonical_matrices: retained.matrices.clone(),
+        });
+    }
+
+    artifacts.sort_by(compare_artifacts_for_output);
+    retained_classes.sort_by(|left, right| {
+        left.canonical_lag
+            .cmp(&right.canonical_lag)
+            .then(left.retained_lag.cmp(&right.retained_lag))
+            .then(left.retained_label.cmp(&right.retained_label))
+    });
+
+    Ok(RetainedGuideArtifactEnvelope {
+        artifacts,
+        quotient_materialization: RetainedGuideMaterializationMetadata {
+            source_guide_artifact_paths: cli
+                .guide_artifact_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            selection_policy: "select the shortest existing witness artifact in each quotient class; ties break by artifact_id/provenance label".to_string(),
+            analysis: analysis.clone(),
+            retained_classes,
+        },
+    })
+}
+
+fn compare_loaded_guides_for_retention(
+    left: &LoadedGuide,
+    right: &LoadedGuide,
+) -> std::cmp::Ordering {
+    loaded_guide_effective_lag(left)
+        .cmp(&loaded_guide_effective_lag(right))
+        .then(left_path_matrix_count(left).cmp(&left_path_matrix_count(right)))
+        .then(artifact_sort_key(&left.artifact).cmp(&artifact_sort_key(&right.artifact)))
+        .then(left.label.cmp(&right.label))
+}
+
+fn compare_artifacts_for_output(left: &GuideArtifact, right: &GuideArtifact) -> std::cmp::Ordering {
+    artifact_effective_lag(left)
+        .cmp(&artifact_effective_lag(right))
+        .then(
+            left_path_matrix_count_from_artifact(left)
+                .cmp(&left_path_matrix_count_from_artifact(right)),
+        )
+        .then(artifact_sort_key(left).cmp(&artifact_sort_key(right)))
+}
+
+fn loaded_guide_effective_lag(guide: &LoadedGuide) -> usize {
+    artifact_effective_lag(&guide.artifact)
+}
+
+fn artifact_effective_lag(artifact: &GuideArtifact) -> usize {
+    artifact
+        .quality
+        .lag
+        .unwrap_or_else(|| artifact_path(artifact).steps.len())
+}
+
+fn left_path_matrix_count(guide: &LoadedGuide) -> usize {
+    artifact_path(&guide.artifact).matrices.len()
+}
+
+fn left_path_matrix_count_from_artifact(artifact: &GuideArtifact) -> usize {
+    artifact_path(artifact).matrices.len()
+}
+
+fn artifact_sort_key(artifact: &GuideArtifact) -> (&str, &str, &str) {
+    (
+        artifact.artifact_id.as_deref().unwrap_or(""),
+        artifact.provenance.source_ref.as_deref().unwrap_or(""),
+        artifact.provenance.label.as_deref().unwrap_or(""),
+    )
+}
+
+fn artifact_path(artifact: &GuideArtifact) -> &DynSsePath {
+    let GuideArtifactPayload::FullPath { path } = &artifact.payload;
+    path
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        artifact_effective_lag, artifact_path, base_guide_label,
+        build_retained_guide_artifact_envelope, canonicalize_path, label_loaded_guides, Cli,
+    };
+    use sse_core::matrix::DynMatrix;
+    use sse_core::path_quotient::{analyze_guide_pool_quotient, NamedPath, PathQuotientConfig};
+    use sse_core::types::{
+        DynSsePath, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
+        GuideArtifactPayload, GuideArtifactProvenance, GuideArtifactQuality,
+        GuideArtifactValidation, SearchStage,
+    };
+    use std::path::PathBuf;
+
+    #[test]
+    fn retained_guide_materialization_chooses_shortest_witness_per_quotient_class() {
+        let artifacts = vec![
+            fixture_artifact("direct", vec![matrix(1), matrix(3)], 1),
+            fixture_artifact("two-hop", vec![matrix(1), matrix(2), matrix(3)], 2),
+            fixture_artifact("other", vec![matrix(4), matrix(5)], 1),
+        ];
+        let guides = label_loaded_guides(artifacts).unwrap();
+        let paths = guides
+            .iter()
+            .map(|guide| NamedPath {
+                label: guide.label.clone(),
+                matrices: guide.canonical_matrices.clone(),
+            })
+            .collect::<Vec<_>>();
+        let analysis = analyze_guide_pool_quotient(
+            &paths,
+            &PathQuotientConfig {
+                max_suffix_lag: 3,
+                max_rewrite_states: 32,
+                max_samples: 8,
+            },
+        );
+
+        let cli = Cli {
+            guide_artifact_paths: vec![PathBuf::from("input.json")],
+            max_suffix_lag: 3,
+            max_rewrite_states: 32,
+            max_samples: 8,
+            json_out: None,
+            retained_guide_artifacts_out: Some(PathBuf::from("retained.json")),
+        };
+        let envelope = build_retained_guide_artifact_envelope(&cli, &guides, &analysis).unwrap();
+
+        let retained_ids = envelope
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.artifact_id.as_deref().unwrap_or(""))
+            .collect::<Vec<_>>();
+        assert_eq!(retained_ids, vec!["direct", "other"]);
+        assert_eq!(envelope.quotient_materialization.retained_classes.len(), 2);
+        assert_eq!(
+            envelope.quotient_materialization.retained_classes[0].source_labels,
+            vec!["direct".to_string(), "two-hop".to_string()]
+        );
+    }
+
+    #[test]
+    fn label_loaded_guides_disambiguates_duplicate_labels() {
+        let guides = label_loaded_guides(vec![
+            fixture_artifact_with_label(None, Some("dup"), vec![matrix(1), matrix(2)], 1),
+            fixture_artifact_with_label(None, Some("dup"), vec![matrix(2), matrix(3)], 1),
+        ])
+        .unwrap();
+
+        assert_eq!(guides[0].label, "dup#1");
+        assert_eq!(guides[1].label, "dup#2");
+    }
+
+    #[test]
+    fn helpers_preserve_existing_effective_lag_and_canonicalize() {
+        let artifact = fixture_artifact("lagged", vec![matrix(7), matrix(8), matrix(9)], 2);
+        assert_eq!(base_guide_label(0, &artifact), "lagged");
+        assert_eq!(artifact_effective_lag(&artifact), 2);
+        assert_eq!(
+            canonicalize_path(&artifact_path(&artifact).matrices),
+            artifact_path(&artifact)
+                .matrices
+                .iter()
+                .map(DynMatrix::canonical_perm)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    fn fixture_artifact(id: &str, matrices: Vec<DynMatrix>, lag: usize) -> GuideArtifact {
+        fixture_artifact_with_label(Some(id), Some(id), matrices, lag)
+    }
+
+    fn fixture_artifact_with_label(
+        artifact_id: Option<&str>,
+        provenance_label: Option<&str>,
+        matrices: Vec<DynMatrix>,
+        lag: usize,
+    ) -> GuideArtifact {
+        GuideArtifact {
+            artifact_id: artifact_id.map(str::to_string),
+            endpoints: GuideArtifactEndpoints {
+                source: matrices.first().cloned().unwrap(),
+                target: matrices.last().cloned().unwrap(),
+            },
+            payload: GuideArtifactPayload::FullPath {
+                path: DynSsePath {
+                    matrices,
+                    steps: vec![],
+                },
+            },
+            provenance: GuideArtifactProvenance {
+                source_kind: Some("test".to_string()),
+                label: provenance_label.map(str::to_string),
+                source_ref: Some("test:fixture".to_string()),
+            },
+            validation: GuideArtifactValidation::Unchecked,
+            compatibility: GuideArtifactCompatibility {
+                supported_stages: vec![SearchStage::ShortcutSearch],
+                max_endpoint_dim: None,
+            },
+            quality: GuideArtifactQuality {
+                lag: Some(lag),
+                cost: Some(lag),
+                score: None,
+            },
+        }
+    }
+
+    fn matrix(value: u32) -> DynMatrix {
+        DynMatrix::new(1, 1, vec![value])
+    }
 }
