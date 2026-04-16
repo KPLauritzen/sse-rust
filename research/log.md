@@ -443,3 +443,10 @@
   soundness lemmas around `src/search/path.rs`, `src/graph_moves.rs`, and
   `src/invariants.rs`; it is not a good fit for the main solver, performance
   tuning, or the current measurement/reporting seams.
+
+- `sse-rust-oaj` Rechecked the graph-only `brix_ruiz_k3` depth-`4`
+  `beam_bfs_handoff` surface on rebuilt `target/dist/search`.
+  Plain beam still returned `unknown` in `0.07s`, while the historical handoff
+  and deferred caps `5`, `10`, and `20` all timed out at `5s` without final
+  JSON. No cap variant earned a corpus change; details are in
+  `research/notes/2026-04-16-beam-bfs-handoff-cap-sweep-graph-only-k3.md`.
