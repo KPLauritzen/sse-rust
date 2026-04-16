@@ -681,6 +681,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             };
 
             let (_result, _telemetry) =
@@ -740,6 +741,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: Some(8),
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let beam_bfs_handoff = SearchConfig {
             max_lag: 4,
@@ -749,6 +751,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(8),
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         assert_eq!(search_mode_label(&SearchConfig::default()), "mixed");

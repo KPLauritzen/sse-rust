@@ -208,6 +208,7 @@ fn main() {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         },
     }];
     if include_mixed {
@@ -221,6 +222,7 @@ fn main() {
                 move_family_policy: MoveFamilyPolicy::Mixed,
                 beam_width: Some(mixed_beam_width),
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
         });
     }

@@ -18,6 +18,10 @@ explicit `beam_bfs_handoff` frontier mode. In that mode:
 - beam seeding now has an explicit config seam via
   `beam_bfs_handoff_depth`; when unset it still defaults to depth `4`
   inclusive, so depth-`5` and later discoveries go directly to the BFS queue
+- retained overflow admission now has an additional opt-in seam via
+  `beam_bfs_handoff_deferred_cap`; when unset the deferred queue remains
+  unlimited, and when set only the earliest deferred entries up to that cap are
+  retained per frontier side
 
 This probe is intentionally **graph-only**.
 
@@ -90,6 +94,35 @@ timeout -k 1s 5s target/dist/search 1,3,2,1 1,6,1,1 \
 The plain-beam control completed in `0.07s`; the depth-`8` and depth-`10`
 handoff runs were each bounded by the same `5s` cap.
 
+Bounded deferred-admission follow-up in this worktree:
+
+```bash
+/usr/bin/time -f '%e' -o tmp/sse-rust-x15-beam-control.time \
+  target/debug/search 1,3,2,1 1,6,1,1 \
+  --max-lag 10 \
+  --max-intermediate-dim 5 \
+  --max-entry 6 \
+  --move-policy graph-only \
+  --frontier-mode beam \
+  --beam-width 10 \
+  --json --telemetry > tmp/sse-rust-x15-beam-control.json
+
+/usr/bin/time -f '%e' -o tmp/sse-rust-x15-handoff-cap10.time \
+  timeout -k 1s 5s target/debug/search 1,3,2,1 1,6,1,1 \
+  --max-lag 10 \
+  --max-intermediate-dim 5 \
+  --max-entry 6 \
+  --move-policy graph-only \
+  --frontier-mode beam-bfs-handoff \
+  --beam-width 10 \
+  --beam-bfs-handoff-deferred-cap 10 \
+  --json --telemetry > tmp/sse-rust-x15-handoff-cap10.json
+```
+
+This keeps the existing default handoff depth (`4`) and changes only the
+retained-overflow admission rule: each frontier side keeps at most one
+beam-width worth of deferred entries.
+
 ## Results
 
 ### Plain Beam
@@ -138,6 +171,27 @@ These numbers were rechecked after fixing the handoff boundary to make depth
 `4` inclusive and after deferring beam-phase exact-meet returns until the BFS
 phase can recover shorter deferred paths.
 
+### Deferred-Admission Cap Probe
+
+- plain `beam` control on `target/debug/search`:
+  - outcome: `unknown`
+  - wall time: `0.52s`
+  - `frontier_nodes_expanded = 182`
+  - `candidates_generated = 8334`
+  - `total_visited_nodes = 5372`
+  - `max_frontier_size = 10`
+- `beam_bfs_handoff_deferred_cap = 10` with the default handoff depth:
+  - outcome: `unknown`
+  - wall time: `0.87s`
+  - `frontier_nodes_expanded = 236`
+  - `candidates_generated = 13758`
+  - `total_visited_nodes = 7999`
+  - `max_frontier_size = 20`
+
+Both commands exited with solver status `3` (`unknown`), but unlike the
+uncapped handoff mode the capped run emitted final JSON and stayed well under
+the existing `5s` bound.
+
 ## Interpretation
 
 - The depth-4 graph-only handoff is implemented and deterministic, but this
@@ -152,6 +206,13 @@ phase can recover shorter deferred paths.
   even with `beam_bfs_handoff_depth = 10` (the full `max_lag` cap), the
   retained-overflow BFS phase still failed to finish within `5s` while plain
   `beam` completed in `0.07s` with unchanged telemetry.
+- Capping deferred retention at one beam-width per side is the first
+  `beam_bfs_handoff` setting on this control that avoids the timeout without
+  redesigning the frontier wholesale, so the unbounded deferred queue is the
+  main source of the previous blow-up.
+- The capped run is still negative for the search goal: it returned `unknown`
+  and actually expanded more nodes than plain `beam`, so the seam improves
+  measurability, not solution quality.
 - The handoff mode is therefore a usable research surface, not yet a good
   default for the graph-only `k=3` benchmark.
 
@@ -162,6 +223,7 @@ phase can recover shorter deferred paths.
 - Deeper beam seeding alone is no longer the most informative next probe on
   this graph-only control; the existing seam already shows that `8` and `10`
   still time out.
-- If graph-only remains the target, the next bounded experiment surface should
-  be a very narrow deferred-admission policy on retained overflow before the
-  BFS phase begins.
+- If graph-only remains the target and this surface is revisited, the next
+  bounded follow-up should vary small deferred caps around the beam-width scale
+  before touching `beam_bfs_handoff_depth` again; depth-only sweeps are now
+  less informative than cap sizing.

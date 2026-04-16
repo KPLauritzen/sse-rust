@@ -253,6 +253,11 @@ pub struct SearchConfig {
     /// `None` preserves the existing built-in default handoff depth.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beam_bfs_handoff_depth: Option<usize>,
+    /// Optional cap on retained deferred overflow entries for `beam_bfs_handoff`.
+    ///
+    /// `None` preserves the existing unlimited deferred queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beam_bfs_handoff_deferred_cap: Option<usize>,
 }
 
 impl Default for SearchConfig {
@@ -265,6 +270,7 @@ impl Default for SearchConfig {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         }
     }
 }
@@ -603,6 +609,7 @@ mod tests {
         assert_eq!(config.move_family_policy, MoveFamilyPolicy::Mixed);
         assert_eq!(config.beam_width, None);
         assert_eq!(config.beam_bfs_handoff_depth, None);
+        assert_eq!(config.beam_bfs_handoff_deferred_cap, None);
         assert_eq!(DEFAULT_BEAM_WIDTH, 64);
     }
 
@@ -616,6 +623,7 @@ mod tests {
         assert_eq!(config.max_intermediate_dim, 3);
         assert_eq!(config.max_entry, 4);
         assert_eq!(config.beam_bfs_handoff_depth, None);
+        assert_eq!(config.beam_bfs_handoff_deferred_cap, None);
     }
 
     #[test]
@@ -628,6 +636,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: Some(8),
             beam_bfs_handoff_depth: Some(6),
+            beam_bfs_handoff_deferred_cap: Some(24),
         };
 
         let encoded = serde_json::to_value(&config).unwrap();
@@ -637,6 +646,12 @@ mod tests {
                 .get("beam_bfs_handoff_depth")
                 .and_then(serde_json::Value::as_u64),
             Some(6)
+        );
+        assert_eq!(
+            object
+                .get("beam_bfs_handoff_deferred_cap")
+                .and_then(serde_json::Value::as_u64),
+            Some(24)
         );
     }
 

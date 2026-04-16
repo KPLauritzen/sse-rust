@@ -77,6 +77,7 @@ fn main() {
         move_family_policy: MoveFamilyPolicy::Mixed,
         beam_width: None,
         beam_bfs_handoff_depth: None,
+        beam_bfs_handoff_deferred_cap: None,
     };
 
     let a_bridges = compute_bridge_map(&enumerate_outsplits_2x2_to_3x3(&a), bridge_max_entry);

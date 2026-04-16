@@ -187,6 +187,8 @@ struct JsonSearchConfig {
     beam_width: Option<usize>,
     #[serde(default)]
     beam_bfs_handoff_depth: Option<usize>,
+    #[serde(default)]
+    beam_bfs_handoff_deferred_cap: Option<usize>,
     #[serde(
         default = "default_move_family_policy",
         alias = "search_mode",
@@ -520,6 +522,7 @@ fn load_research_cases(cli: &Cli) -> Result<Vec<SegmentCase>, String> {
                     move_family_policy: case.config.move_family_policy,
                     beam_width: case.config.beam_width,
                     beam_bfs_handoff_depth: case.config.beam_bfs_handoff_depth,
+                    beam_bfs_handoff_deferred_cap: case.config.beam_bfs_handoff_deferred_cap,
                 },
                 stage: case.config.stage,
                 guided_refinement: case.config.guided_refinement,
@@ -578,6 +581,7 @@ fn derive_path_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
                         move_family_policy: cli.search_mode,
                         beam_width: None,
                         beam_bfs_handoff_depth: None,
+                        beam_bfs_handoff_deferred_cap: None,
                     },
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
@@ -737,6 +741,7 @@ mod tests {
                 frontier_mode: Default::default(),
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
                 move_family_policy: super::default_move_family_policy(),
                 stage: Default::default(),
                 guided_refinement: Default::default(),

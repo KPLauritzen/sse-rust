@@ -203,6 +203,7 @@ pub fn probe_graph_proposal_shortlist(
         move_family_policy: MoveFamilyPolicy::GraphOnly,
         beam_width: None,
         beam_bfs_handoff_depth: None,
+        beam_bfs_handoff_deferred_cap: None,
     };
     let attempts = shortlist
         .into_iter()
@@ -1685,8 +1686,10 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
     bwd_signatures.insert(approx_signature(&b_canon));
 
     let mut serial = 0usize;
-    let mut fwd_frontier = BeamBfsHandoffFrontier::new(beam_width);
-    let mut bwd_frontier = BeamBfsHandoffFrontier::new(beam_width);
+    let mut fwd_frontier =
+        BeamBfsHandoffFrontier::new(beam_width, config.beam_bfs_handoff_deferred_cap);
+    let mut bwd_frontier =
+        BeamBfsHandoffFrontier::new(beam_width, config.beam_bfs_handoff_deferred_cap);
     push_beam_bfs_handoff_entry(
         &mut fwd_frontier,
         &a_canon,
@@ -2529,8 +2532,10 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
     bwd_signatures.insert(approx_signature(&b_canon));
 
     let mut serial = 0usize;
-    let mut fwd_frontier = BeamBfsHandoffFrontier::new(beam_width);
-    let mut bwd_frontier = BeamBfsHandoffFrontier::new(beam_width);
+    let mut fwd_frontier =
+        BeamBfsHandoffFrontier::new(beam_width, config.beam_bfs_handoff_deferred_cap);
+    let mut bwd_frontier =
+        BeamBfsHandoffFrontier::new(beam_width, config.beam_bfs_handoff_deferred_cap);
     push_beam_bfs_handoff_entry(
         &mut fwd_frontier,
         &a_canon,
@@ -3653,6 +3658,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         }
     }
 
@@ -3711,6 +3717,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts,
@@ -3872,6 +3879,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(4),
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -3897,6 +3905,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: Some(3),
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -3918,6 +3927,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(2),
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -3943,6 +3953,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: Some(1),
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         let result = search_sse_2x2(&a, &b, &config);
@@ -3968,6 +3979,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
         );
 
@@ -4071,6 +4083,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
@@ -4120,6 +4133,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
@@ -4171,6 +4185,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let guided = GuidedRefinementConfig {
             max_shortcut_lag: 1,
@@ -4239,6 +4254,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let guided = GuidedRefinementConfig {
             max_shortcut_lag: 2,
@@ -4303,6 +4319,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![full_path_artifact("legacy-guided", guide)],
@@ -4377,6 +4394,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![indirect, direct_duplicate, direct_forward],
@@ -4663,6 +4681,7 @@ mod tests {
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![],
@@ -4815,6 +4834,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         let shortcut_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
@@ -4846,6 +4866,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let base_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
             .expect("identity pair should produce a bounded concrete-shift proof");
@@ -4940,6 +4961,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match result {
@@ -4961,6 +4983,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -4991,6 +5014,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
         assert!(!telemetry.invariant_filtered);
@@ -5178,6 +5202,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
 
         for _ in 0..16 {
@@ -5433,6 +5458,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&m1, &m2, &config);
         assert!(
@@ -5453,6 +5479,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&m1, &m3, &config);
         assert!(
@@ -5485,6 +5512,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -5522,6 +5550,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -5548,6 +5577,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -5590,6 +5620,7 @@ mod tests {
             move_family_policy: MoveFamilyPolicy::Mixed,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match &result {

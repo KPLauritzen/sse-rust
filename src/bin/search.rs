@@ -180,6 +180,8 @@ where
                        --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
                        --beam-bfs-handoff-depth N\n\
                                               inclusive beam depth before handing discoveries to BFS (default: 4)\n\
+                       --beam-bfs-handoff-deferred-cap N\n\
+                                              cap retained deferred overflow entries before BFS (default: unlimited; 0 drops all retained overflow)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
                                               (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
@@ -236,6 +238,10 @@ where
             "--beam-bfs-handoff-depth" => {
                 config.beam_bfs_handoff_depth =
                     Some(next_parsed(&mut args, "--beam-bfs-handoff-depth")?);
+            }
+            "--beam-bfs-handoff-deferred-cap" => {
+                config.beam_bfs_handoff_deferred_cap =
+                    Some(next_parsed(&mut args, "--beam-bfs-handoff-deferred-cap")?);
             }
             "--stage" => {
                 let value = args.next().ok_or("--stage requires a value")?;
@@ -327,6 +333,13 @@ where
     {
         return Err(
             "--beam-bfs-handoff-depth requires --frontier-mode beam-bfs-handoff".to_string(),
+        );
+    }
+    if config.frontier_mode != FrontierMode::BeamBfsHandoff
+        && config.beam_bfs_handoff_deferred_cap.is_some()
+    {
+        return Err(
+            "--beam-bfs-handoff-deferred-cap requires --frontier-mode beam-bfs-handoff".to_string(),
         );
     }
 
@@ -1181,6 +1194,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_cli_accepts_beam_bfs_handoff_deferred_cap_with_handoff_mode() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--frontier-mode".to_string(),
+                "beam-bfs-handoff".to_string(),
+                "--beam-bfs-handoff-deferred-cap".to_string(),
+                "24".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.config.frontier_mode, FrontierMode::BeamBfsHandoff);
+        assert_eq!(cli.config.beam_bfs_handoff_deferred_cap, Some(24));
+    }
+
+    #[test]
     fn parse_cli_rejects_beam_bfs_handoff_depth_without_handoff_mode() {
         let err = parse_cli(
             vec![
@@ -1196,6 +1228,25 @@ mod tests {
         assert_eq!(
             err,
             "--beam-bfs-handoff-depth requires --frontier-mode beam-bfs-handoff"
+        );
+    }
+
+    #[test]
+    fn parse_cli_rejects_beam_bfs_handoff_deferred_cap_without_handoff_mode() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--beam-bfs-handoff-deferred-cap".to_string(),
+                "24".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            err,
+            "--beam-bfs-handoff-deferred-cap requires --frontier-mode beam-bfs-handoff"
         );
     }
 

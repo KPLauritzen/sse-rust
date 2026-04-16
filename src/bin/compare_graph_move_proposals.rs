@@ -130,6 +130,7 @@ fn main() -> Result<(), String> {
             move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
         };
         let probe =
             probe_graph_proposal_shortlist(&current, &target, &search_config, &probe_config)
