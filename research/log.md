@@ -481,3 +481,20 @@
   stayed identical except for a small elapsed improvement (`23041 ms` ->
   `22969 ms`). Details are in
   `research/notes/2026-04-16-k3-hard-control-4x4-cofactor-unroll.md`.
+
+- `sse-rust-t8r` Re-profiled after the `4x4` cofactor win and reused `3x3`
+  adjugates in the next structured sparse hotspot.
+  Kept. Fresh rebuilt-binary profiles still showed `square_factorisation_3x3`
+  dominating raw mixed-search volume, but the bounded current hard shortcut
+  control over-weighted `solve_nonneg_3x3` inside the structured
+  `3x3 -> 4x4` sparse family. `src/factorisation.rs` now computes the `3x3`
+  adjugate/determinant once per nonsingular core and reuses it across repeated
+  RHS solves in the `4x4 -> 3x3` and `3x3 -> 4x4` structured sparse loops. On
+  direct controls, mixed endpoint-search kept identical telemetry while wall
+  dropped from `2.00s` to `0.48s`, and the hard attempts-8 shortcut control
+  stayed at lag `7` with no guide improvements/promotions while wall dropped
+  from `11.62s` to `6.49s`. Full harness fitness stayed unchanged; reruns
+  landed at `23036 ms` and `22951 ms` versus the current-`HEAD` baseline
+  `22969 ms`, so aggregate impact is effectively flat-to-slightly-positive.
+  Details are in
+  `research/notes/2026-04-16-k3-structured-3x3-adjugate-reuse.md`.

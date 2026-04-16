@@ -835,15 +835,21 @@ where
                     continue;
                 }
 
-                let mut v_cols = Vec::with_capacity(4);
+                let (u_top_adjugate, det) = adjugate_matrix_and_det_3x3(&u_top);
+                if det == 0 {
+                    continue;
+                }
+
+                let mut v_cols = [[0u32; 3]; 4];
                 let mut ok = true;
-                for col in &a_cols {
-                    let solutions = solve_nonneg_3x3(&u_top, col, max_entry);
-                    if solutions.len() != 1 {
+                for (idx, col) in a_cols.iter().enumerate() {
+                    let Some(solution) =
+                        solve_nonneg_3x3_with_adjugate(&u_top_adjugate, det, col, max_entry)
+                    else {
                         ok = false;
                         break;
-                    }
-                    v_cols.push(solutions[0]);
+                    };
+                    v_cols[idx] = solution;
                 }
                 if !ok {
                     continue;
@@ -975,23 +981,24 @@ where
                                 ],
                             ];
 
-                            let det = core[0][0]
-                                * (core[1][1] * core[2][2] - core[1][2] * core[2][1])
-                                - core[0][1] * (core[1][0] * core[2][2] - core[1][2] * core[2][0])
-                                + core[0][2] * (core[1][0] * core[2][1] - core[1][1] * core[2][0]);
+                            let (core_adjugate, det) = adjugate_matrix_and_det_3x3(&core);
                             if det == 0 {
                                 continue;
                             }
 
-                            let mut core_row_cols = Vec::with_capacity(3);
+                            let mut core_row_cols = [[0u32; 3]; 3];
                             let mut core_valid = true;
-                            for residual_col in &residual_cols {
-                                let solutions = solve_nonneg_3x3(&core, residual_col, max_entry);
-                                if solutions.len() != 1 {
+                            for (idx, residual_col) in residual_cols.iter().enumerate() {
+                                let Some(solution) = solve_nonneg_3x3_with_adjugate(
+                                    &core_adjugate,
+                                    det,
+                                    residual_col,
+                                    max_entry,
+                                ) else {
                                     core_valid = false;
                                     break;
-                                }
-                                core_row_cols.push(solutions[0]);
+                                };
+                                core_row_cols[idx] = solution;
                             }
                             if !core_valid {
                                 continue;
@@ -1923,44 +1930,11 @@ fn scale_cols_by_diag_3x3(m: &[[u32; 3]; 3], diag: &[u32; 3]) -> [[u32; 3]; 3] {
 /// entries ≤ max_entry. If the system is full-rank, there is at most one solution.
 /// If rank-2, reduces to solve_nonneg_2x3 + verification of the remaining equation.
 fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32; 3]> {
-    let me = max_entry as i64;
-
-    // Compute determinant via cofactor expansion along row 0.
-    let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
-        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
-        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    let (adjugate, det) = adjugate_matrix_and_det_3x3(a);
 
     if det != 0 {
-        // Unique solution: x = adj(A)·b / det.
-        let adj = [
-            [
-                a[1][1] * a[2][2] - a[1][2] * a[2][1],
-                a[0][2] * a[2][1] - a[0][1] * a[2][2],
-                a[0][1] * a[1][2] - a[0][2] * a[1][1],
-            ],
-            [
-                a[1][2] * a[2][0] - a[1][0] * a[2][2],
-                a[0][0] * a[2][2] - a[0][2] * a[2][0],
-                a[0][2] * a[1][0] - a[0][0] * a[1][2],
-            ],
-            [
-                a[1][0] * a[2][1] - a[1][1] * a[2][0],
-                a[0][1] * a[2][0] - a[0][0] * a[2][1],
-                a[0][0] * a[1][1] - a[0][1] * a[1][0],
-            ],
-        ];
-        let mut x = [0i64; 3];
-        for i in 0..3 {
-            let num = adj[i][0] * b[0] + adj[i][1] * b[1] + adj[i][2] * b[2];
-            if num % det != 0 {
-                return vec![];
-            }
-            x[i] = num / det;
-            if x[i] < 0 || x[i] > me {
-                return vec![];
-            }
-        }
-        return vec![[x[0] as u32, x[1] as u32, x[2] as u32]];
+        return solve_nonneg_3x3_with_adjugate(&adjugate, det, b, max_entry)
+            .map_or_else(Vec::new, |x| vec![x]);
     }
 
     // det = 0: find a rank-2 row pair and reduce to solve_nonneg_2x3.
@@ -1987,6 +1961,54 @@ fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32
 
     // Rank ≤ 1: skip (degenerate, rarely contributes useful factorisations).
     vec![]
+}
+
+fn adjugate_matrix_and_det_3x3(a: &[[i64; 3]; 3]) -> ([[i64; 3]; 3], i64) {
+    let adjugate = [
+        [
+            a[1][1] * a[2][2] - a[1][2] * a[2][1],
+            a[0][2] * a[2][1] - a[0][1] * a[2][2],
+            a[0][1] * a[1][2] - a[0][2] * a[1][1],
+        ],
+        [
+            a[1][2] * a[2][0] - a[1][0] * a[2][2],
+            a[0][0] * a[2][2] - a[0][2] * a[2][0],
+            a[0][2] * a[1][0] - a[0][0] * a[1][2],
+        ],
+        [
+            a[1][0] * a[2][1] - a[1][1] * a[2][0],
+            a[0][1] * a[2][0] - a[0][0] * a[2][1],
+            a[0][0] * a[1][1] - a[0][1] * a[1][0],
+        ],
+    ];
+    let det = a[0][0] * adjugate[0][0] + a[0][1] * adjugate[1][0] + a[0][2] * adjugate[2][0];
+    (adjugate, det)
+}
+
+fn solve_nonneg_3x3_with_adjugate(
+    adjugate: &[[i64; 3]; 3],
+    det: i64,
+    b: &[i64; 3],
+    max_entry: u32,
+) -> Option<[u32; 3]> {
+    if det == 0 {
+        return None;
+    }
+
+    let me = max_entry as i64;
+    let mut x = [0u32; 3];
+    for i in 0..3 {
+        let num = adjugate[i][0] * b[0] + adjugate[i][1] * b[1] + adjugate[i][2] * b[2];
+        if num % det != 0 {
+            return None;
+        }
+        let value = num / det;
+        if value < 0 || value > me {
+            return None;
+        }
+        x[i] = value as u32;
+    }
+    Some(x)
 }
 
 /// Compute the determinant of a 3×3 matrix given as rows.
@@ -3361,6 +3383,35 @@ mod tests {
         let b = [2, 3, 5, 5];
         let result = solve_overdetermined_4x3(&u, &b, 10);
         assert_eq!(result, Some([2, 3, 5]));
+    }
+
+    #[test]
+    fn test_solve_nonneg_3x3_with_adjugate_matches_solver() {
+        let cases = [
+            (
+                [[1, 1, 0], [0, 1, 1], [1, 0, 1]],
+                [3, 5, 4],
+                10,
+                Some([1, 2, 3]),
+            ),
+            (
+                [[2, 0, 1], [1, 1, 0], [0, 1, 1]],
+                [7, 3, 4],
+                10,
+                Some([2, 1, 3]),
+            ),
+            ([[1, 1, 0], [0, 1, 1], [1, 0, 1]], [1, 1, 1], 10, None),
+        ];
+
+        for (a, b, max_entry, expected) in cases {
+            let (adjugate, det) = adjugate_matrix_and_det_3x3(&a);
+            assert_eq!(
+                solve_nonneg_3x3_with_adjugate(&adjugate, det, &b, max_entry),
+                expected
+            );
+            let expected_vec = expected.map_or_else(Vec::new, |x| vec![x]);
+            assert_eq!(solve_nonneg_3x3(&a, &b, max_entry), expected_vec);
+        }
     }
 
     #[test]
