@@ -435,3 +435,11 @@
   `373/812` window occurrences collapsing and no rewrite-state truncation.
   Details are in `research/notes/2026-04-16-triangle-path-telemetry.md` and
   `research/runs/2026-04-16-triangle-path-telemetry-{graph,guides,combined}.json`.
+
+- `working tree` Evaluated Lean as a bounded formal-methods sidecar for this
+  repo.
+  Added `research/notes/2026-04-16-lean-evaluation.md`. The conclusion is that
+  Lean is only plausible for narrow witness, structured-move, or invariant
+  soundness lemmas around `src/search/path.rs`, `src/graph_moves.rs`, and
+  `src/invariants.rs`; it is not a good fit for the main solver, performance
+  tuning, or the current measurement/reporting seams.
