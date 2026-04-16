@@ -214,7 +214,6 @@ enum ContrastSourceKind {
 enum ContinuationLabel {
     BestContinuation,
     SupportingContinuation,
-    NonContinuation,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -224,9 +223,8 @@ struct LayerContrast {
     layer_size: usize,
     matched_witness_candidates: usize,
     best_remaining_witness_lag: usize,
-    layer_signature: String,
     dedup_scope_key: String,
-    candidate_labels: Vec<CandidateLabel>,
+    matched_candidates: Vec<CandidateLabel>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1029,25 +1027,17 @@ fn analyze_case(
             .min()
             .expect("matched layer has at least one witness candidate");
         let dedup_scope_key = case_dedup_scope_key(case, layer.direction);
-        let candidate_labels = layer
-            .candidates
+        let matched_candidates = matched_for_labels
             .iter()
-            .map(|candidate| {
-                let candidate_key = matrix_key(candidate);
-                let solution_info = remaining_labels.get(&candidate_key);
-                let continuation_label = match solution_info {
-                    Some(info) if info.remaining_witness_lag == best_remaining_witness_lag => {
-                        ContinuationLabel::BestContinuation
-                    }
-                    Some(_) => ContinuationLabel::SupportingContinuation,
-                    None => ContinuationLabel::NonContinuation,
-                };
-                CandidateLabel {
-                    candidate_key,
-                    continuation_label,
-                    remaining_witness_lag: solution_info.map(|info| info.remaining_witness_lag),
-                    solution_path_index: solution_info.map(|info| info.solution_path_index),
-                }
+            .map(|(candidate, info)| CandidateLabel {
+                candidate_key: matrix_key(candidate),
+                continuation_label: if info.remaining_witness_lag == best_remaining_witness_lag {
+                    ContinuationLabel::BestContinuation
+                } else {
+                    ContinuationLabel::SupportingContinuation
+                },
+                remaining_witness_lag: Some(info.remaining_witness_lag),
+                solution_path_index: Some(info.solution_path_index),
             })
             .collect::<Vec<_>>();
         rankable_layers.push(LayerContrast {
@@ -1056,9 +1046,8 @@ fn analyze_case(
             layer_size: layer.candidates.len(),
             matched_witness_candidates: matched_for_labels.len(),
             best_remaining_witness_lag,
-            layer_signature: layer_signature(&layer.candidates),
             dedup_scope_key,
-            candidate_labels,
+            matched_candidates,
         });
         for (candidate, _) in matched_for_labels {
             remaining_labels.remove(&matrix_key(&candidate));
@@ -1187,9 +1176,8 @@ fn compact_layer_contrast(layer: &LayerContrast) -> ArtifactLayerContrast {
         best_remaining_witness_lag: layer.best_remaining_witness_lag,
         dedup_scope_key: layer.dedup_scope_key.clone(),
         matched_candidates: layer
-            .candidate_labels
+            .matched_candidates
             .iter()
-            .filter(|candidate| candidate.continuation_label != ContinuationLabel::NonContinuation)
             .map(|candidate| ArtifactMatchedCandidate {
                 candidate_key: candidate.candidate_key.clone(),
                 continuation_label: candidate.continuation_label,
@@ -1274,12 +1262,6 @@ fn direction_label(direction: SearchDirection) -> &'static str {
         SearchDirection::Forward => "forward",
         SearchDirection::Backward => "backward",
     }
-}
-
-fn layer_signature(candidates: &[DynMatrix]) -> String {
-    let mut keys = candidates.iter().map(matrix_key).collect::<Vec<_>>();
-    keys.sort();
-    keys.join("|")
 }
 
 fn path_signature(path: &[DynMatrix]) -> String {
