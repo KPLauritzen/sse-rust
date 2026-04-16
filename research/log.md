@@ -147,6 +147,15 @@
   cleanly. Durable note:
   `research/notes/2026-04-16-bounded-row-split-3x3-to-4x4-family.md`.
 
+- `working tree` Added the bounded `single_column_split_3x3_to_4x4` family to the main search seam.
+  Kept. This lands the sibling explicit column-splitting slice through the same
+  descriptor seam without reopening broad generic `3x4` widening: one chosen
+  `3x3` column may split into two contiguous `4x4` clones, the family gets its
+  own stable telemetry label and policy slot between the row split and the
+  broader sparse `3x3 -> 4x4` family, and focused tests plus frontier telemetry
+  confirm it participates cleanly. Durable note:
+  `research/notes/2026-04-16-bounded-column-split-3x3-to-4x4-family.md`.
+
 ## 2026-04-16 Arithmetic Follow-up
 
 - `working tree` Classified extra matrix-characterization ideas by solver role.

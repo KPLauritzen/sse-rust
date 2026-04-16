@@ -767,6 +767,31 @@ where
     }
 }
 
+/// Enumerate a bounded explicit 3x3 -> 4x4 column-splitting family.
+///
+/// This is the transpose-dual of the bounded row-splitting slice: one chosen
+/// source column is split into two contiguous clones, while the other columns
+/// stay fixed. The matching source row is duplicated by the fixed transposed
+/// 4x3 duplication matrix, so the target vocabulary stays explicit and bounded.
+fn visit_single_column_split_factorisations_3x3_to_4<F>(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut F,
+) where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 3);
+    assert_eq!(a.cols, 3);
+
+    visit_single_row_split_factorisations_3x3_to_4(
+        &a.transpose(),
+        max_entry,
+        &mut |u_transposed, v_transposed| {
+            visit(v_transposed.transpose(), u_transposed.transpose());
+        },
+    );
+}
+
 fn binary_sparse_rows_len3() -> Vec<[u32; 3]> {
     vec![
         [1, 0, 0],
@@ -2744,7 +2769,7 @@ const TWO_BY_TWO_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
     ),
 ];
 
-const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 3] = [
+const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 4] = [
     FactorisationFamilyDescriptor::new(
         "rectangular_factorisation_3x3_to_2",
         enabled_rectangular_factorisation_3x3_to_2,
@@ -2754,6 +2779,11 @@ const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 3] = 
         "single_row_split_3x3_to_4x4",
         enabled_single_row_split_3x3_to_4x4,
         enumerate_single_row_split_3x3_to_4x4_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "single_column_split_3x3_to_4x4",
+        enabled_single_column_split_3x3_to_4x4,
+        enumerate_single_column_split_3x3_to_4x4_family,
     ),
     FactorisationFamilyDescriptor::new(
         "binary_sparse_rectangular_factorisation_3x3_to_4",
@@ -2862,6 +2892,14 @@ fn enabled_single_row_split_3x3_to_4x4(
     input_dim == 3 && max_intermediate_dim >= 4
 }
 
+fn enabled_single_column_split_3x3_to_4x4(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3 && max_intermediate_dim >= 4
+}
+
 fn enabled_square_factorisation_3x3(
     input_dim: usize,
     max_intermediate_dim: usize,
@@ -2948,6 +2986,14 @@ fn enumerate_single_row_split_3x3_to_4x4_family(
     visit: &mut dyn FnMut(DynMatrix, DynMatrix),
 ) {
     visit_single_row_split_factorisations_3x3_to_4(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_single_column_split_3x3_to_4x4_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_single_column_split_factorisations_3x3_to_4(a, max_entry, &mut |u, v| visit(u, v));
 }
 
 fn enumerate_binary_sparse_factorisation_3x3_to_4_family(
@@ -3629,6 +3675,7 @@ mod tests {
             vec![
                 "rectangular_factorisation_3x3_to_2",
                 "single_row_split_3x3_to_4x4",
+                "single_column_split_3x3_to_4x4",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
                 "square_factorisation_3x3",
                 "diagonal_refactorization_3x3",
@@ -3647,6 +3694,7 @@ mod tests {
             vec![
                 "rectangular_factorisation_3x3_to_2",
                 "single_row_split_3x3_to_4x4",
+                "single_column_split_3x3_to_4x4",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
                 "diagonal_refactorization_3x3",
                 "elementary_conjugation_3x3",
@@ -3753,6 +3801,27 @@ mod tests {
     }
 
     #[test]
+    fn test_single_column_split_factorisations_reach_expected_3x3_to_4x4_target() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 0, 1, 0, 1, 1, 2, 1]);
+        let target = DynMatrix::new(4, 4, vec![1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1]);
+        let mut found = false;
+
+        visit_single_column_split_factorisations_3x3_to_4(&current, 3, &mut |u, v| {
+            if u == DynMatrix::new(3, 4, vec![1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1])
+                && v == DynMatrix::new(4, 3, vec![1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1])
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected bounded 3x3->4x4 single-column split factorisation"
+        );
+    }
+
+    #[test]
     fn test_visit_all_factorisations_includes_binary_sparse_3x3_to_4_family() {
         let current = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
         let target = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0]);
@@ -3789,6 +3858,28 @@ mod tests {
         assert!(
             found,
             "expected main dispatcher to expose the bounded 3x3->4x4 row-split family"
+        );
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_single_column_split_3x3_to_4x4_family() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 0, 1, 0, 1, 1, 2, 1]);
+        let target = DynMatrix::new(4, 4, vec![1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1]);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&current, 4, 3, |family, u, v| {
+            if family == "single_column_split_3x3_to_4x4"
+                && u == DynMatrix::new(3, 4, vec![1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1])
+                && v == DynMatrix::new(4, 3, vec![1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1])
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the bounded 3x3->4x4 column-split family"
         );
     }
 
