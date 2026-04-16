@@ -200,6 +200,19 @@ dedicated local corpus or explicit worker-case branch instead.
 
 See `docs/research-harness-benchmark-policy.md` for tradeoffs and follow-up.
 
+## Graph-Proposal Shortlist Rounds
+
+Treat graph-proposal shortlist rounds as evidence-lane sidecars, not harness
+defaults.
+
+- keep them on `compare_graph_move_proposals` / `just graph-proposal-shortlist-round`;
+- do not promote them into `research_harness` yet;
+- do not widen default frontier expansion around them yet.
+
+Use the documented default round shape, output fields, and keep/revert contract
+in `docs/graph-proposal-shortlist-rounds.md` so future workers compare the same
+waypoint seam instead of replaying ad hoc diagnostics.
+
 ## Experiment Loop
 
 Repeat:

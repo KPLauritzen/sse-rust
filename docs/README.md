@@ -25,6 +25,9 @@ This repo now uses three documentation layers with different jobs:
 - [`search-parallelism-8h4.md`](search-parallelism-8h4.md) turns that timing
   evidence into a concrete determinism, memory, and correctness risk assessment
   for future deeper parallelism work in `src/search.rs`.
+- [`graph-proposal-shortlist-rounds.md`](graph-proposal-shortlist-rounds.md)
+  standardizes the default bounded graph-proposal shortlist evidence round,
+  including the runner, output fields, and keep/revert interpretation.
 - [`research-ideas.md`](research-ideas.md) is the long-horizon idea bank from
   paper reading and code review. It should collect plausible directions and
   synthesis, not a ranked backlog.

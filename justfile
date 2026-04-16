@@ -27,6 +27,20 @@ research-json-save stamp:
     mkdir -p research/runs
     cargo run --profile dist --features research-tools --bin research_harness -- --cases research/cases.json --format json > research/runs/{{stamp}}.json
 
+graph-proposal-shortlist-round *args:
+    cargo build --profile dist --features research-tools --bin compare_graph_move_proposals
+    timeout -k 5s 20s target/dist/compare_graph_move_proposals \
+        --fixture-ref research/fixtures/brix_ruiz_family.json#brix_ruiz_k3 \
+        --seeded-guide-id endpoint_16_path \
+        --current guide:1 \
+        --target guide:15 \
+        --max-dim 4 \
+        --zigzag-bridge-entry 8 \
+        --top-k 6 \
+        --probe-lag 3 \
+        --probe-shortlist-k 4 \
+        {{args}}
+
 build:
     cargo build --release
 

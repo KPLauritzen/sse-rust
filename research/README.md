@@ -59,6 +59,10 @@ For active work, use:
   staged solver surface,
 - `cargo run --features research-tools --bin research_harness -- ...` for
   fixture-backed benchmark and campaign runs.
+- `just graph-proposal-shortlist-round` for the default graph-proposal
+  shortlist evidence round on the current kept waypoint seam. Keep this as a
+  research-tool sidecar rather than a harness case; see
+  [`../docs/graph-proposal-shortlist-rounds.md`](../docs/graph-proposal-shortlist-rounds.md).
 
 The remaining `research-tools` binaries are intentionally narrower. Keep them
 for targeted diagnostics or paper reproduction, not as alternate front doors

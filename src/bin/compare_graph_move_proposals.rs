@@ -135,7 +135,13 @@ fn main() -> Result<(), String> {
         let probe =
             probe_graph_proposal_shortlist(&current, &target, &search_config, &probe_config)
                 .map_err(|err| format!("proposal probe failed: {err}"))?;
-        print_proposal_probe(&probe, probe_lag);
+        print_proposal_probe(
+            &probe,
+            probe_lag,
+            probe_config.shortlist_size,
+            search_config.max_entry,
+            &blind_set,
+        );
     }
 
     Ok(())
@@ -334,7 +340,13 @@ fn print_top_proposals(proposals: &[GraphProposal], top_k: usize) {
     }
 }
 
-fn print_proposal_probe(probe: &sse_core::search::GraphProposalProbeResult, probe_lag: usize) {
+fn print_proposal_probe(
+    probe: &sse_core::search::GraphProposalProbeResult,
+    probe_lag: usize,
+    shortlist_cap: usize,
+    realization_max_entry: u32,
+    blind_set: &BTreeSet<DynMatrix>,
+) {
     println!("Best-gap proposal probe");
     println!("  raw proposal candidates: {}", probe.raw_candidates);
     println!("  unique canonical proposals: {}", probe.unique_candidates);
@@ -342,8 +354,11 @@ fn print_proposal_probe(probe: &sse_core::search::GraphProposalProbeResult, prob
         println!("  best target signature gap: {}", format_gap(best_gap));
     }
     println!("  best-gap shortlist: {}", probe.best_gap_candidates);
+    println!("  shortlist cap: {}", shortlist_cap);
     println!("  probed proposals: {}", probe.attempts.len());
+    println!("  realization surface: graph-only bfs");
     println!("  realization lag bound: {}", probe_lag);
+    println!("  realization max_entry: {}", realization_max_entry);
     if probe.attempts.is_empty() {
         println!("  none");
         return;
@@ -356,11 +371,13 @@ fn print_proposal_probe(probe: &sse_core::search::GraphProposalProbeResult, prob
             DynSseResult::Unknown => "not realized within bound".to_string(),
         };
         println!(
-            "  {}. {} families={} gap={} frontier_nodes={} visited={} {:?}",
+            "  {}. {} families={} gap={} proposal_dim={} blind_overlap={} frontier_nodes={} visited={} {:?}",
             index + 1,
             outcome,
             attempt.proposal.families.join(","),
             format_gap(attempt.proposal.target_signature_gap),
+            attempt.proposal.matrix.rows,
+            blind_set.contains(&attempt.proposal.matrix),
             attempt.telemetry.frontier_nodes_expanded,
             attempt.telemetry.total_visited_nodes,
             attempt.proposal.matrix,
