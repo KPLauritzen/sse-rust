@@ -192,6 +192,7 @@
     ],
     "endpoint_case_only_pairs": [
       {
+        "pair_id": "riedel_baker_k4",
         "case_id": "riedel_baker_k4",
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
@@ -199,6 +200,7 @@
         "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
       },
       {
+        "pair_id": "riedel_baker_k6",
         "case_id": "riedel_baker_k6",
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
@@ -206,6 +208,7 @@
         "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
       },
       {
+        "pair_id": "riedel_baker_k8",
         "case_id": "riedel_baker_k8",
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
@@ -213,6 +216,7 @@
         "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
       },
       {
+        "pair_id": "riedel_baker_k10",
         "case_id": "riedel_baker_k10",
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
@@ -220,6 +224,7 @@
         "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
       },
       {
+        "pair_id": "riedel_baker_k12",
         "case_id": "riedel_baker_k12",
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
@@ -227,6 +232,7 @@
         "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
       },
       {
+        "pair_id": "lind_marcus_a_to_c",
         "case_id": "lind_marcus_a_to_c",
         "family_tags": [
           "lind_marcus",
@@ -239,6 +245,7 @@
         "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
       },
       {
+        "pair_id": "full_2_shift_higher_block_1x1_to_4x4",
         "case_id": "full_2_shift_higher_block_1x1_to_4x4",
         "family_tags": [
           "higher_block",
