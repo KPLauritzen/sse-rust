@@ -168,6 +168,16 @@
   step-5 recovery. Durable note:
   `research/notes/2026-04-16-bounded-4x4-diagonal-refactorization-family.md`.
 
+- `working tree` Added the bounded `single_row_split_4x4_to_5x5` family to the main search seam.
+  Kept. This lands one explicit `4x4 -> 5x5` row-splitting slice without
+  reopening broad generic `4x5` widening: one chosen `4x4` row may split into
+  two contiguous `5x5` clones, mirrored split/twin duplicates are suppressed,
+  and the family gets a stable telemetry label and descriptor slot ahead of the
+  broader sparse `4x4 -> 5x5` family. Focused factorisation, dispatcher-order,
+  and frontier telemetry tests confirm it participates cleanly under
+  `GraphPlusStructured`. Durable note:
+  `research/notes/2026-04-16-bounded-row-split-4x4-to-5x5-family.md`.
+
 ## 2026-04-16 Arithmetic Follow-up
 
 - `working tree` Classified extra matrix-characterization ideas by solver role.
