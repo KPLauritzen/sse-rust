@@ -1,10 +1,11 @@
 use sse_core::balanced::{
+    enumerate_balanced_bridge_insplit_return_neighbors_3x3,
     enumerate_balanced_bridge_return_neighbors_3x3, enumerate_balanced_elementary_neighbors_2x2,
     enumerate_balanced_neighbor_set_hits_2x2, enumerate_outsplit_bridge_states_2x2,
     find_balanced_elementary_equivalence_2x2, find_balanced_elementary_zigzag_meeting_2x2,
     BalancedBridgeReturnNeighbor3x3, BalancedSearchConfig2x2, BalancedSearchResult2x2,
 };
-use sse_core::graph_moves::enumerate_outsplits_2x2_to_3x3;
+use sse_core::graph_moves::{enumerate_insplits_2x2_to_3x3, enumerate_outsplits_2x2_to_3x3};
 use sse_core::matrix::{DynMatrix, SqMatrix};
 use sse_core::structured_surface::StructuredSurfaceDescriptor2x2;
 use std::collections::BTreeSet;
@@ -19,6 +20,7 @@ fn main() {
     let mut bridge_max_entry = 8u32;
     let mut search_bridge_neighbor_seam = false;
     let mut search_bridge_return_seam = false;
+    let mut search_bridge_insplit_return_seam = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -59,9 +61,12 @@ fn main() {
             "--bridge-return-seam" => {
                 search_bridge_return_seam = true;
             }
+            "--bridge-insplit-return-seam" => {
+                search_bridge_insplit_return_seam = true;
+            }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_balanced [--case brix_k3|brix_k4|toy] [--max-common-dim N] [--max-entry N] [--neighbors] [--zigzag] [--bridge-max-entry N] [--bridge-neighbor-seam] [--bridge-return-seam]"
+                    "usage: find_balanced [--case brix_k3|brix_k4|toy] [--max-common-dim N] [--max-entry N] [--neighbors] [--zigzag] [--bridge-max-entry N] [--bridge-neighbor-seam] [--bridge-return-seam] [--bridge-insplit-return-seam]"
                 );
                 return;
             }
@@ -196,6 +201,67 @@ fn main() {
             print_bridge_return_hits(&b_hits);
         }
     }
+
+    if search_bridge_insplit_return_seam {
+        println!();
+        let a_source_states = canonical_outsplit_states(&a);
+        let b_source_states = canonical_outsplit_states(&b);
+        let a_target_states = canonical_insplit_states(&a);
+        let b_target_states = canonical_insplit_states(&b);
+        println!(
+            "A-side canonical 3x3 outsplit source states ({}): {:?}",
+            a_source_states.len(),
+            a_source_states
+        );
+        println!(
+            "B-side canonical 3x3 insplit target states ({}): {:?}",
+            b_target_states.len(),
+            b_target_states
+        );
+
+        let a_hits = collect_balanced_bridge_insplit_return_hits(
+            &a_source_states,
+            &b_target_states,
+            bridge_max_entry,
+            &config,
+        );
+        println!(
+            "A(out)->B(in) balanced bridge-return hits: {}",
+            a_hits.len()
+        );
+        if a_hits.is_empty() {
+            println!("No bounded A(out)->B(in) balanced bridge-return seam found");
+        } else {
+            print_bridge_return_hits(&a_hits);
+        }
+
+        println!(
+            "B-side canonical 3x3 outsplit source states ({}): {:?}",
+            b_source_states.len(),
+            b_source_states
+        );
+        println!(
+            "A-side canonical 3x3 insplit target states ({}): {:?}",
+            a_target_states.len(),
+            a_target_states
+        );
+
+        let b_hits = collect_balanced_bridge_insplit_return_hits(
+            &b_source_states,
+            &a_target_states,
+            bridge_max_entry,
+            &config,
+        );
+        println!(
+            "B(out)->A(in) balanced bridge-return hits: {}",
+            b_hits.len()
+        );
+        if b_hits.is_empty() {
+            println!("No bounded B(out)->A(in) balanced bridge-return seam found");
+        } else {
+            print_bridge_return_hits(&b_hits);
+        }
+    }
 }
 
 fn print_neighbors_for_side(label: &str, matrix: &SqMatrix<2>, config: &BalancedSearchConfig2x2) {
@@ -222,6 +288,18 @@ fn canonical_outsplit_states(m: &SqMatrix<2>) -> Vec<DynMatrix> {
     states
 }
 
+fn canonical_insplit_states(m: &SqMatrix<2>) -> Vec<DynMatrix> {
+    let mut seen = BTreeSet::new();
+    let mut states = Vec::new();
+    for witness in enumerate_insplits_2x2_to_3x3(m) {
+        let canon = witness.outsplit.canonical_perm();
+        if seen.insert(canon.clone()) {
+            states.push(canon);
+        }
+    }
+    states
+}
+
 fn collect_balanced_bridge_return_hits(
     source_candidates: &[DynMatrix],
     target_candidates: &[DynMatrix],
@@ -234,6 +312,28 @@ fn collect_balanced_bridge_return_hits(
     for source in source_candidates {
         for neighbor in
             enumerate_balanced_bridge_return_neighbors_3x3(source, bridge_max_entry, config)
+        {
+            if target_set.contains(&neighbor.matrix) {
+                hits.push((source.clone(), neighbor));
+            }
+        }
+    }
+
+    hits
+}
+
+fn collect_balanced_bridge_insplit_return_hits(
+    source_candidates: &[DynMatrix],
+    target_candidates: &[DynMatrix],
+    bridge_max_entry: u32,
+    config: &BalancedSearchConfig2x2,
+) -> Vec<(DynMatrix, BalancedBridgeReturnNeighbor3x3)> {
+    let target_set = target_candidates.iter().cloned().collect::<BTreeSet<_>>();
+    let mut hits = Vec::new();
+
+    for source in source_candidates {
+        for neighbor in
+            enumerate_balanced_bridge_insplit_return_neighbors_3x3(source, bridge_max_entry, config)
         {
             if target_set.contains(&neighbor.matrix) {
                 hits.push((source.clone(), neighbor));

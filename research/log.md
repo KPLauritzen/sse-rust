@@ -126,6 +126,11 @@
   move, but both Brix-Ruiz controls still stay disconnected at the same return
   seam.
 
+- `working tree` Added a bounded `3x3(out) -> 2x2 <-balanced-> 2x2 -> 3x3(in)` return seam.
+  Kept as evidence. The mixed in-split return family is real on the toy control
+  with the same bounded bridge hop, but bounded `brix_ruiz_k3` and `k4` still
+  stay disconnected at the same caps.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.
