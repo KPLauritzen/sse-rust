@@ -544,6 +544,19 @@
   `44` matched witness candidates while keeping the other held-out families out
   until the current analyzer surface can rank them.
 
+- `sse-rust-7n4` Probed one bounded held-out-family broadening slice for the
+  layer-contrast corpus.
+  Landed as a negative result. Added
+  `research/notes/2026-04-16-layer-contrast-heldout-family-policy-probe.md`.
+  Re-ran `analyze_path_signal_corpus` on `lind_marcus_a_to_c` and
+  `full_2_shift_higher_block_1x1_to_4x4` under `mixed`, `graph_only`, and
+  `graph_plus_structured` case-local move-policy variants while keeping
+  witness/family provenance aligned with
+  `research/ranking_signal_family_benchmark_v1.json`. All six runs solved, but
+  none exported a rankable layer; the current collector retained `layer_count =
+  0` for both families in every variant, so this round did not justify a new
+  corpus artifact.
+
 - `sse-rust-oci` Re-profiled the current hard shortcut control and trimmed the
   hot `4x4` cofactor path in structured sparse factorisations.
   Kept. A bounded hard-control `pprof` sample on rebuilt `target/dist/search`
