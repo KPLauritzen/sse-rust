@@ -490,7 +490,11 @@ fn fallback_factorisation_families(current: &DynMatrix, target: &DynMatrix) -> V
         (3, 4) => vec!["binary_sparse_rectangular_factorisation_3x3_to_4".to_string()],
         (4, 3) => vec!["binary_sparse_rectangular_factorisation_4x3_to_3".to_string()],
         (4, 4) => vec!["elementary_conjugation".to_string()],
-        (4, 5) => vec!["binary_sparse_rectangular_factorisation_4x4_to_5".to_string()],
+        (4, 5) => vec![
+            "single_row_split_4x4_to_5x5".to_string(),
+            "single_column_split_4x4_to_5x5".to_string(),
+            "binary_sparse_rectangular_factorisation_4x4_to_5".to_string(),
+        ],
         (5, 4) => vec!["binary_sparse_rectangular_factorisation_5x5_to_4".to_string()],
         _ => Vec::new(),
     }
@@ -661,7 +665,8 @@ fn csv_escape(field: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::csv_escape;
+    use super::{csv_escape, fallback_factorisation_families};
+    use sse_core::matrix::DynMatrix;
 
     #[test]
     fn csv_escape_quotes_commas_and_newlines() {
@@ -669,5 +674,20 @@ mod tests {
         assert_eq!(csv_escape("a,b"), "\"a,b\"");
         assert_eq!(csv_escape("a\"b"), "\"a\"\"b\"");
         assert_eq!(csv_escape("a\nb"), "\"a\nb\"");
+    }
+
+    #[test]
+    fn fallback_factorisation_families_keep_explicit_4x4_to_5x5_labels_ahead_of_sparse() {
+        let current = DynMatrix::new(4, 4, vec![1; 16]);
+        let target = DynMatrix::new(5, 5, vec![1; 25]);
+
+        assert_eq!(
+            fallback_factorisation_families(&current, &target),
+            vec![
+                "single_row_split_4x4_to_5x5".to_string(),
+                "single_column_split_4x4_to_5x5".to_string(),
+                "binary_sparse_rectangular_factorisation_4x4_to_5".to_string(),
+            ]
+        );
     }
 }

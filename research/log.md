@@ -178,6 +178,18 @@
   `GraphPlusStructured`. Durable note:
   `research/notes/2026-04-16-bounded-row-split-4x4-to-5x5-family.md`.
 
+- `working tree` Added the bounded `single_column_split_4x4_to_5x5` family to the main search seam.
+  Kept. This lands the transpose-dual explicit `4x4 -> 5x5` column-splitting
+  slice without reopening broad generic `4x5` widening: one chosen `4x4`
+  column may split into two contiguous `5x5` clones, mirrored split/twin
+  duplicates are suppressed through the inherited row-split ordering, and the
+  family gets its own stable telemetry label and descriptor slot between the
+  row split and the broader sparse `4x4 -> 5x5` family. Focused factorisation,
+  dispatcher-order, frontier telemetry, and exporter fallback-list coverage
+  confirm the label now participates cleanly and stays explicit outside the
+  main dispatcher seam. Durable note:
+  `research/notes/2026-04-16-bounded-column-split-4x4-to-5x5-family.md`.
+
 ## 2026-04-16 Arithmetic Follow-up
 
 - `working tree` Classified extra matrix-characterization ideas by solver role.
