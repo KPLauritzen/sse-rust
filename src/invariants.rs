@@ -1,5 +1,5 @@
 use crate::matrix::{DynMatrix, SqMatrix};
-use crate::quadratic::ReducedForm;
+use crate::quadratic::{QuadraticOrderProfile, ReducedForm};
 
 const GENERIC_SQUARE_TRACE_INVARIANT_MAX_POWER: usize = 4;
 
@@ -29,6 +29,14 @@ pub struct ArithmeticProfile2x2 {
     pub determinant: i64,
     pub discriminant: i64,
     pub determinant_band: DeterminantBand2x2,
+    pub quadratic_arithmetic: Option<QuadraticArithmeticProfile2x2>,
+}
+
+/// Bounded second-stage arithmetic data for irreducible `2x2` endpoints.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct QuadraticArithmeticProfile2x2 {
+    pub order: QuadraticOrderProfile,
+    pub principal_ideal_class: bool,
 }
 
 /// Exact GL(2,Z)-similarity analysis used by [`gl2z_similarity_profile_2x2`].
@@ -72,12 +80,30 @@ pub fn arithmetic_profile_2x2(matrix: &SqMatrix<2>) -> ArithmeticProfile2x2 {
     let trace = matrix.trace() as i64;
     let determinant = matrix.det();
     let discriminant = trace * trace - 4 * determinant;
+    let quadratic_arithmetic = quadratic_arithmetic_profile_2x2(matrix, discriminant);
     ArithmeticProfile2x2 {
         trace,
         determinant,
         discriminant,
         determinant_band: determinant_band_2x2(trace, determinant),
+        quadratic_arithmetic,
     }
+}
+
+fn quadratic_arithmetic_profile_2x2(
+    matrix: &SqMatrix<2>,
+    discriminant: i64,
+) -> Option<QuadraticArithmeticProfile2x2> {
+    let order = crate::quadratic::quadratic_order_profile(discriminant)?;
+    let ideal_class = crate::quadratic::eigenvector_ideal_class_2x2(matrix)
+        .expect("irreducible 2x2 endpoint should yield a quadratic-order ideal class");
+    let principal_ideal_class =
+        crate::quadratic::reduced_form_is_principal(discriminant, &ideal_class)
+            .expect("quadratic order should admit a canonical principal class");
+    Some(QuadraticArithmeticProfile2x2 {
+        order,
+        principal_ideal_class,
+    })
 }
 
 /// Classify the Baker/Choe-Shin determinant territory for one 2x2 endpoint.
@@ -507,6 +533,95 @@ mod tests {
         assert_eq!(determinant_band_2x2(6, 7), DeterminantBand2x2::Baker);
         assert_eq!(determinant_band_2x2(4, -6), DeterminantBand2x2::ChoeShin);
         assert_eq!(determinant_band_2x2(4, -5), DeterminantBand2x2::Neither);
+    }
+
+    #[test]
+    fn test_arithmetic_profile_2x2_reports_eilers_kiming_order_data() {
+        let source = SqMatrix::new([[14, 2], [1, 0]]);
+        let target = SqMatrix::new([[13, 5], [3, 1]]);
+
+        let source_profile = arithmetic_profile_2x2(&source);
+        let target_profile = arithmetic_profile_2x2(&target);
+
+        let expected_order = QuadraticOrderProfile {
+            order_discriminant: 204,
+            field_discriminant: 204,
+            conductor: 1,
+        };
+        assert_eq!(
+            source_profile.quadratic_arithmetic,
+            Some(QuadraticArithmeticProfile2x2 {
+                order: expected_order,
+                principal_ideal_class: true,
+            })
+        );
+        assert_eq!(
+            target_profile.quadratic_arithmetic,
+            Some(QuadraticArithmeticProfile2x2 {
+                order: expected_order,
+                principal_ideal_class: false,
+            })
+        );
+    }
+
+    #[test]
+    fn test_arithmetic_profile_2x2_reports_brix_k3_order_data() {
+        let source = SqMatrix::new([[1, 3], [2, 1]]);
+        let target = SqMatrix::new([[1, 6], [1, 1]]);
+
+        let source_profile = arithmetic_profile_2x2(&source);
+        let target_profile = arithmetic_profile_2x2(&target);
+
+        let source_quadratic = source_profile
+            .quadratic_arithmetic
+            .expect("Brix-Ruiz k=3 should be irreducible");
+        let target_quadratic = target_profile
+            .quadratic_arithmetic
+            .expect("Brix-Ruiz k=3 should be irreducible");
+
+        assert_eq!(
+            source_quadratic.order,
+            QuadraticOrderProfile {
+                order_discriminant: 24,
+                field_discriminant: 24,
+                conductor: 1,
+            }
+        );
+        assert_eq!(source_quadratic, target_quadratic);
+    }
+
+    #[test]
+    fn test_arithmetic_profile_2x2_reports_brix_k4_nonmaximal_order_data() {
+        let source = SqMatrix::new([[1, 4], [3, 1]]);
+        let target = SqMatrix::new([[1, 12], [1, 1]]);
+
+        let source_profile = arithmetic_profile_2x2(&source);
+        let target_profile = arithmetic_profile_2x2(&target);
+
+        let source_quadratic = source_profile
+            .quadratic_arithmetic
+            .expect("Brix-Ruiz k=4 should be irreducible");
+        let target_quadratic = target_profile
+            .quadratic_arithmetic
+            .expect("Brix-Ruiz k=4 should be irreducible");
+
+        assert_eq!(
+            source_quadratic.order,
+            QuadraticOrderProfile {
+                order_discriminant: 48,
+                field_discriminant: 12,
+                conductor: 2,
+            }
+        );
+        assert_eq!(source_quadratic, target_quadratic);
+        assert!(!source_quadratic.order.maximal_order());
+    }
+
+    #[test]
+    fn test_arithmetic_profile_2x2_skips_quadratic_data_for_split_case() {
+        let split = SqMatrix::new([[1, 1], [0, 3]]);
+        let profile = arithmetic_profile_2x2(&split);
+        assert_eq!(profile.quadratic_arithmetic, None);
     }
 
     #[test]

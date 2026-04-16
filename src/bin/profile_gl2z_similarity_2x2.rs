@@ -117,6 +117,24 @@ fn print_matrix_profile(label: &str, profile: &sse_core::invariants::ArithmeticP
         profile.discriminant,
         profile.determinant_band.label()
     );
+    match profile.quadratic_arithmetic {
+        Some(quadratic) => println!(
+            "  quadratic order: field_disc={} conductor={} maximal={} principal_class={}",
+            quadratic.order.field_discriminant,
+            quadratic.order.conductor,
+            if quadratic.order.maximal_order() {
+                "yes"
+            } else {
+                "no"
+            },
+            if quadratic.principal_ideal_class {
+                "yes"
+            } else {
+                "no"
+            }
+        ),
+        None => println!("  quadratic order: n/a (split or rational characteristic polynomial)"),
+    }
 }
 
 fn print_similarity_analysis(analysis: &Gl2zSimilarityAnalysis2x2) {

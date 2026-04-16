@@ -26,6 +26,64 @@ pub struct ReducedForm {
     pub c: i64,
 }
 
+/// Exact profile of the quadratic order `Z[λ]` attached to an irreducible
+/// `2x2` characteristic polynomial.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct QuadraticOrderProfile {
+    /// The order discriminant `disc(Z[λ])`.
+    pub order_discriminant: i64,
+    /// The fundamental discriminant of the ambient quadratic field.
+    pub field_discriminant: i64,
+    /// The conductor `f`, equivalently the order index `[O_K : Z[λ]]`.
+    pub conductor: i64,
+}
+
+impl QuadraticOrderProfile {
+    pub fn maximal_order(self) -> bool {
+        self.conductor == 1
+    }
+}
+
+/// Return the exact quadratic-order profile determined by the given
+/// discriminant, or `None` when the characteristic polynomial is not
+/// irreducible over `Q`.
+pub fn quadratic_order_profile(discriminant: i64) -> Option<QuadraticOrderProfile> {
+    if discriminant == 0 {
+        return None;
+    }
+    if discriminant > 0 && is_perfect_square(discriminant as u64) {
+        return None;
+    }
+
+    let (field_discriminant, conductor) = fundamental_discriminant(discriminant);
+    Some(QuadraticOrderProfile {
+        order_discriminant: discriminant,
+        field_discriminant,
+        conductor,
+    })
+}
+
+/// Canonical reduced representative of the principal class for the quadratic
+/// order of discriminant `D`.
+pub fn principal_reduced_form(discriminant: i64) -> Option<ReducedForm> {
+    quadratic_order_profile(discriminant)?;
+
+    let principal_b = discriminant.rem_euclid(2);
+    let principal_c = (principal_b * principal_b - discriminant) / 4;
+    if discriminant < 0 {
+        Some(reduce_form_negative(1, principal_b, principal_c))
+    } else {
+        Some(reduce_form_positive(1, principal_b, principal_c))
+    }
+}
+
+/// Whether the given reduced form represents the principal class in the order
+/// of discriminant `D`.
+pub fn reduced_form_is_principal(discriminant: i64, form: &ReducedForm) -> Option<bool> {
+    let principal = principal_reduced_form(discriminant)?;
+    Some(*form == principal)
+}
+
 /// Compute the fundamental discriminant D_K from the raw discriminant Δ = t² - 4d.
 /// Factors out perfect squares: if Δ = f²·D_K where D_K is squarefree
 /// (times 1 or 4 depending on D_K mod 4), returns (D_K_fund, f) where
@@ -315,14 +373,7 @@ pub fn eigenvector_ideal_class_2x2(mat: &SqMatrix<2>) -> Option<ReducedForm> {
     // Discriminant of char poly x² - tx + det
     let delta = t * t - 4 * det;
 
-    if delta == 0 {
-        return None; // Repeated eigenvalue, invariant not useful
-    }
-
-    let abs_delta = delta.unsigned_abs();
-    if is_perfect_square(abs_delta) {
-        return None; // Rational eigenvalues, not a quadratic field
-    }
+    quadratic_order_profile(delta)?;
 
     // The eigenvector for eigenvalue λ is (λ - d, c) (from (A - λI)v = 0).
     // If c = 0, use the other row: (b, λ - a).
@@ -353,8 +404,6 @@ pub fn eigenvector_ideal_class_2x2(mat: &SqMatrix<2>) -> Option<ReducedForm> {
     // The ideal aZ + ((b + √D)/2)Z has norm a and corresponds to form (a, b, (b²-D)/(4a)).
     //
     // We work with the fundamental discriminant D_K and the full ring O_K.
-
-    let (_fund_disc, _f) = fundamental_discriminant(delta);
 
     // For the ideal class computation, we work with discriminant Δ directly
     // (the form discriminant), not the fundamental discriminant. The ideal
@@ -619,6 +668,27 @@ mod tests {
         // Δ = -20: |Δ| = 20 = 2²·5, d=5, sign=-1, d_signed=-5, -5 mod 4 = 3 → D_K = -20, f = 1
         // Wait: -5 mod 4 = -1 mod 4 = 3. So D_K = 4*(-5) = -20, f = 2/2 = 1
         assert_eq!(fundamental_discriminant(-20), (-20, 1));
+    }
+
+    #[test]
+    fn test_quadratic_order_profile_detects_nonmaximal_order() {
+        let profile = quadratic_order_profile(48).expect("48 should define a quadratic order");
+        assert_eq!(
+            profile,
+            QuadraticOrderProfile {
+                order_discriminant: 48,
+                field_discriminant: 12,
+                conductor: 2,
+            }
+        );
+        assert!(!profile.maximal_order());
+    }
+
+    #[test]
+    fn test_principal_reduced_form_for_real_quadratic_order() {
+        let principal = principal_reduced_form(204).expect("principal form should exist");
+        assert_eq!(principal, ReducedForm { a: 1, b: 14, c: 2 });
+        assert_eq!(reduced_form_is_principal(204, &principal), Some(true));
     }
 
     #[test]
