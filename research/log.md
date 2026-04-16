@@ -144,6 +144,12 @@
   the repo's current exact quadratic-order ideal-class comparison and did not
   justify a new hard rejection.
 
+- `working tree` Probed the observer layer-event seam for non-Brix layer-contrast coverage.
+  Kept as evidence. `lind_marcus` and `higher_block` endpoint solves both
+  populate telemetry layers, but the current observer surface still delivers
+  zero `SearchEvent::Layer` payloads for those runs, so a collector/export-only
+  tweak could not make either held-out family rankable this round.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.
