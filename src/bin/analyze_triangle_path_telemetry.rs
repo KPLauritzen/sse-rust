@@ -226,22 +226,34 @@ fn load_paths(cli: &Cli) -> Result<Vec<NamedPath>, String> {
     }
 
     let mut seen = BTreeSet::new();
-    paths.retain(|path| seen.insert(path.matrices.clone()));
+    paths.retain(|path| seen.insert((path.label.clone(), path.matrices.clone())));
     Ok(paths)
 }
 
 fn load_paths_from_guide_artifacts(path: &Path) -> Result<Vec<NamedPath>, String> {
     let mut paths = Vec::new();
+    let mut unsupported_labels = Vec::new();
     for artifact in load_guide_artifacts_from_path(path)? {
-        let GuideArtifactPayload::FullPath { path } = artifact.payload;
         let label = artifact
             .artifact_id
             .or(artifact.provenance.label)
             .unwrap_or_else(|| "guide_artifact_path".to_string());
-        paths.push(NamedPath {
-            label,
-            matrices: canonicalize_path(&path.matrices),
-        });
+        #[allow(unreachable_patterns)]
+        let matrices = match artifact.payload {
+            GuideArtifactPayload::FullPath { path } => canonicalize_path(&path.matrices),
+            _ => {
+                unsupported_labels.push(label);
+                continue;
+            }
+        };
+        paths.push(NamedPath { label, matrices });
+    }
+    if !unsupported_labels.is_empty() {
+        return Err(format!(
+            "unsupported guide artifact payloads in {}: {}",
+            path.display(),
+            unsupported_labels.join(", ")
+        ));
     }
     Ok(paths)
 }
