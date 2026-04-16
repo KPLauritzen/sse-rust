@@ -359,6 +359,18 @@
 
 ## 2026-04-16
 
+- `working tree` Added a bounded same-size balanced-neighbor surface and a
+  one-bridge `2x2` zig-zag probe for `sse-rust-2uy.6`.
+  Kept as evidence. `src/balanced.rs` can now enumerate distinct nontrivial
+  same-size balanced-elementary neighbors of a `2x2` matrix and search for a
+  bounded `2x2 <-balanced-> 2x2 <-balanced-> 2x2` meeting, while
+  `find_balanced` exposes that surface for toy and Brix controls. The toy pair
+  has exactly one nontrivial neighbor each way, but both Brix-Ruiz controls
+  have empty same-size balanced neighborhoods at `max_common_dim=2` for
+  `max_entry=8`, `10`, and `12`, so the first bounded zig-zag step still has
+  no local room to start. Details in
+  `research/notes/2026-04-16-balanced-neighbor-zigzag-first-slice.md`.
+
 - `working tree` Audited the measurement-only corpus baselines after the lane
   split.
   Retired the non-reproducing shared `beam_bfs_handoff` `cap10` probe,

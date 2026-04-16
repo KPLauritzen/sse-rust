@@ -1,4 +1,5 @@
 use crate::matrix::{DynMatrix, SqMatrix};
+use std::collections::{BTreeMap, HashMap};
 
 /// A balanced elementary equivalence witness for a pair of 2x2 matrices.
 ///
@@ -9,6 +10,21 @@ pub struct BalancedElementaryWitness2x2 {
     pub s: DynMatrix,
     pub r_a: DynMatrix,
     pub r_b: DynMatrix,
+}
+
+/// A nontrivial same-size balanced-elementary neighbor of a `2x2` matrix.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BalancedElementaryNeighbor2x2 {
+    pub matrix: SqMatrix<2>,
+    pub witness: BalancedElementaryWitness2x2,
+}
+
+/// A two-step same-size balanced-elementary zig-zag through a `2x2` bridge state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BalancedElementaryZigzag2x2 {
+    pub bridge: SqMatrix<2>,
+    pub left_witness: BalancedElementaryWitness2x2,
+    pub right_witness: BalancedElementaryWitness2x2,
 }
 
 /// Configuration for bounded balanced-elementary search on 2x2 matrices.
@@ -98,6 +114,52 @@ pub fn find_balanced_elementary_equivalence_2x2(
     BalancedSearchResult2x2::Exhausted
 }
 
+/// Enumerate distinct nontrivial same-size balanced-elementary neighbors of a `2x2` matrix.
+pub fn enumerate_balanced_elementary_neighbors_2x2(
+    source: &SqMatrix<2>,
+    config: &BalancedSearchConfig2x2,
+) -> Vec<BalancedElementaryNeighbor2x2> {
+    let mut unique_neighbors = BTreeMap::<SqMatrix<2>, BalancedElementaryNeighbor2x2>::new();
+    for common_dim in 1..=config.max_common_dim {
+        for neighbor in enumerate_balanced_elementary_neighbors_with_common_dim_2x2(
+            source,
+            common_dim,
+            config.max_entry,
+        ) {
+            unique_neighbors
+                .entry(neighbor.matrix.clone())
+                .or_insert(neighbor);
+        }
+    }
+    unique_neighbors.into_values().collect()
+}
+
+/// Search for a bounded `2x2 <-balanced-> 2x2 <-balanced-> 2x2` zig-zag meeting.
+pub fn find_balanced_elementary_zigzag_meeting_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &BalancedSearchConfig2x2,
+) -> Option<BalancedElementaryZigzag2x2> {
+    let mut right_neighbors = BTreeMap::<SqMatrix<2>, BalancedElementaryWitness2x2>::new();
+    for neighbor in enumerate_balanced_elementary_neighbors_2x2(b, config) {
+        right_neighbors
+            .entry(neighbor.matrix.clone())
+            .or_insert(neighbor.witness);
+    }
+
+    for neighbor in enumerate_balanced_elementary_neighbors_2x2(a, config) {
+        if let Some(right_witness) = right_neighbors.get(&neighbor.matrix) {
+            return Some(BalancedElementaryZigzag2x2 {
+                bridge: neighbor.matrix,
+                left_witness: neighbor.witness,
+                right_witness: right_witness.clone(),
+            });
+        }
+    }
+
+    None
+}
+
 /// Search for a balanced-elementary equivalence witness with a fixed common dimension.
 pub fn find_balanced_elementary_equivalence_with_common_dim_2x2(
     a: &SqMatrix<2>,
@@ -136,6 +198,56 @@ pub fn find_balanced_elementary_equivalence_with_common_dim_2x2(
     }
 
     None
+}
+
+fn enumerate_balanced_elementary_neighbors_with_common_dim_2x2(
+    source: &SqMatrix<2>,
+    common_dim: usize,
+    max_entry: u32,
+) -> Vec<BalancedElementaryNeighbor2x2> {
+    let source_dyn = DynMatrix::from_sq(source);
+    let mut neighbors = BTreeMap::<SqMatrix<2>, BalancedElementaryNeighbor2x2>::new();
+
+    for s_data in enumerate_matrix_data(2 * common_dim, max_entry) {
+        let s = DynMatrix::new(2, common_dim, s_data);
+        let r_a_candidates = enumerate_right_factorisations_2x2(&s, &source_dyn, max_entry);
+        if r_a_candidates.is_empty() {
+            continue;
+        }
+
+        let mut row_solution_cache = HashMap::<Vec<u32>, Vec<[u32; 2]>>::new();
+        for r_a in r_a_candidates {
+            let balanced_product = r_a.mul(&s);
+            let r_b_candidates = enumerate_balanced_right_factors_2x2(
+                &s,
+                &balanced_product,
+                max_entry,
+                &mut row_solution_cache,
+            );
+            for r_b in r_b_candidates {
+                let matrix = s
+                    .mul(&r_b)
+                    .to_sq::<2>()
+                    .expect("balanced same-size neighbors should stay 2x2");
+                if &matrix == source {
+                    continue;
+                }
+                let witness = BalancedElementaryWitness2x2 {
+                    s: s.clone(),
+                    r_a: r_a.clone(),
+                    r_b,
+                };
+                debug_assert!(
+                    verify_balanced_elementary_witness_2x2(source, &matrix, &witness).is_ok()
+                );
+                neighbors
+                    .entry(matrix.clone())
+                    .or_insert_with(|| BalancedElementaryNeighbor2x2 { matrix, witness });
+            }
+        }
+    }
+
+    neighbors.into_values().collect()
 }
 
 fn enumerate_right_factorisations_2x2(
@@ -209,6 +321,79 @@ fn recurse_column_solution(
         }
 
         recurse_column_solution(idx + 1, s, target, max_entry, current, solutions);
+    }
+}
+
+fn enumerate_balanced_right_factors_2x2(
+    s: &DynMatrix,
+    balanced_product: &DynMatrix,
+    max_entry: u32,
+    row_solution_cache: &mut HashMap<Vec<u32>, Vec<[u32; 2]>>,
+) -> Vec<DynMatrix> {
+    debug_assert_eq!(balanced_product.rows, s.cols);
+    debug_assert_eq!(balanced_product.cols, s.cols);
+
+    let mut row_solutions = Vec::with_capacity(s.cols);
+    for row in 0..balanced_product.rows {
+        let target = (0..balanced_product.cols)
+            .map(|col| balanced_product.get(row, col))
+            .collect::<Vec<_>>();
+        let solutions = row_solution_cache
+            .entry(target.clone())
+            .or_insert_with(|| enumerate_row_solutions_1x2_times_2xm(s, &target, max_entry))
+            .clone();
+        if solutions.is_empty() {
+            return Vec::new();
+        }
+        row_solutions.push(solutions);
+    }
+
+    let mut factors = Vec::new();
+    let mut current_rows = vec![[0u32; 2]; balanced_product.rows];
+    recurse_balanced_right_factor_rows(0, &row_solutions, &mut current_rows, &mut factors);
+    factors
+}
+
+fn enumerate_row_solutions_1x2_times_2xm(
+    s: &DynMatrix,
+    target: &[u32],
+    max_entry: u32,
+) -> Vec<[u32; 2]> {
+    debug_assert_eq!(s.rows, 2);
+    debug_assert_eq!(target.len(), s.cols);
+
+    let mut solutions = Vec::new();
+    for left in 0..=max_entry {
+        for right in 0..=max_entry {
+            let matches =
+                (0..s.cols).all(|col| left * s.get(0, col) + right * s.get(1, col) == target[col]);
+            if matches {
+                solutions.push([left, right]);
+            }
+        }
+    }
+    solutions
+}
+
+fn recurse_balanced_right_factor_rows(
+    idx: usize,
+    row_solutions: &[Vec<[u32; 2]>],
+    current_rows: &mut [[u32; 2]],
+    factors: &mut Vec<DynMatrix>,
+) {
+    if idx == current_rows.len() {
+        let mut data = Vec::with_capacity(current_rows.len() * 2);
+        for row in current_rows.iter() {
+            data.push(row[0]);
+            data.push(row[1]);
+        }
+        factors.push(DynMatrix::new(current_rows.len(), 2, data));
+        return;
+    }
+
+    for solution in &row_solutions[idx] {
+        current_rows[idx] = *solution;
+        recurse_balanced_right_factor_rows(idx + 1, row_solutions, current_rows, factors);
     }
 }
 
@@ -320,5 +505,49 @@ mod tests {
             },
         );
         assert_eq!(result, BalancedSearchResult2x2::Exhausted);
+    }
+
+    #[test]
+    fn test_enumerate_balanced_neighbors_toy_contains_swap_partner() {
+        let a = SqMatrix::new([[1, 0], [1, 0]]);
+        let b = SqMatrix::new([[0, 1], [0, 1]]);
+        let neighbors = enumerate_balanced_elementary_neighbors_2x2(
+            &a,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 1,
+                max_entry: 1,
+            },
+        );
+        assert_eq!(neighbors.len(), 1);
+        assert_eq!(neighbors[0].matrix, b);
+        assert!(verify_balanced_elementary_witness_2x2(&a, &b, &neighbors[0].witness).is_ok());
+    }
+
+    #[test]
+    fn test_enumerate_balanced_neighbors_excludes_source_matrix() {
+        let a = SqMatrix::new([[1, 0], [1, 0]]);
+        let neighbors = enumerate_balanced_elementary_neighbors_2x2(
+            &a,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 1,
+                max_entry: 1,
+            },
+        );
+        assert!(neighbors.iter().all(|neighbor| neighbor.matrix != a));
+    }
+
+    #[test]
+    fn test_brix_ruiz_k3_balanced_zigzag_meeting_exhausted() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let result = find_balanced_elementary_zigzag_meeting_2x2(
+            &a,
+            &b,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+        assert_eq!(result, None);
     }
 }
