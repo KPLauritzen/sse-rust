@@ -5369,6 +5369,33 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_exposes_diagonal_refactorization_4x4() {
+        let current = DynMatrix::new(4, 4, vec![2, 2, 0, 2, 2, 0, 1, 1, 2, 2, 2, 0, 0, 1, 1, 1]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 4,
+                max_entry: 4,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(expansions
+            .iter()
+            .any(|expansion| expansion.move_family == "diagonal_refactorization_4x4"));
+        assert!(stats
+            .move_family_telemetry
+            .get("diagonal_refactorization_4x4")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_deduplicates_across_frontier_nodes() {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         let a_dyn = DynMatrix::from_sq(&a);

@@ -1863,6 +1863,7 @@ where
 }
 
 const DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY: u32 = 3;
+const DIAGONAL_REFACTORIZATION_4X4_MAX_DIAG_ENTRY: u32 = 2;
 
 /// Generate a narrow 3x3 -> 3x3 diagonal-refactorization family:
 /// A = D*X -> B = X*D or A = X*D -> B = D*X, where D is positive diagonal.
@@ -1906,6 +1907,58 @@ where
                 if let Some(x) = divide_cols_by_diag_3x3(&cm, &diag, max_entry) {
                     if scale_rows_by_diag_3x3(&x, &diag) != cm {
                         visit(mat3_u32_to_dyn(&x), diag3_to_dyn(diag));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Generate a narrow 4x4 -> 4x4 diagonal-refactorization family:
+/// A = D*X -> B = X*D or A = X*D -> B = D*X, where D is positive diagonal.
+///
+/// The 4x4 follow-up stays intentionally tighter than the landed 3x3 slice:
+/// it only tries binary diagonals with entries in {1, 2}, skips the scalar
+/// case, and only emits nontrivial same-size moves whose factors stay within
+/// the standard entry bound.
+fn visit_diagonal_refactorizations_4x4<F>(c: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(c.rows, 4);
+    assert_eq!(c.cols, 4);
+
+    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_4X4_MAX_DIAG_ENTRY);
+    if diag_cap <= 1 {
+        return;
+    }
+
+    let mut cm = [[0u32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            cm[i][j] = c.get(i, j);
+        }
+    }
+
+    for d0 in 1..=diag_cap {
+        for d1 in 1..=diag_cap {
+            for d2 in 1..=diag_cap {
+                for d3 in 1..=diag_cap {
+                    let diag = [d0, d1, d2, d3];
+                    if diag == [1, 1, 1, 1] || (d0 == d1 && d1 == d2 && d2 == d3) {
+                        continue;
+                    }
+
+                    if let Some(x) = divide_rows_by_diag_4x4(&cm, &diag, max_entry) {
+                        if scale_cols_by_diag_4x4(&x, &diag) != cm {
+                            visit(diag4_to_dyn(diag), mat4_u32_to_dyn(&x));
+                        }
+                    }
+
+                    if let Some(x) = divide_cols_by_diag_4x4(&cm, &diag, max_entry) {
+                        if scale_rows_by_diag_4x4(&x, &diag) != cm {
+                            visit(mat4_u32_to_dyn(&x), diag4_to_dyn(diag));
+                        }
                     }
                 }
             }
@@ -1962,6 +2015,21 @@ fn mat3_u32_to_dyn(m: &[[u32; 3]; 3]) -> DynMatrix {
 
 fn diag3_to_dyn(diag: [u32; 3]) -> DynMatrix {
     DynMatrix::new(3, 3, vec![diag[0], 0, 0, 0, diag[1], 0, 0, 0, diag[2]])
+}
+
+fn mat4_u32_to_dyn(m: &[[u32; 4]; 4]) -> DynMatrix {
+    let data: Vec<u32> = m.iter().flat_map(|r| r.iter()).copied().collect();
+    DynMatrix::new(4, 4, data)
+}
+
+fn diag4_to_dyn(diag: [u32; 4]) -> DynMatrix {
+    DynMatrix::new(
+        4,
+        4,
+        vec![
+            diag[0], 0, 0, 0, 0, diag[1], 0, 0, 0, 0, diag[2], 0, 0, 0, 0, diag[3],
+        ],
+    )
 }
 
 fn divide_rows_by_diag_3x3(
@@ -2024,6 +2092,72 @@ fn scale_cols_by_diag_3x3(m: &[[u32; 3]; 3], diag: &[u32; 3]) -> [[u32; 3]; 3] {
     let mut out = [[0u32; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
+            out[i][j] = m[i][j] * diag[j];
+        }
+    }
+    out
+}
+
+fn divide_rows_by_diag_4x4(
+    m: &[[u32; 4]; 4],
+    diag: &[u32; 4],
+    max_entry: u32,
+) -> Option<[[u32; 4]; 4]> {
+    let mut out = [[0u32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            let value = m[i][j];
+            let scale = diag[i];
+            if value % scale != 0 {
+                return None;
+            }
+            let quotient = value / scale;
+            if quotient > max_entry {
+                return None;
+            }
+            out[i][j] = quotient;
+        }
+    }
+    Some(out)
+}
+
+fn divide_cols_by_diag_4x4(
+    m: &[[u32; 4]; 4],
+    diag: &[u32; 4],
+    max_entry: u32,
+) -> Option<[[u32; 4]; 4]> {
+    let mut out = [[0u32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            let value = m[i][j];
+            let scale = diag[j];
+            if value % scale != 0 {
+                return None;
+            }
+            let quotient = value / scale;
+            if quotient > max_entry {
+                return None;
+            }
+            out[i][j] = quotient;
+        }
+    }
+    Some(out)
+}
+
+fn scale_rows_by_diag_4x4(m: &[[u32; 4]; 4], diag: &[u32; 4]) -> [[u32; 4]; 4] {
+    let mut out = [[0u32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            out[i][j] = m[i][j] * diag[i];
+        }
+    }
+    out
+}
+
+fn scale_cols_by_diag_4x4(m: &[[u32; 4]; 4], diag: &[u32; 4]) -> [[u32; 4]; 4] {
+    let mut out = [[0u32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
             out[i][j] = m[i][j] * diag[j];
         }
     }
@@ -2825,7 +2959,7 @@ const THREE_BY_THREE_SAME_DIMENSION_FAMILIES: [FactorisationFamilyDescriptor; 6]
     ),
 ];
 
-const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
+const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 3] = [
     FactorisationFamilyDescriptor::new(
         "binary_sparse_rectangular_factorisation_4x3_to_3",
         enabled_binary_sparse_factorisation_4x4_to_3,
@@ -2835,6 +2969,11 @@ const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = 
         "binary_sparse_rectangular_factorisation_4x4_to_5",
         enabled_binary_sparse_factorisation_4x4_to_5,
         enumerate_binary_sparse_factorisation_4x4_to_5_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "diagonal_refactorization_4x4",
+        enabled_four_by_four_same_dimension_family,
+        enumerate_diagonal_refactorization_4x4_family,
     ),
 ];
 
@@ -2932,6 +3071,14 @@ fn enabled_binary_sparse_factorisation_4x4_to_5(
     _move_family_policy: MoveFamilyPolicy,
 ) -> bool {
     input_dim == 4 && max_intermediate_dim >= 5
+}
+
+fn enabled_four_by_four_same_dimension_family(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 4 && max_intermediate_dim >= 4
 }
 
 fn enabled_binary_sparse_factorisation_5x5_to_4(
@@ -3067,6 +3214,14 @@ fn enumerate_binary_sparse_factorisation_4x4_to_5_family(
     visit: &mut dyn FnMut(DynMatrix, DynMatrix),
 ) {
     visit_binary_sparse_factorisations_4x4_to_5(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_diagonal_refactorization_4x4_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_diagonal_refactorizations_4x4(a, max_entry, &mut |u, v| visit(u, v));
 }
 
 fn enumerate_binary_sparse_factorisation_5x5_to_4_family(
@@ -3669,6 +3824,26 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_plus_structured_policy_exposes_diagonal_refactorization_4x4_witness() {
+        let u = DynMatrix::new(4, 4, vec![2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1]);
+        let v = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1]);
+        let c = u.mul(&v);
+        let mut families = BTreeSet::new();
+
+        visit_factorisations_with_family_for_policy(
+            &c,
+            4,
+            4,
+            MoveFamilyPolicy::GraphPlusStructured,
+            |family, _, _| {
+                families.insert(family);
+            },
+        );
+
+        assert!(families.contains("diagonal_refactorization_4x4"));
+    }
+
+    #[test]
     fn test_selected_family_labels_for_mixed_3x3_follow_group_order() {
         assert_eq!(
             selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::Mixed),
@@ -3712,6 +3887,7 @@ mod tests {
             vec![
                 "binary_sparse_rectangular_factorisation_4x3_to_3",
                 "binary_sparse_rectangular_factorisation_4x4_to_5",
+                "diagonal_refactorization_4x4",
                 "elementary_conjugation",
             ]
         );
@@ -3822,6 +3998,27 @@ mod tests {
     }
 
     #[test]
+    fn test_diagonal_refactorizations_4x4_reach_expected_target() {
+        let current = DynMatrix::new(4, 4, vec![2, 2, 0, 2, 2, 0, 1, 1, 2, 2, 2, 0, 0, 1, 1, 1]);
+        let target = DynMatrix::new(4, 4, vec![2, 1, 0, 1, 4, 0, 2, 1, 2, 1, 2, 0, 0, 1, 2, 1]);
+        let mut found = false;
+
+        visit_diagonal_refactorizations_4x4(&current, 4, &mut |u, v| {
+            if u == DynMatrix::new(4, 4, vec![2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1])
+                && v == DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1])
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected bounded 4x4 same-size diagonal refactorization factorisation"
+        );
+    }
+
+    #[test]
     fn test_visit_all_factorisations_includes_binary_sparse_3x3_to_4_family() {
         let current = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
         let target = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0]);
@@ -3880,6 +4077,28 @@ mod tests {
         assert!(
             found,
             "expected main dispatcher to expose the bounded 3x3->4x4 column-split family"
+        );
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_diagonal_refactorization_4x4_family() {
+        let current = DynMatrix::new(4, 4, vec![2, 2, 0, 2, 2, 0, 1, 1, 2, 2, 2, 0, 0, 1, 1, 1]);
+        let target = DynMatrix::new(4, 4, vec![2, 1, 0, 1, 4, 0, 2, 1, 2, 1, 2, 0, 0, 1, 2, 1]);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&current, 4, 4, |family, u, v| {
+            if family == "diagonal_refactorization_4x4"
+                && u == DynMatrix::new(4, 4, vec![2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1])
+                && v == DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1])
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the bounded 4x4 same-size diagonal family"
         );
     }
 

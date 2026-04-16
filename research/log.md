@@ -156,6 +156,18 @@
   confirm it participates cleanly. Durable note:
   `research/notes/2026-04-16-bounded-column-split-3x3-to-4x4-family.md`.
 
+- `working tree` Added the bounded `diagonal_refactorization_4x4` family to the main search seam.
+  Kept. This lands the open same-size `4x4` follow-up as a tiny binary-diagonal
+  slice: positive diagonals use only entries in `{1, 2}`, scalar patterns are
+  skipped, and the family only emits nontrivial `D X <-> X D` witnesses whose
+  factors stay inside the normal entry cap. It now sits after the specific
+  `4x4 -> 3x3` / `4x4 -> 5x5` rectangular families and before generic
+  same-dimension conjugation, with focused factorisation and frontier tests.
+  A local sanity check found no direct Baker step-5 witness under tiny diagonal
+  bounds, so this is explicit vocabulary coverage rather than a claimed
+  step-5 recovery. Durable note:
+  `research/notes/2026-04-16-bounded-4x4-diagonal-refactorization-family.md`.
+
 ## 2026-04-16 Arithmetic Follow-up
 
 - `working tree` Classified extra matrix-characterization ideas by solver role.
