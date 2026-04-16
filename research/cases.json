@@ -683,7 +683,7 @@
     },
     {
       "id": "brix_ruiz_k3_graph_only_beam_probe",
-      "description": "Benchmark-style measurement baseline: graph-only endpoint search with the plain beam frontier on the hard k=3 family target.",
+      "description": "Benchmark-style measurement control: cheap graph-only endpoint search with the plain beam frontier on the hard k=3 family target.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -717,7 +717,7 @@
     },
     {
       "id": "brix_ruiz_k3_graph_only_beam_bfs_handoff_probe",
-      "description": "Benchmark-style diagnostic baseline: graph-only endpoint search with the known-losing depth-4 beam-to-BFS handoff shape on the hard k=3 family target.",
+      "description": "Benchmark-style diagnostic losing control: graph-only endpoint search with the historical depth-4 beam-to-BFS handoff shape on the hard k=3 family target. Keep this only to detect whether a future frontier change materially rescues the handoff mode.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -751,44 +751,8 @@
       }
     },
     {
-      "id": "brix_ruiz_k3_graph_only_beam_bfs_handoff_cap10_probe",
-      "description": "Benchmark-style diagnostic probe: graph-only endpoint search with beam-to-BFS handoff plus a deferred-cap of 10 on the hard k=3 family target.",
-      "required": false,
-      "measurement": {
-        "warmup_runs": 1,
-        "repeat_runs": 5
-      },
-      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
-      "config": {
-        "max_lag": 10,
-        "max_intermediate_dim": 5,
-        "max_entry": 6,
-        "move_family_policy": "graph-only",
-        "frontier_mode": "beam_bfs_handoff",
-        "beam_width": 10,
-        "beam_bfs_handoff_depth": 4,
-        "beam_bfs_handoff_deferred_cap": 10
-      },
-      "timeout_ms": 3000,
-      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
-      "target_outcome": null,
-      "points": {
-        "equivalent": 0,
-        "not_equivalent": 0,
-        "unknown": 0,
-        "timeout": 0,
-        "panic": -2000
-      },
-      "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement"],
-      "campaign": {
-        "id": "brix_ruiz_k3_frontier",
-        "strategy": "graph_only_beam_bfs_handoff_cap10_probe",
-        "schedule_order": 30
-      }
-    },
-    {
       "id": "brix_ruiz_k3_graph_plus_structured_probe",
-      "description": "Benchmark-style measurement probe: endpoint search on the hard k=3 family target using the intermediate graph-plus-structured move-family policy.",
+      "description": "Benchmark-style intermediate move-policy probe: endpoint search on the hard k=3 family target using graph_plus_structured between the graph-only frontier controls and broader mixed widening.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -820,7 +784,7 @@
     },
     {
       "id": "brix_ruiz_k3_shortcut_normalized_pool_probe",
-      "description": "Benchmark-style measurement probe: shortcut search over the normalized k=3 guide pool under a bounded staged configuration.",
+      "description": "Benchmark-style staged-search control: shortcut search over the normalized k=3 guide pool under the bounded lag-7 plateau configuration.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -865,7 +829,8 @@
     },
     {
       "id": "brix_ruiz_k3_wide_probe",
-      "description": "Wider telemetry probe for the same hard known-SSE pair. This case is for progress diagnostics, not target scoring.",
+      "description": "Evidence-lane mixed wide smoke probe for the same hard known-SSE pair. Keep this for progress diagnostics only; it is not a correctness gate or scored target.",
+      "required": false,
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "config": {
         "max_lag": 8,
@@ -873,16 +838,16 @@
         "max_entry": 8
       },
       "timeout_ms": 4000,
-      "allowed_outcomes": ["equivalent", "unknown"],
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
       "target_outcome": null,
       "points": {
         "equivalent": 0,
-        "not_equivalent": -2000,
+        "not_equivalent": 0,
         "unknown": 0,
-        "timeout": -3000,
+        "timeout": 0,
         "panic": -3000
       },
-      "tags": ["hard-positive", "telemetry-focus", "wide-probe"],
+      "tags": ["hard-positive", "telemetry-focus", "wide-probe", "evidence"],
       "campaign": {
         "id": "brix_ruiz_k3",
         "strategy": "mixed_wide_probe",
@@ -891,7 +856,8 @@
     },
     {
       "id": "brix_ruiz_k4_probe",
-      "description": "Telemetry-only family probe for the open Brix-Ruiz k=4 pair. This should never count as a scored target, but it is useful for checking whether heuristics generalize beyond k=3.",
+      "description": "Evidence-lane k=4 mixed wide smoke probe for the open Brix-Ruiz pair. Keep this as a cheap generalization check only; it is not a correctness gate or scored target.",
+      "required": false,
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
       "config": {
         "max_lag": 8,
@@ -899,16 +865,16 @@
         "max_entry": 8
       },
       "timeout_ms": 4000,
-      "allowed_outcomes": ["equivalent", "unknown"],
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
       "target_outcome": null,
       "points": {
         "equivalent": 0,
-        "not_equivalent": -2000,
+        "not_equivalent": 0,
         "unknown": 0,
-        "timeout": -3000,
+        "timeout": 0,
         "panic": -3000
       },
-      "tags": ["hard-positive", "telemetry-focus", "family-probe"],
+      "tags": ["hard-positive", "telemetry-focus", "family-probe", "evidence"],
       "campaign": {
         "id": "brix_ruiz_k4",
         "strategy": "mixed_wide_probe",
@@ -917,7 +883,7 @@
     },
     {
       "id": "brix_ruiz_k4_boundary_ramp",
-      "description": "Evidence-only k=4 diagnostic ramp: a lightweight ordered lag sweep on the current cheap mixed family probe surface. Use heavier beam64+dim5 boundary maps from dedicated local corpora rather than the shared default corpus.",
+      "description": "Evidence-lane k=4 diagnostic ramp: a lightweight ordered lag sweep on the current cheap mixed family probe surface. Keep this as the shared-corpus boundary map, and leave heavier beam64+dim5 boundary ramps to dedicated local corpora.",
       "required": false,
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
       "config": {

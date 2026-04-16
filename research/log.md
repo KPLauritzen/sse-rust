@@ -359,6 +359,14 @@
 
 ## 2026-04-16
 
+- `working tree` Audited the measurement-only corpus baselines after the lane
+  split.
+  Retired the non-reproducing shared `beam_bfs_handoff` `cap10` probe,
+  reworded the retained `k=3` frontier and staged-search controls, and moved
+  the mixed `brix_ruiz_k3_wide_probe` / `brix_ruiz_k4_probe` surfaces into the
+  explicit non-required evidence lane with neutral timeout scoring. Details in
+  `research/notes/2026-04-16-measurement-corpus-baseline-audit.md`.
+
 - `e0108b8` Added a bounded missing-reference literature slice for `sse-rust-9ls.6`.
   Kept as durable context. Added Baker 1983, Wagoner 1990, and a Choe-Shin
   1997 abstract-page reference; the resulting note says the best concrete
