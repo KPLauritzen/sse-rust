@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use sse_core::graph_moves::{
-    enumerate_graph_move_successors, enumerate_graph_proposals, same_future_past_signature,
+    enumerate_graph_move_successors, enumerate_graph_proposals,
+    partition_refined_same_future_past_gap_total, same_future_past_signature,
     same_future_past_signature_gap, GraphProposal, SameFuturePastSignatureGap,
 };
 use sse_core::matrix::DynMatrix;
@@ -51,6 +52,7 @@ struct ScoredBlindSuccessor {
     family: &'static str,
     matrix: DynMatrix,
     gap: SameFuturePastSignatureGap,
+    partition_refined_gap: u64,
 }
 
 fn main() -> Result<(), String> {
@@ -75,6 +77,10 @@ fn main() -> Result<(), String> {
                 family: successor.family,
                 matrix: successor.matrix.clone(),
                 gap: same_future_past_signature_gap(&signature, &target_signature),
+                partition_refined_gap: partition_refined_same_future_past_gap_total(
+                    &successor.matrix,
+                    &target,
+                ),
             }
         })
         .collect::<Vec<_>>();
@@ -276,6 +282,12 @@ fn print_blind_summary(
                 .take_while(|candidate| candidate.gap == best_gap)
                 .count()
         );
+        print_partition_refined_bucket_summary(
+            blind_scored
+                .iter()
+                .take_while(|candidate| candidate.gap == best_gap)
+                .map(|candidate| candidate.partition_refined_gap),
+        );
     }
 }
 
@@ -301,6 +313,13 @@ fn print_proposal_summary(proposals: &sse_core::graph_moves::GraphProposals, bli
             "  best-gap shortlist: {}",
             proposals.best_gap_shortlist_len()
         );
+        print_partition_refined_bucket_summary(
+            proposals
+                .nodes
+                .iter()
+                .take_while(|proposal| proposal.target_signature_gap == best_gap)
+                .map(|proposal| proposal.target_partition_refined_gap),
+        );
     }
 }
 
@@ -313,10 +332,11 @@ fn print_top_blind_successors(blind_scored: &[ScoredBlindSuccessor], top_k: usiz
 
     for (index, candidate) in blind_scored.iter().take(top_k).enumerate() {
         println!(
-            "  {}. family={} gap={} {:?}",
+            "  {}. family={} gap={} refined_gap={} {:?}",
             index + 1,
             candidate.family,
             format_gap(candidate.gap),
+            candidate.partition_refined_gap,
             candidate.matrix,
         );
     }
@@ -331,10 +351,11 @@ fn print_top_proposals(proposals: &[GraphProposal], top_k: usize) {
 
     for (index, proposal) in proposals.iter().take(top_k).enumerate() {
         println!(
-            "  {}. families={} gap={} {:?}",
+            "  {}. families={} gap={} refined_gap={} {:?}",
             index + 1,
             proposal.families.join(","),
             format_gap(proposal.target_signature_gap),
+            proposal.target_partition_refined_gap,
             proposal.matrix,
         );
     }
@@ -371,11 +392,12 @@ fn print_proposal_probe(
             DynSseResult::Unknown => "not realized within bound".to_string(),
         };
         println!(
-            "  {}. {} families={} gap={} proposal_dim={} blind_overlap={} frontier_nodes={} visited={} {:?}",
+            "  {}. {} families={} gap={} refined_gap={} proposal_dim={} blind_overlap={} frontier_nodes={} visited={} {:?}",
             index + 1,
             outcome,
             attempt.proposal.families.join(","),
             format_gap(attempt.proposal.target_signature_gap),
+            attempt.proposal.target_partition_refined_gap,
             attempt.proposal.matrix.rows,
             blind_set.contains(&attempt.proposal.matrix),
             attempt.telemetry.frontier_nodes_expanded,
@@ -419,6 +441,19 @@ fn format_gap(gap: SameFuturePastSignatureGap) -> String {
         "dim={} row={} col={} entry_sum={}",
         gap.dimension_gap, gap.row_class_gap, gap.col_class_gap, gap.entry_sum_gap
     )
+}
+
+fn print_partition_refined_bucket_summary(gaps: impl Iterator<Item = u64>) {
+    let gaps = gaps.collect::<Vec<_>>();
+    if gaps.is_empty() {
+        return;
+    }
+    let best_gap = *gaps.iter().min().expect("non-empty refined gap bucket");
+    let best_count = gaps.iter().filter(|&&gap| gap == best_gap).count();
+    println!(
+        "  within best coarse-gap bucket: refined_gap={} refined_shortlist={}",
+        best_gap, best_count
+    );
 }
 
 fn load_endpoint_fixture(fixture_ref: &str) -> Result<EndpointFixture, String> {

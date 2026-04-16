@@ -635,3 +635,17 @@
   required hits, total points, and telemetry-focus score unchanged. Details are
   in
   `research/notes/2026-04-16-k3-telemetry-accumulator-borrowed-family-keys.md`.
+
+- `sse-rust-ee8` Added one analysis-only partition-refined quotient score as a
+  sidecar to the existing same-future/same-past lane.
+  Kept as analysis-only. `src/path_scoring.rs` now exposes
+  `partition_refined_quotient_low`, and `src/bin/compare_graph_move_proposals.rs`
+  reports a partition-refined gap beside the existing coarse proposal gap
+  without changing `score_node()` or default beam ordering. On the bounded
+  observed-layer corpus, the new score matched the best structural signals on
+  the only rankable node and beat the endpoint-distance controls; on replay it
+  was clearly better than endpoint-distance scores but still weaker than the
+  strongest coarse structural counts; on the bounded proposal probes it
+  distinguished the same-dimension waypoint seam numerically but did not yet
+  shrink any real best-gap tie bucket. Details are in
+  `research/notes/2026-04-16-partition-refined-quotient-score-experiment.md`.

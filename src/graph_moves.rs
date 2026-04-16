@@ -54,6 +54,37 @@ pub struct SameFuturePastSignatureGap {
     pub entry_sum_gap: u64,
 }
 
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct QuotientCellSignature {
+    opposite_multiplicity: usize,
+    opposite_entry_sum: u32,
+    opposite_support: u8,
+    value: u32,
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct PartitionRefinedClassSignature {
+    multiplicity: usize,
+    entry_sum: u32,
+    support: u8,
+    quotient_profile: Vec<QuotientCellSignature>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct PartitionRefinedSignature {
+    dim: usize,
+    entry_sum: u64,
+    row_classes: Vec<PartitionRefinedClassSignature>,
+    col_classes: Vec<PartitionRefinedClassSignature>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct DuplicateVectorClass {
+    signature: SameFuturePastClassSignature,
+    representative: Vec<u32>,
+    example_index: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GraphProposal {
     /// Proposal families that produced this canonical matrix.
@@ -64,6 +95,7 @@ pub struct GraphProposal {
     /// comes directly from a graph move family.
     pub step: Option<EsseStep>,
     pub target_signature_gap: SameFuturePastSignatureGap,
+    pub target_partition_refined_gap: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -263,6 +295,34 @@ pub fn same_future_past_signature_gap(
     }
 }
 
+/// Scalar total for the coarse same-future/same-past quotient gap.
+pub fn same_future_past_signature_gap_total(left: &DynMatrix, right: &DynMatrix) -> u64 {
+    let left_sig =
+        same_future_past_signature(left).expect("square matrix should always have a signature");
+    let right_sig =
+        same_future_past_signature(right).expect("square matrix should always have a signature");
+    let gap = same_future_past_signature_gap(&left_sig, &right_sig);
+    10 * gap.dimension_gap as u64
+        + gap.row_class_gap as u64
+        + gap.col_class_gap as u64
+        + gap.entry_sum_gap
+}
+
+/// Scalar total for a one-step partition-refined quotient gap.
+///
+/// This keeps the existing same-future/same-past duplicate-class partition, then
+/// compares the quotient-style block values induced between row and column
+/// classes. It is intended for analysis and proposal shortlisting only.
+pub fn partition_refined_same_future_past_gap_total(left: &DynMatrix, right: &DynMatrix) -> u64 {
+    let left_sig = PartitionRefinedSignature::new(left);
+    let right_sig = PartitionRefinedSignature::new(right);
+
+    10 * left_sig.dim.abs_diff(right_sig.dim) as u64
+        + left_sig.entry_sum.abs_diff(right_sig.entry_sum)
+        + refined_class_signature_gap(&left_sig.row_classes, &right_sig.row_classes)
+        + refined_class_signature_gap(&left_sig.col_classes, &right_sig.col_classes)
+}
+
 /// Enumerate research-only proposal candidates toward `target` from bounded graph families.
 ///
 /// This does not affect default search expansion. It exists so proposal sources can
@@ -278,6 +338,7 @@ pub fn enumerate_graph_proposals(
 
     let target_signature = same_future_past_signature(target)
         .expect("square target should always produce a same-future/past signature");
+    let target_partition_refined_signature = PartitionRefinedSignature::new(target);
     let current_canon = current.canonical_perm();
     let mut candidates = 0usize;
     let mut family_candidates = BTreeMap::new();
@@ -297,6 +358,7 @@ pub fn enumerate_graph_proposals(
                 }),
                 &current_canon,
                 &target_signature,
+                &target_partition_refined_signature,
             );
         }
 
@@ -313,6 +375,7 @@ pub fn enumerate_graph_proposals(
                 }),
                 &current_canon,
                 &target_signature,
+                &target_partition_refined_signature,
             );
         }
     }
@@ -331,6 +394,7 @@ pub fn enumerate_graph_proposals(
                 }),
                 &current_canon,
                 &target_signature,
+                &target_partition_refined_signature,
             );
         }
 
@@ -347,6 +411,7 @@ pub fn enumerate_graph_proposals(
                 }),
                 &current_canon,
                 &target_signature,
+                &target_partition_refined_signature,
             );
         }
     }
@@ -365,6 +430,7 @@ pub fn enumerate_graph_proposals(
                     None,
                     &current_canon,
                     &target_signature,
+                    &target_partition_refined_signature,
                 );
             }
         }
@@ -583,6 +649,7 @@ fn record_graph_proposal(
     step: Option<EsseStep>,
     current_canon: &DynMatrix,
     target_signature: &SameFuturePastSignature,
+    target_partition_refined_signature: &PartitionRefinedSignature,
 ) {
     let canon = matrix.canonical_perm();
     if canon == *current_canon {
@@ -591,6 +658,22 @@ fn record_graph_proposal(
     let signature = same_future_past_signature(&canon)
         .expect("square graph proposal should always produce a same-future/past signature");
     let gap = same_future_past_signature_gap(&signature, target_signature);
+    let partition_refined_signature = PartitionRefinedSignature::new(&canon);
+    let partition_refined_gap = 10
+        * partition_refined_signature
+            .dim
+            .abs_diff(target_partition_refined_signature.dim) as u64
+        + partition_refined_signature
+            .entry_sum
+            .abs_diff(target_partition_refined_signature.entry_sum)
+        + refined_class_signature_gap(
+            &partition_refined_signature.row_classes,
+            &target_partition_refined_signature.row_classes,
+        )
+        + refined_class_signature_gap(
+            &partition_refined_signature.col_classes,
+            &target_partition_refined_signature.col_classes,
+        );
 
     match nodes.entry(canon.clone()) {
         std::collections::btree_map::Entry::Occupied(mut entry) => {
@@ -608,6 +691,7 @@ fn record_graph_proposal(
                 orig_matrix: matrix,
                 step,
                 target_signature_gap: gap,
+                target_partition_refined_gap: partition_refined_gap,
             });
         }
     }
@@ -703,22 +787,91 @@ fn child_parent_assignments(child_count: usize, parent_count: usize) -> Vec<Vec<
     assignments
 }
 
+impl PartitionRefinedSignature {
+    fn new(m: &DynMatrix) -> Self {
+        assert!(m.is_square());
+
+        let row_vectors = (0..m.rows)
+            .map(|row| (0..m.cols).map(|col| m.get(row, col)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let col_vectors = (0..m.cols)
+            .map(|col| (0..m.rows).map(|row| m.get(row, col)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let row_classes = duplicate_vector_classes_with_examples(&row_vectors);
+        let col_classes = duplicate_vector_classes_with_examples(&col_vectors);
+
+        Self {
+            dim: m.rows,
+            entry_sum: m.data.iter().map(|&value| value as u64).sum(),
+            row_classes: partition_refined_classes(&row_classes, &col_classes),
+            col_classes: partition_refined_classes(&col_classes, &row_classes),
+        }
+    }
+}
+
 fn duplicate_vector_classes(vectors: &[Vec<u32>]) -> Vec<SameFuturePastClassSignature> {
+    duplicate_vector_classes_with_examples(vectors)
+        .into_iter()
+        .map(|class| class.signature)
+        .collect()
+}
+
+fn duplicate_vector_classes_with_examples(vectors: &[Vec<u32>]) -> Vec<DuplicateVectorClass> {
     let mut multiplicities = BTreeMap::<Vec<u32>, usize>::new();
-    for values in vectors {
+    let mut example_indices = BTreeMap::<Vec<u32>, usize>::new();
+    for (index, values) in vectors.iter().enumerate() {
         *multiplicities.entry(values.clone()).or_default() += 1;
+        example_indices.entry(values.clone()).or_insert(index);
     }
 
     let mut classes = multiplicities
         .into_iter()
-        .map(|(values, multiplicity)| SameFuturePastClassSignature {
-            multiplicity,
-            entry_sum: values.iter().copied().sum(),
-            support: values.iter().filter(|&&value| value > 0).count() as u8,
+        .map(|(values, multiplicity)| DuplicateVectorClass {
+            signature: SameFuturePastClassSignature {
+                multiplicity,
+                entry_sum: values.iter().copied().sum(),
+                support: values.iter().filter(|&&value| value > 0).count() as u8,
+            },
+            example_index: *example_indices
+                .get(&values)
+                .expect("duplicate class should retain an example index"),
+            representative: values,
         })
         .collect::<Vec<_>>();
-    classes.sort_unstable();
+    classes.sort_by(|left, right| {
+        left.signature
+            .cmp(&right.signature)
+            .then_with(|| left.representative.cmp(&right.representative))
+    });
     classes
+}
+
+fn partition_refined_classes(
+    classes: &[DuplicateVectorClass],
+    opposite_classes: &[DuplicateVectorClass],
+) -> Vec<PartitionRefinedClassSignature> {
+    let mut refined = classes
+        .iter()
+        .map(|class| PartitionRefinedClassSignature {
+            multiplicity: class.signature.multiplicity,
+            entry_sum: class.signature.entry_sum,
+            support: class.signature.support,
+            quotient_profile: opposite_classes
+                .iter()
+                .map(|opposite| QuotientCellSignature {
+                    opposite_multiplicity: opposite.signature.multiplicity,
+                    opposite_entry_sum: opposite.signature.entry_sum,
+                    opposite_support: opposite.signature.support,
+                    value: class.representative[opposite.example_index],
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    for class in &mut refined {
+        class.quotient_profile.sort_unstable();
+    }
+    refined.sort_unstable();
+    refined
 }
 
 fn class_signature_gap(
@@ -741,6 +894,72 @@ fn class_signature_gap(
         gap += extra.multiplicity + extra.entry_sum as usize + extra.support as usize;
     }
 
+    gap
+}
+
+fn refined_class_signature_gap(
+    left: &[PartitionRefinedClassSignature],
+    right: &[PartitionRefinedClassSignature],
+) -> u64 {
+    let len = left.len().max(right.len());
+    let mut gap = 0u64;
+    for idx in 0..len {
+        let left_class = left.get(idx);
+        let right_class = right.get(idx);
+        gap += left_class
+            .map(|class| class.multiplicity)
+            .unwrap_or(0)
+            .abs_diff(right_class.map(|class| class.multiplicity).unwrap_or(0))
+            as u64;
+        gap += left_class
+            .map(|class| class.entry_sum)
+            .unwrap_or(0)
+            .abs_diff(right_class.map(|class| class.entry_sum).unwrap_or(0)) as u64;
+        gap += left_class
+            .map(|class| class.support)
+            .unwrap_or(0)
+            .abs_diff(right_class.map(|class| class.support).unwrap_or(0)) as u64;
+        gap += quotient_profile_gap(
+            left_class
+                .map(|class| class.quotient_profile.as_slice())
+                .unwrap_or(&[]),
+            right_class
+                .map(|class| class.quotient_profile.as_slice())
+                .unwrap_or(&[]),
+        );
+    }
+    gap
+}
+
+fn quotient_profile_gap(left: &[QuotientCellSignature], right: &[QuotientCellSignature]) -> u64 {
+    let len = left.len().max(right.len());
+    let mut gap = 0u64;
+    for idx in 0..len {
+        let left_cell = left.get(idx);
+        let right_cell = right.get(idx);
+        gap += left_cell
+            .map(|cell| cell.opposite_multiplicity)
+            .unwrap_or(0)
+            .abs_diff(
+                right_cell
+                    .map(|cell| cell.opposite_multiplicity)
+                    .unwrap_or(0),
+            ) as u64;
+        gap += left_cell
+            .map(|cell| cell.opposite_entry_sum)
+            .unwrap_or(0)
+            .abs_diff(right_cell.map(|cell| cell.opposite_entry_sum).unwrap_or(0))
+            as u64;
+        gap += left_cell
+            .map(|cell| cell.opposite_support)
+            .unwrap_or(0)
+            .abs_diff(right_cell.map(|cell| cell.opposite_support).unwrap_or(0))
+            as u64;
+        gap += left_cell
+            .map(|cell| cell.value)
+            .unwrap_or(0)
+            .abs_diff(right_cell.map(|cell| cell.value).unwrap_or(0)) as u64;
+    }
     gap
 }
 
@@ -1150,6 +1369,15 @@ mod tests {
             same_future_past_signature_gap(&a_signature, &b_signature),
             SameFuturePastSignatureGap::default()
         );
+    }
+
+    #[test]
+    fn test_partition_refined_gap_detects_coarse_duplicate_profile_collision() {
+        let a = DynMatrix::new(3, 3, vec![0, 0, 1, 0, 1, 1, 1, 2, 0]);
+        let b = DynMatrix::new(3, 3, vec![0, 0, 1, 0, 1, 2, 1, 1, 0]);
+
+        assert_eq!(same_future_past_signature_gap_total(&a, &b), 0);
+        assert!(partition_refined_same_future_past_gap_total(&a, &b) > 0);
     }
 
     #[test]

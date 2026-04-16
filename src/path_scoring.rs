@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::graph_moves::partition_refined_same_future_past_gap_total;
 use crate::matrix::DynMatrix;
 
 #[derive(Clone, Copy)]
@@ -116,6 +117,12 @@ pub fn candidate_score_specs() -> Vec<ScoreSpec> {
         ScoreSpec {
             name: "duplicates_high",
             score: |m, _, _| -((duplicate_row_pairs(m) + duplicate_col_pairs(m)) as f64),
+        },
+        ScoreSpec {
+            name: "partition_refined_quotient_low",
+            score: |m, endpoint, _| {
+                partition_refined_same_future_past_gap_total(m, endpoint) as f64
+            },
         },
         ScoreSpec {
             name: "endpoint_sig_low",
@@ -474,6 +481,13 @@ mod tests {
         assert!(candidate_score_specs()
             .into_iter()
             .any(|spec| spec.name == DEFAULT_BEAM_SCORE_NAME));
+    }
+
+    #[test]
+    fn partition_refined_quotient_score_is_registered() {
+        assert!(candidate_score_specs()
+            .into_iter()
+            .any(|spec| spec.name == "partition_refined_quotient_low"));
     }
 
     #[test]
