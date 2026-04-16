@@ -5434,6 +5434,44 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_exposes_single_column_amalgamation_5x5_to_4x4(
+    ) {
+        let current = DynMatrix::new(
+            5,
+            5,
+            vec![
+                1, 1, 1, 0, 1, //
+                1, 0, 1, 1, 0, //
+                1, 0, 1, 1, 0, //
+                0, 1, 0, 1, 2, //
+                1, 1, 1, 0, 1,
+            ],
+        );
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 5,
+                max_entry: 3,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(expansions
+            .iter()
+            .any(|expansion| expansion.next_orig.rows == 4));
+        assert!(stats
+            .move_family_telemetry
+            .get("single_column_amalgamation_5x5_to_4x4")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_graph_plus_structured_exposes_single_column_split() {
         let current = DynMatrix::new(3, 3, vec![2, 1, 0, 1, 0, 1, 1, 2, 1]);
         let current_canon = current.canonical_perm();

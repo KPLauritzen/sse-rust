@@ -497,6 +497,7 @@ fn fallback_factorisation_families(current: &DynMatrix, target: &DynMatrix) -> V
         ],
         (5, 4) => vec![
             "single_row_amalgamation_5x5_to_4x4".to_string(),
+            "single_column_amalgamation_5x5_to_4x4".to_string(),
             "binary_sparse_rectangular_factorisation_5x5_to_4".to_string(),
         ],
         _ => Vec::new(),
@@ -703,6 +704,7 @@ mod tests {
             fallback_factorisation_families(&current, &target),
             vec![
                 "single_row_amalgamation_5x5_to_4x4".to_string(),
+                "single_column_amalgamation_5x5_to_4x4".to_string(),
                 "binary_sparse_rectangular_factorisation_5x5_to_4".to_string(),
             ]
         );

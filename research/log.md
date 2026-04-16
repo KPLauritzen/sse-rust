@@ -732,3 +732,17 @@
   `GraphPlusStructured` factorisation/frontier telemetry participation, and the
   `(5,4)` exporter fallback list. Details are in
   `research/notes/2026-04-16-bounded-row-amalgamation-5x5-to-4x4-family.md`.
+
+- `sse-rust-enj` Added one bounded explicit `5x5 -> 4x4` column-amalgamation
+  family as the transpose-dual sibling of the landed row-amalgamation slice.
+  Kept. `src/factorisation.rs` now exposes
+  `single_column_amalgamation_5x5_to_4x4` between the explicit row family and
+  `binary_sparse_rectangular_factorisation_5x5_to_4`, reusing the transposed
+  fixed `5x4` duplication seam instead of adding any broad generic `5x4`
+  framework. The family accepts exactly one contiguous source-column pair,
+  requires the matching contiguous source-row pair to already be duplicated,
+  and recovers the `4x5` factor by deleting one copy of that duplicated block.
+  Focused tests cover the direct witness, dispatcher order/label exposure,
+  `GraphPlusStructured` factorisation/frontier telemetry participation, and
+  the `(5,4)` exporter fallback list. Details are in
+  `research/notes/2026-04-16-bounded-column-amalgamation-5x5-to-4x4-family.md`.
