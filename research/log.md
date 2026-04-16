@@ -136,6 +136,14 @@
   in-splits stays toy-positive with the same tiny balanced bridge hop, but
   bounded `brix_ruiz_k3` and `k4` still stay disconnected at the same caps.
 
+## 2026-04-16 Arithmetic Follow-up
+
+- `working tree` Checked the deferred `2x2` ideal-quotient / colon-ideal follow-up.
+  Kept as evidence. Eilers-Kiming Theorem 1 reduces the colon-ideal equation to
+  class congruence only modulo primes dividing `lambda`, so it is weaker than
+  the repo's current exact quadratic-order ideal-class comparison and did not
+  justify a new hard rejection.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.

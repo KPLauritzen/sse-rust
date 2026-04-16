@@ -83,3 +83,11 @@ The next plausible arithmetic layer is still one of:
 
 That work was deferred here because this round deliberately preferred one small
 defensible addition over a batch of partially justified arithmetic heuristics.
+
+Follow-up result:
+
+- [`2026-04-16-2x2-ideal-quotient-followup.md`](2026-04-16-2x2-ideal-quotient-followup.md)
+  records the negative result for that next step: the theorem-backed
+  ideal-quotient condition only yields class congruence modulo primes dividing
+  `lambda`, so it did not justify a new exact pairwise screen beyond the
+  current ideal-class comparison.
