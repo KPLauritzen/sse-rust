@@ -498,3 +498,16 @@
   `22969 ms`, so aggregate impact is effectively flat-to-slightly-positive.
   Details are in
   `research/notes/2026-04-16-k3-structured-3x3-adjugate-reuse.md`.
+
+- `sse-rust-2ve` Re-profiled after the structured `3x3` adjugate win and
+  tested two more bounded runtime ideas.
+  Reverted. Fresh rebuilt-binary profiles still pointed at the square `3x3`
+  `solve_nonneg_2x3` path and at move-family telemetry bookkeeping, so two
+  low-level candidates were measured: a square-family-only prepared `2x3`
+  solver path in `enumerate_sq3_from_row0`, and a hit fast path for
+  `move_family_telemetry_mut`. Both helped the targeted direct controls, but
+  neither cleared the aggregate keep gate: the localized prepared-solver path
+  regressed harness reruns to `23197 ms` and `23242 ms`, and the telemetry-map
+  fast path stayed slightly above the current kept baseline across three reruns
+  (`23076 ms`, `23004 ms`, `23082 ms` vs `22951 ms`). Details are in
+  `research/notes/2026-04-16-k3-runtime-round-reverted-square-prep-and-telemetry-map.md`.
