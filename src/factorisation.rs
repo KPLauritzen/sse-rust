@@ -1997,50 +1997,68 @@ fn det3x3(m: &[[i64; 3]; 3]) -> i64 {
 }
 
 fn cofactor_matrix_and_det_4x4(a: &[[i64; 4]; 4]) -> ([[i64; 4]; 4], i64) {
-    let minor = |r: usize, c: usize| -> [[i64; 3]; 3] {
-        let mut m = [[0i64; 3]; 3];
-        let mut mi = 0;
-        for (i, row) in a.iter().enumerate() {
-            if i == r {
-                continue;
-            }
-            let mut mj = 0;
-            for (j, &value) in row.iter().enumerate() {
-                if j == c {
-                    continue;
-                }
-                m[mi][mj] = value;
-                mj += 1;
-            }
-            mi += 1;
-        }
-        m
-    };
+    let a00 = a[0][0];
+    let a01 = a[0][1];
+    let a02 = a[0][2];
+    let a03 = a[0][3];
+    let a10 = a[1][0];
+    let a11 = a[1][1];
+    let a12 = a[1][2];
+    let a13 = a[1][3];
+    let a20 = a[2][0];
+    let a21 = a[2][1];
+    let a22 = a[2][2];
+    let a23 = a[2][3];
+    let a30 = a[3][0];
+    let a31 = a[3][1];
+    let a32 = a[3][2];
+    let a33 = a[3][3];
+
+    let m23_23 = a22 * a33 - a23 * a32;
+    let m23_13 = a21 * a33 - a23 * a31;
+    let m23_12 = a21 * a32 - a22 * a31;
+    let m23_03 = a20 * a33 - a23 * a30;
+    let m23_02 = a20 * a32 - a22 * a30;
+    let m23_01 = a20 * a31 - a21 * a30;
+
+    let m13_23 = a12 * a33 - a13 * a32;
+    let m13_13 = a11 * a33 - a13 * a31;
+    let m13_12 = a11 * a32 - a12 * a31;
+    let m13_03 = a10 * a33 - a13 * a30;
+    let m13_02 = a10 * a32 - a12 * a30;
+    let m13_01 = a10 * a31 - a11 * a30;
+
+    let m12_23 = a12 * a23 - a13 * a22;
+    let m12_13 = a11 * a23 - a13 * a21;
+    let m12_12 = a11 * a22 - a12 * a21;
+    let m12_03 = a10 * a23 - a13 * a20;
+    let m12_02 = a10 * a22 - a12 * a20;
+    let m12_01 = a10 * a21 - a11 * a20;
 
     let cofactors = [
         [
-            det3x3(&minor(0, 0)),
-            -det3x3(&minor(0, 1)),
-            det3x3(&minor(0, 2)),
-            -det3x3(&minor(0, 3)),
+            a11 * m23_23 - a12 * m23_13 + a13 * m23_12,
+            -a10 * m23_23 + a12 * m23_03 - a13 * m23_02,
+            a10 * m23_13 - a11 * m23_03 + a13 * m23_01,
+            -a10 * m23_12 + a11 * m23_02 - a12 * m23_01,
         ],
         [
-            -det3x3(&minor(1, 0)),
-            det3x3(&minor(1, 1)),
-            -det3x3(&minor(1, 2)),
-            det3x3(&minor(1, 3)),
+            -a01 * m23_23 + a02 * m23_13 - a03 * m23_12,
+            a00 * m23_23 - a02 * m23_03 + a03 * m23_02,
+            -a00 * m23_13 + a01 * m23_03 - a03 * m23_01,
+            a00 * m23_12 - a01 * m23_02 + a02 * m23_01,
         ],
         [
-            det3x3(&minor(2, 0)),
-            -det3x3(&minor(2, 1)),
-            det3x3(&minor(2, 2)),
-            -det3x3(&minor(2, 3)),
+            a01 * m13_23 - a02 * m13_13 + a03 * m13_12,
+            -a00 * m13_23 + a02 * m13_03 - a03 * m13_02,
+            a00 * m13_13 - a01 * m13_03 + a03 * m13_01,
+            -a00 * m13_12 + a01 * m13_02 - a02 * m13_01,
         ],
         [
-            -det3x3(&minor(3, 0)),
-            det3x3(&minor(3, 1)),
-            -det3x3(&minor(3, 2)),
-            det3x3(&minor(3, 3)),
+            -a01 * m12_23 + a02 * m12_13 - a03 * m12_12,
+            a00 * m12_23 - a02 * m12_03 + a03 * m12_02,
+            -a00 * m12_13 + a01 * m12_03 - a03 * m12_01,
+            a00 * m12_12 - a01 * m12_02 + a02 * m12_01,
         ],
     ];
     let det = a[0][0] * cofactors[0][0]
@@ -3679,6 +3697,73 @@ mod tests {
                 let check: i64 = (0..4).map(|c| a[row][c] * x[c] as i64).sum();
                 assert_eq!(check, b[row]);
             }
+        }
+    }
+
+    #[test]
+    fn test_cofactor_matrix_and_det_4x4_matches_reference() {
+        fn reference(a: &[[i64; 4]; 4]) -> ([[i64; 4]; 4], i64) {
+            let minor = |r: usize, c: usize| -> [[i64; 3]; 3] {
+                let mut m = [[0i64; 3]; 3];
+                let mut mi = 0;
+                for (i, row) in a.iter().enumerate() {
+                    if i == r {
+                        continue;
+                    }
+                    let mut mj = 0;
+                    for (j, &value) in row.iter().enumerate() {
+                        if j == c {
+                            continue;
+                        }
+                        m[mi][mj] = value;
+                        mj += 1;
+                    }
+                    mi += 1;
+                }
+                m
+            };
+
+            let cofactors = [
+                [
+                    det3x3(&minor(0, 0)),
+                    -det3x3(&minor(0, 1)),
+                    det3x3(&minor(0, 2)),
+                    -det3x3(&minor(0, 3)),
+                ],
+                [
+                    -det3x3(&minor(1, 0)),
+                    det3x3(&minor(1, 1)),
+                    -det3x3(&minor(1, 2)),
+                    det3x3(&minor(1, 3)),
+                ],
+                [
+                    det3x3(&minor(2, 0)),
+                    -det3x3(&minor(2, 1)),
+                    det3x3(&minor(2, 2)),
+                    -det3x3(&minor(2, 3)),
+                ],
+                [
+                    -det3x3(&minor(3, 0)),
+                    det3x3(&minor(3, 1)),
+                    -det3x3(&minor(3, 2)),
+                    det3x3(&minor(3, 3)),
+                ],
+            ];
+            let det = a[0][0] * cofactors[0][0]
+                + a[0][1] * cofactors[0][1]
+                + a[0][2] * cofactors[0][2]
+                + a[0][3] * cofactors[0][3];
+            (cofactors, det)
+        }
+
+        let cases = [
+            [[1, 0, 2, 3], [0, 1, 4, 5], [6, 7, 1, 0], [2, 3, 4, 1]],
+            [[1, 2, 3, 4], [2, 4, 6, 8], [0, 1, 1, 0], [3, 1, 0, 2]],
+            [[0, 1, 0, 1], [2, 0, 3, 0], [1, 4, 0, 2], [0, 1, 5, 1]],
+        ];
+
+        for case in cases {
+            assert_eq!(cofactor_matrix_and_det_4x4(&case), reference(&case));
         }
     }
 

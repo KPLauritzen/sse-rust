@@ -469,3 +469,15 @@
   endpoint-only literature manifest, and defer a wider sqlite witness-corpus
   surface until non-path proof kinds or stronger cross-source queries require
   it.
+
+- `sse-rust-oci` Re-profiled the current hard shortcut control and trimmed the
+  hot `4x4` cofactor path in structured sparse factorisations.
+  Kept. A bounded hard-control `pprof` sample on rebuilt `target/dist/search`
+  shifted the hotspot to `cofactor_matrix_and_det_4x4` inside the structured
+  `4x4 -> 5x5` sparse family, so `src/factorisation.rs` now computes those
+  cofactors via reused `2x2` minors instead of rebuilding every `3x3` minor.
+  On the current attempts-8 hard control, lag and guide outcomes stayed flat
+  while wall time dropped from `39.27s` to `6.32s`; the full harness fitness
+  stayed identical except for a small elapsed improvement (`23041 ms` ->
+  `22969 ms`). Details are in
+  `research/notes/2026-04-16-k3-hard-control-4x4-cofactor-unroll.md`.
