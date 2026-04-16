@@ -127,10 +127,10 @@ fn print_matrix_profile(label: &str, profile: &sse_core::invariants::ArithmeticP
             } else {
                 "no"
             },
-            if quadratic.principal_ideal_class {
-                "yes"
-            } else {
-                "no"
+            match quadratic.principal_ideal_class {
+                Some(true) => "yes",
+                Some(false) => "no",
+                None => "unknown",
             }
         ),
         None => println!("  quadratic order: n/a (split or rational characteristic polynomial)"),

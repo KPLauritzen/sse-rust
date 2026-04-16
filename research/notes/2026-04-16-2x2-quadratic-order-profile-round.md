@@ -18,7 +18,8 @@ The repo now exposes one bounded second-stage arithmetic layer for irreducible
   - conductor, equivalently the order index in the maximal order,
   - maximal-vs-nonmaximal status;
 - a principal-vs-nonprincipal summary for the Perron eigenvector ideal class,
-  computed against the canonical reduced principal form of the same order.
+  computed against the canonical reduced principal form of the same order when
+  the current ideal-class routine can classify the endpoint.
 
 Concrete touchpoints:
 

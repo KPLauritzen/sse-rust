@@ -36,7 +36,7 @@ pub struct ArithmeticProfile2x2 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct QuadraticArithmeticProfile2x2 {
     pub order: QuadraticOrderProfile,
-    pub principal_ideal_class: bool,
+    pub principal_ideal_class: Option<bool>,
 }
 
 /// Exact GL(2,Z)-similarity analysis used by [`gl2z_similarity_profile_2x2`].
@@ -95,11 +95,10 @@ fn quadratic_arithmetic_profile_2x2(
     discriminant: i64,
 ) -> Option<QuadraticArithmeticProfile2x2> {
     let order = crate::quadratic::quadratic_order_profile(discriminant)?;
-    let ideal_class = crate::quadratic::eigenvector_ideal_class_2x2(matrix)
-        .expect("irreducible 2x2 endpoint should yield a quadratic-order ideal class");
     let principal_ideal_class =
-        crate::quadratic::reduced_form_is_principal(discriminant, &ideal_class)
-            .expect("quadratic order should admit a canonical principal class");
+        crate::quadratic::eigenvector_ideal_class_2x2(matrix).and_then(|ideal_class| {
+            crate::quadratic::reduced_form_is_principal(discriminant, &ideal_class)
+        });
     Some(QuadraticArithmeticProfile2x2 {
         order,
         principal_ideal_class,
@@ -552,14 +551,14 @@ mod tests {
             source_profile.quadratic_arithmetic,
             Some(QuadraticArithmeticProfile2x2 {
                 order: expected_order,
-                principal_ideal_class: true,
+                principal_ideal_class: Some(true),
             })
         );
         assert_eq!(
             target_profile.quadratic_arithmetic,
             Some(QuadraticArithmeticProfile2x2 {
                 order: expected_order,
-                principal_ideal_class: false,
+                principal_ideal_class: Some(false),
             })
         );
     }
