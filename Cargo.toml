@@ -160,6 +160,11 @@ path = "src/bin/analyze_path_signal_corpus.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "analyze_triangle_path_telemetry"
+path = "src/bin/analyze_triangle_path_telemetry.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "assemble_k3_guide_pool"
 path = "src/bin/assemble_k3_guide_pool.rs"
 required-features = ["research-tools"]

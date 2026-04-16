@@ -6,6 +6,7 @@ pub mod graph_moves;
 pub mod guide_artifacts;
 pub mod invariants;
 pub mod matrix;
+pub mod path_quotient;
 pub mod path_scoring;
 pub mod quadratic;
 pub mod search;

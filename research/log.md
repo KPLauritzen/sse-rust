@@ -423,3 +423,15 @@
   versus heuristic pruning. Added matching wording in
   `docs/research-harness-benchmark-policy.md` so repeated timing is not read in
   isolation from the reach signals.
+
+- `sse-rust-t4p` Added bounded triangle-path quotient telemetry on existing
+  witness/guide corpora.
+  Kept as research-only telemetry. Added `src/path_quotient.rs` plus the
+  `analyze_triangle_path_telemetry` research binary to mine lag-1/lag-2 local
+  rewrite families from stored full paths, canonicalize short suffix windows,
+  and report triangle-collapsible redundancy separately from state-collision
+  style counts. On the bounded `lag <= 4` runs, the combined graph+guide corpus
+  shrank from `444` unique windows to `187` under the local quotient, with
+  `373/812` window occurrences collapsing and no rewrite-state truncation.
+  Details are in `research/notes/2026-04-16-triangle-path-telemetry.md` and
+  `research/runs/2026-04-16-triangle-path-telemetry-{graph,guides,combined}.json`.
