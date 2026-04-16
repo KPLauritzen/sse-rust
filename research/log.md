@@ -450,3 +450,12 @@
   and deferred caps `5`, `10`, and `20` all timed out at `5s` without final
   JSON. No cap variant earned a corpus change; details are in
   `research/notes/2026-04-16-beam-bfs-handoff-cap-sweep-graph-only-k3.md`.
+
+- `sse-rust-4hp` Tested sub-beam deferred caps on the same graph-only
+  `brix_ruiz_k3` depth-`4` handoff surface.
+  On rebuilt `target/dist/search`, plain beam still returned `unknown` in
+  `0.07s`, while the historical handoff and deferred caps `0`, `1`, `2`, and
+  `3` all timed out at `5s` without final JSON. `deferred_cap = 0` still timed
+  out, so the losing control is not rescued just by dropping retained overflow.
+  No sub-beam cap earned a corpus change; details are in
+  `research/notes/2026-04-16-beam-bfs-handoff-subbeam-cap-sweep-graph-only-k3.md`.
