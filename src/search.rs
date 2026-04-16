@@ -5315,6 +5315,33 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_exposes_single_row_split() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 4,
+                max_entry: 3,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(expansions
+            .iter()
+            .any(|expansion| expansion.next_orig.rows == 4));
+        assert!(stats
+            .move_family_telemetry
+            .get("single_row_split_3x3_to_4x4")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_deduplicates_across_frontier_nodes() {
         let a = SqMatrix::new([[2, 1], [1, 1]]);
         let a_dyn = DynMatrix::from_sq(&a);

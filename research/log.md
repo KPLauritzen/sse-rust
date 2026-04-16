@@ -136,6 +136,17 @@
   in-splits stays toy-positive with the same tiny balanced bridge hop, but
   bounded `brix_ruiz_k3` and `k4` still stay disconnected at the same caps.
 
+## 2026-04-16 Explicit Structured Families
+
+- `working tree` Added the bounded `single_row_split_3x3_to_4x4` family to the main search seam.
+  Kept. This lands one explicit row-splitting slice through the descriptor
+  seam without reopening broad generic `3x4` widening: one chosen `3x3` row may
+  split into two contiguous `4x4` clones, the family gets a stable telemetry
+  label and ordered policy slot ahead of the broader sparse `3x3 -> 4x4`
+  family, and focused tests plus frontier telemetry confirm it participates
+  cleanly. Durable note:
+  `research/notes/2026-04-16-bounded-row-split-3x3-to-4x4-family.md`.
+
 ## 2026-04-16 Arithmetic Follow-up
 
 - `working tree` Classified extra matrix-characterization ideas by solver role.

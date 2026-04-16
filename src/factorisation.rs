@@ -686,6 +686,87 @@ fn enumerate_factorisations_3x3_to_2_from_row0(
     results
 }
 
+fn build_contiguous_row_split_duplication_matrix(clone_counts: &[usize]) -> DynMatrix {
+    let rows = clone_counts.len();
+    let cols = clone_counts.iter().sum();
+    let mut data = vec![0u32; rows * cols];
+    let mut col_start = 0usize;
+
+    for (row, &count) in clone_counts.iter().enumerate() {
+        for col in col_start..(col_start + count) {
+            data[row * cols + col] = 1;
+        }
+        col_start += count;
+    }
+
+    DynMatrix::new(rows, cols, data)
+}
+
+/// Enumerate a bounded explicit 3x3 -> 4x4 row-splitting family.
+///
+/// One chosen source row is split into two contiguous clones, while the other
+/// rows stay fixed. The matching source column is duplicated by a fixed
+/// 3x4 duplication matrix, so the target vocabulary stays much smaller than
+/// the generic 3x3 -> 4x4 rectangular families.
+fn visit_single_row_split_factorisations_3x3_to_4<F>(a: &DynMatrix, max_entry: u32, visit: &mut F)
+where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 3);
+    assert_eq!(a.cols, 3);
+
+    let rows = [
+        [a.get(0, 0), a.get(0, 1), a.get(0, 2)],
+        [a.get(1, 0), a.get(1, 1), a.get(1, 2)],
+        [a.get(2, 0), a.get(2, 1), a.get(2, 2)],
+    ];
+
+    for split_row in 0..3 {
+        let mut clone_counts = [1usize; 3];
+        clone_counts[split_row] = 2;
+        let u = build_contiguous_row_split_duplication_matrix(&clone_counts);
+        let original = rows[split_row];
+
+        let lower0 = original[0].saturating_sub(max_entry);
+        let upper0 = original[0].min(max_entry);
+        let lower1 = original[1].saturating_sub(max_entry);
+        let upper1 = original[1].min(max_entry);
+        let lower2 = original[2].saturating_sub(max_entry);
+        let upper2 = original[2].min(max_entry);
+
+        for split0 in lower0..=upper0 {
+            for split1 in lower1..=upper1 {
+                for split2 in lower2..=upper2 {
+                    let split = [split0, split1, split2];
+                    let twin = [
+                        original[0] - split0,
+                        original[1] - split1,
+                        original[2] - split2,
+                    ];
+                    if split == [0, 0, 0] || twin == [0, 0, 0] {
+                        continue;
+                    }
+                    if split > twin {
+                        continue;
+                    }
+
+                    let mut v_data = Vec::with_capacity(12);
+                    for row in 0..split_row {
+                        v_data.extend_from_slice(&rows[row]);
+                    }
+                    v_data.extend_from_slice(&split);
+                    v_data.extend_from_slice(&twin);
+                    for row in (split_row + 1)..3 {
+                        v_data.extend_from_slice(&rows[row]);
+                    }
+
+                    visit(u.clone(), DynMatrix::new(4, 3, v_data));
+                }
+            }
+        }
+    }
+}
+
 fn binary_sparse_rows_len3() -> Vec<[u32; 3]> {
     vec![
         [1, 0, 0],
@@ -2663,11 +2744,16 @@ const TWO_BY_TWO_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
     ),
 ];
 
-const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
+const THREE_BY_THREE_RECTANGULAR_FAMILIES: [FactorisationFamilyDescriptor; 3] = [
     FactorisationFamilyDescriptor::new(
         "rectangular_factorisation_3x3_to_2",
         enabled_rectangular_factorisation_3x3_to_2,
         enumerate_rectangular_factorisation_3x3_to_2_family,
+    ),
+    FactorisationFamilyDescriptor::new(
+        "single_row_split_3x3_to_4x4",
+        enabled_single_row_split_3x3_to_4x4,
+        enumerate_single_row_split_3x3_to_4x4_family,
     ),
     FactorisationFamilyDescriptor::new(
         "binary_sparse_rectangular_factorisation_3x3_to_4",
@@ -2768,6 +2854,14 @@ fn enabled_binary_sparse_factorisation_3x3_to_4(
     input_dim == 3 && max_intermediate_dim >= 4
 }
 
+fn enabled_single_row_split_3x3_to_4x4(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3 && max_intermediate_dim >= 4
+}
+
 fn enabled_square_factorisation_3x3(
     input_dim: usize,
     max_intermediate_dim: usize,
@@ -2846,6 +2940,14 @@ fn enumerate_rectangular_factorisation_3x3_to_2_family(
     visit: &mut dyn FnMut(DynMatrix, DynMatrix),
 ) {
     visit_factorisations_3x3_to_2(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_single_row_split_3x3_to_4x4_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_single_row_split_factorisations_3x3_to_4(a, max_entry, &mut |u, v| visit(u, v));
 }
 
 fn enumerate_binary_sparse_factorisation_3x3_to_4_family(
@@ -3526,6 +3628,7 @@ mod tests {
             selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::Mixed),
             vec![
                 "rectangular_factorisation_3x3_to_2",
+                "single_row_split_3x3_to_4x4",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
                 "square_factorisation_3x3",
                 "diagonal_refactorization_3x3",
@@ -3543,6 +3646,7 @@ mod tests {
             selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::GraphPlusStructured),
             vec![
                 "rectangular_factorisation_3x3_to_2",
+                "single_row_split_3x3_to_4x4",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
                 "diagonal_refactorization_3x3",
                 "elementary_conjugation_3x3",
@@ -3562,6 +3666,14 @@ mod tests {
                 "binary_sparse_rectangular_factorisation_4x4_to_5",
                 "elementary_conjugation",
             ]
+        );
+    }
+
+    #[test]
+    fn test_contiguous_row_split_duplication_matrix_matches_literature_2x2_to_5x5_template() {
+        assert_eq!(
+            build_contiguous_row_split_duplication_matrix(&[3, 2]),
+            DynMatrix::new(2, 5, vec![1, 1, 1, 0, 0, 0, 0, 0, 1, 1])
         );
     }
 
@@ -3620,6 +3732,27 @@ mod tests {
     }
 
     #[test]
+    fn test_single_row_split_factorisations_reach_expected_3x3_to_4x4_target() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
+        let target = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
+        let mut found = false;
+
+        visit_single_row_split_factorisations_3x3_to_4(&current, 3, &mut |u, v| {
+            if u == DynMatrix::new(3, 4, vec![1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+                && v == DynMatrix::new(4, 3, vec![1, 0, 1, 1, 1, 0, 1, 0, 2, 0, 1, 1])
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected bounded 3x3->4x4 single-row split factorisation"
+        );
+    }
+
+    #[test]
     fn test_visit_all_factorisations_includes_binary_sparse_3x3_to_4_family() {
         let current = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
         let target = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0]);
@@ -3634,6 +3767,28 @@ mod tests {
         assert!(
             found,
             "expected main dispatcher to expose the binary sparse 3x3->4x4 family"
+        );
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_single_row_split_3x3_to_4x4_family() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
+        let target = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&current, 4, 3, |family, u, v| {
+            if family == "single_row_split_3x3_to_4x4"
+                && u == DynMatrix::new(3, 4, vec![1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+                && v == DynMatrix::new(4, 3, vec![1, 0, 1, 1, 1, 0, 1, 0, 2, 0, 1, 1])
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the bounded 3x3->4x4 row-split family"
         );
     }
 
