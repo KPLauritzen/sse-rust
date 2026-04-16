@@ -356,3 +356,13 @@
 
 - `loop37-k4-low-lag-reramp` Re-ramped the same release-binary k4 mixed-beam surface upward from low lag to recover the first completing points.
   Kept as boundary evidence. On `target/release/search` with `mixed + beam64 + dim5 + entry10`, lag `4/6/8` all returned `unknown` in `35.93s / 61.36s / 103.68s`, while lag `9` timed out at `120.02s` (matching the earlier lag10 timeout). The current keepable envelope on this worker is therefore completion through lag8 with a timeout cliff between lag8 and lag9; still no k4 witness. Details in `research/notes/2026-04-15-k4-mixed-beam-low-lag-ramp.md`.
+
+## 2026-04-16
+
+- `e0108b8` Added a bounded missing-reference literature slice for `sse-rust-9ls.6`.
+  Kept as durable context. Added Baker 1983, Wagoner 1990, and a Choe-Shin
+  1997 abstract-page reference; the resulting note says the best concrete
+  follow-ups are a narrow `GL(2,Z)`-similarity-backed positive `2x2` dossier
+  and research-only triangle-collapsible path telemetry, not a broader move-set
+  widening. Details in
+  `research/notes/2026-04-16-missing-references-and-solver-ideas.md`.
