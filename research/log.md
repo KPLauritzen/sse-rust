@@ -126,10 +126,15 @@
   move, but both Brix-Ruiz controls still stay disconnected at the same return
   seam.
 
-- `working tree` Added a bounded `3x3(out) -> 2x2 <-balanced-> 2x2 -> 3x3(in)` return seam.
+- `47462de` Added a bounded `3x3(out) -> 2x2 <-balanced-> 2x2 -> 3x3(in)` return seam.
   Kept as evidence. The mixed in-split return family is real on the toy control
   with the same bounded bridge hop, but bounded `brix_ruiz_k3` and `k4` still
   stay disconnected at the same caps.
+
+- `f2032dc` Added a bounded `3x3(in) -> 2x2 <-balanced-> 2x2 -> 3x3(out)` source seam.
+  Kept as evidence. Swapping the bounded bridge-source family from out-splits to
+  in-splits stays toy-positive with the same tiny balanced bridge hop, but
+  bounded `brix_ruiz_k3` and `k4` still stay disconnected at the same caps.
 
 ## 2026-04-15
 

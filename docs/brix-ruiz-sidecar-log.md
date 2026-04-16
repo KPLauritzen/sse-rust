@@ -150,6 +150,25 @@ The sidecar evidence is now consistent across every small structured move family
 
 That is enough reason to stop widening the split-sidecar graph blindly for now and move back to the main solver, using this structure as guidance for a search heuristic or pruning signal.
 
+## Balanced bridge-source follow-up
+
+Later balanced sidecar follow-up kept the same bounded balanced hop but moved it
+off the original endpoints and onto bounded `2x2` bridge states obtained from
+one-step `3x3` source states.
+
+Outcome so far:
+
+- the outsplit-source bridge-neighbor seam is real on the toy control but stays
+  empty on bounded `brix_ruiz_k3` and `k4`
+- returning from those bridge hops back to `3x3` through either out-splits or
+  in-splits remains toy-positive and Brix-empty at the same caps
+- swapping the source family from one-step `3x3` out-splits to one-step `3x3`
+  in-splits also stays toy-positive and bounded-empty on `brix_ruiz_k3` and
+  `k4`
+
+So the current negative picture is not just an artifact of one particular
+bounded bridge source or one particular bounded return family.
+
 ## Lind-Marcus/Baker lag-7 witness
 
 New reference:
