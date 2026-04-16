@@ -495,7 +495,10 @@ fn fallback_factorisation_families(current: &DynMatrix, target: &DynMatrix) -> V
             "single_column_split_4x4_to_5x5".to_string(),
             "binary_sparse_rectangular_factorisation_4x4_to_5".to_string(),
         ],
-        (5, 4) => vec!["binary_sparse_rectangular_factorisation_5x5_to_4".to_string()],
+        (5, 4) => vec![
+            "single_row_amalgamation_5x5_to_4x4".to_string(),
+            "binary_sparse_rectangular_factorisation_5x5_to_4".to_string(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -687,6 +690,20 @@ mod tests {
                 "single_row_split_4x4_to_5x5".to_string(),
                 "single_column_split_4x4_to_5x5".to_string(),
                 "binary_sparse_rectangular_factorisation_4x4_to_5".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_factorisation_families_keep_explicit_5x5_to_4x4_labels_ahead_of_sparse() {
+        let current = DynMatrix::new(5, 5, vec![1; 25]);
+        let target = DynMatrix::new(4, 4, vec![1; 16]);
+
+        assert_eq!(
+            fallback_factorisation_families(&current, &target),
+            vec![
+                "single_row_amalgamation_5x5_to_4x4".to_string(),
+                "binary_sparse_rectangular_factorisation_5x5_to_4".to_string(),
             ]
         );
     }

@@ -718,3 +718,17 @@
   bounded proposal-analysis role, but still does not justify any default
   ranking or shortlist promotion. Details are in
   `research/notes/2026-04-16-partition-refined-quotient-tiebreak-probe.md`.
+
+- `sse-rust-2nt` Added one bounded explicit `5x5 -> 4x4` row-amalgamation
+  family as the reverse sibling of the landed `4x4 -> 5x5` row split.
+  Kept. `src/factorisation.rs` now exposes
+  `single_row_amalgamation_5x5_to_4x4` ahead of
+  `binary_sparse_rectangular_factorisation_5x5_to_4`, reusing the fixed
+  contiguous `4x5` duplication matrix seam instead of adding any broad generic
+  `5x4` framework. The family accepts exactly one contiguous source-row pair,
+  requires the matching contiguous source-column pair to already be duplicated,
+  and recovers the `5x4` factor by deleting one copy of that block. Focused
+  tests cover the direct witness, dispatcher order/label exposure,
+  `GraphPlusStructured` factorisation/frontier telemetry participation, and the
+  `(5,4)` exporter fallback list. Details are in
+  `research/notes/2026-04-16-bounded-row-amalgamation-5x5-to-4x4-family.md`.

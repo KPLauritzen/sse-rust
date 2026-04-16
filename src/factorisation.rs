@@ -838,6 +838,59 @@ where
     }
 }
 
+/// Enumerate a bounded explicit 5x5 -> 4x4 row-amalgamation family.
+///
+/// One chosen contiguous source-row pair is amalgamated into a single target
+/// row, while the other rows stay fixed. The matching contiguous source-column
+/// pair must already be duplicated, so the factorisation uses the fixed
+/// 4x5 duplication matrix from the `4x4 -> 5x5` row-splitting sibling.
+fn visit_single_row_amalgamation_factorisations_5x5_to_4<F>(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut F,
+) where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 5);
+    assert_eq!(a.cols, 5);
+
+    for merge_row in 0..4 {
+        let mut clone_counts = [1usize; 4];
+        clone_counts[merge_row] = 2;
+        let v = build_contiguous_row_split_duplication_matrix(&clone_counts);
+        let mut u_data = Vec::with_capacity(20);
+        let mut valid = true;
+
+        for row in 0..5 {
+            if a.get(row, merge_row) != a.get(row, merge_row + 1) {
+                valid = false;
+                break;
+            }
+
+            let recovered = match merge_row {
+                0 => [a.get(row, 0), a.get(row, 2), a.get(row, 3), a.get(row, 4)],
+                1 => [a.get(row, 0), a.get(row, 1), a.get(row, 3), a.get(row, 4)],
+                2 => [a.get(row, 0), a.get(row, 1), a.get(row, 2), a.get(row, 4)],
+                3 => [a.get(row, 0), a.get(row, 1), a.get(row, 2), a.get(row, 3)],
+                _ => unreachable!("merge_row is always in 0..4"),
+            };
+            if recovered.into_iter().any(|entry| entry > max_entry) {
+                valid = false;
+                break;
+            }
+            if (row == merge_row || row == merge_row + 1) && recovered == [0, 0, 0, 0] {
+                valid = false;
+                break;
+            }
+            u_data.extend_from_slice(&recovered);
+        }
+
+        if valid {
+            visit(DynMatrix::new(5, 4, u_data), v);
+        }
+    }
+}
+
 /// Enumerate a bounded explicit 3x3 -> 4x4 column-splitting family.
 ///
 /// This is the transpose-dual of the bounded row-splitting slice: one chosen
@@ -3083,12 +3136,18 @@ const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 5] = 
     ),
 ];
 
-const FIVE_BY_FIVE_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 1] =
-    [FactorisationFamilyDescriptor::new(
+const FIVE_BY_FIVE_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 2] = [
+    FactorisationFamilyDescriptor::new(
+        "single_row_amalgamation_5x5_to_4x4",
+        enabled_single_row_amalgamation_5x5_to_4x4,
+        enumerate_single_row_amalgamation_5x5_to_4x4_family,
+    ),
+    FactorisationFamilyDescriptor::new(
         "binary_sparse_rectangular_factorisation_5x5_to_4",
         enabled_binary_sparse_factorisation_5x5_to_4,
         enumerate_binary_sparse_factorisation_5x5_to_4_family,
-    )];
+    ),
+];
 
 const GENERIC_SAME_DIMENSION_CONJUGATION_FAMILIES: [FactorisationFamilyDescriptor; 1] =
     [FactorisationFamilyDescriptor::new(
@@ -3201,6 +3260,14 @@ fn enabled_four_by_four_same_dimension_family(
     _move_family_policy: MoveFamilyPolicy,
 ) -> bool {
     input_dim == 4 && max_intermediate_dim >= 4
+}
+
+fn enabled_single_row_amalgamation_5x5_to_4x4(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 5 && max_intermediate_dim >= 5
 }
 
 fn enabled_binary_sparse_factorisation_5x5_to_4(
@@ -3360,6 +3427,14 @@ fn enumerate_diagonal_refactorization_4x4_family(
     visit: &mut dyn FnMut(DynMatrix, DynMatrix),
 ) {
     visit_diagonal_refactorizations_4x4(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_single_row_amalgamation_5x5_to_4x4_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_single_row_amalgamation_factorisations_5x5_to_4(a, max_entry, &mut |u, v| visit(u, v));
 }
 
 fn enumerate_binary_sparse_factorisation_5x5_to_4_family(
@@ -4038,6 +4113,34 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_plus_structured_policy_exposes_single_row_amalgamation_5x5_to_4x4_witness() {
+        let current = DynMatrix::new(
+            5,
+            5,
+            vec![
+                1, 1, 1, 0, 1, //
+                1, 0, 0, 1, 1, //
+                1, 1, 1, 0, 1, //
+                0, 1, 1, 1, 0, //
+                1, 0, 0, 2, 1,
+            ],
+        );
+        let mut families = BTreeSet::new();
+
+        visit_factorisations_with_family_for_policy(
+            &current,
+            5,
+            3,
+            MoveFamilyPolicy::GraphPlusStructured,
+            |family, _, _| {
+                families.insert(family);
+            },
+        );
+
+        assert!(families.contains("single_row_amalgamation_5x5_to_4x4"));
+    }
+
+    #[test]
     fn test_selected_family_labels_for_mixed_3x3_follow_group_order() {
         assert_eq!(
             selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::Mixed),
@@ -4084,6 +4187,18 @@ mod tests {
                 "single_column_split_4x4_to_5x5",
                 "binary_sparse_rectangular_factorisation_4x4_to_5",
                 "diagonal_refactorization_4x4",
+                "elementary_conjugation",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_5x5_keep_specific_before_generic() {
+        assert_eq!(
+            selected_factorisation_family_labels(5, 5, MoveFamilyPolicy::Mixed),
+            vec![
+                "single_row_amalgamation_5x5_to_4x4",
+                "binary_sparse_rectangular_factorisation_5x5_to_4",
                 "elementary_conjugation",
             ]
         );
@@ -4293,6 +4408,46 @@ mod tests {
     }
 
     #[test]
+    fn test_single_row_amalgamation_factorisations_reach_expected_5x5_to_4x4_target() {
+        let current = DynMatrix::new(
+            5,
+            5,
+            vec![
+                1, 1, 1, 0, 1, //
+                1, 0, 0, 1, 1, //
+                1, 1, 1, 0, 1, //
+                0, 1, 1, 1, 0, //
+                1, 0, 0, 2, 1,
+            ],
+        );
+        let target = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 1, 1, 2, 0, 1, 1, 0, 1, 0, 2, 1]);
+        let mut found = false;
+
+        visit_single_row_amalgamation_factorisations_5x5_to_4(&current, 3, &mut |u, v| {
+            if u == DynMatrix::new(
+                5,
+                4,
+                vec![1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 2, 1],
+            ) && v
+                == DynMatrix::new(
+                    4,
+                    5,
+                    vec![1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+                )
+                && u.mul(&v) == current
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected bounded 5x5->4x4 single-row amalgamation factorisation"
+        );
+    }
+
+    #[test]
     fn test_visit_all_factorisations_includes_binary_sparse_3x3_to_4_family() {
         let current = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
         let target = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0]);
@@ -4453,6 +4608,47 @@ mod tests {
         assert!(
             found,
             "expected main dispatcher to expose the bounded 4x4->5x5 column-split family"
+        );
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_single_row_amalgamation_5x5_to_4x4_family() {
+        let current = DynMatrix::new(
+            5,
+            5,
+            vec![
+                1, 1, 1, 0, 1, //
+                1, 0, 0, 1, 1, //
+                1, 1, 1, 0, 1, //
+                0, 1, 1, 1, 0, //
+                1, 0, 0, 2, 1,
+            ],
+        );
+        let target = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 1, 1, 2, 0, 1, 1, 0, 1, 0, 2, 1]);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&current, 5, 3, |family, u, v| {
+            if family == "single_row_amalgamation_5x5_to_4x4"
+                && u == DynMatrix::new(
+                    5,
+                    4,
+                    vec![1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 2, 1],
+                )
+                && v == DynMatrix::new(
+                    4,
+                    5,
+                    vec![1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+                )
+                && u.mul(&v) == current
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the bounded 5x5->4x4 row-amalgamation family"
         );
     }
 
