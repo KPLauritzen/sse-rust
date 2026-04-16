@@ -9,7 +9,9 @@ use sse_core::graph_moves::{
     same_future_past_signature_gap, GraphProposal, SameFuturePastSignatureGap,
 };
 use sse_core::matrix::DynMatrix;
-use sse_core::search::{probe_graph_proposal_shortlist, GraphProposalProbeConfig};
+use sse_core::search::{
+    probe_graph_proposal_shortlist, GraphProposalProbeConfig, GraphProposalShortlistMode,
+};
 use sse_core::types::{DynSseResult, FrontierMode, MoveFamilyPolicy, SearchConfig};
 
 #[derive(Deserialize)]
@@ -45,6 +47,7 @@ struct Cli {
     top_k: usize,
     probe_lag: Option<usize>,
     probe_shortlist_k: usize,
+    probe_refined_prefix: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -127,6 +130,8 @@ fn main() -> Result<(), String> {
             shortlist_size: cli.probe_shortlist_k.max(1),
             realization_max_lag: probe_lag,
             max_zigzag_bridge_entry: cli.zigzag_bridge_entry,
+            shortlist_mode: GraphProposalShortlistMode::BestGap,
+            refined_coarse_prefix: cli.probe_shortlist_k.max(1),
         };
         let search_config = SearchConfig {
             max_lag: probe_lag,
@@ -142,12 +147,45 @@ fn main() -> Result<(), String> {
             probe_graph_proposal_shortlist(&current, &target, &search_config, &probe_config)
                 .map_err(|err| format!("proposal probe failed: {err}"))?;
         print_proposal_probe(
+            "Best-gap proposal probe",
+            "best coarse-gap bucket",
             &probe,
             probe_lag,
             probe_config.shortlist_size,
             search_config.max_entry,
             &blind_set,
         );
+
+        if let Some(refined_prefix) = cli.probe_refined_prefix {
+            println!();
+            let refined_probe_config = GraphProposalProbeConfig {
+                shortlist_size: cli.probe_shortlist_k.max(1),
+                realization_max_lag: probe_lag,
+                max_zigzag_bridge_entry: cli.zigzag_bridge_entry,
+                shortlist_mode: GraphProposalShortlistMode::CoarsePrefixRefined,
+                refined_coarse_prefix: refined_prefix,
+            };
+            let refined_probe = probe_graph_proposal_shortlist(
+                &current,
+                &target,
+                &search_config,
+                &refined_probe_config,
+            )
+            .map_err(|err| format!("refined proposal probe failed: {err}"))?;
+            let shortlist_order = format!(
+                "refined gap within top {} coarse-ranked proposals",
+                refined_prefix
+            );
+            print_proposal_probe(
+                "Refined alternate proposal probe",
+                &shortlist_order,
+                &refined_probe,
+                probe_lag,
+                refined_probe_config.shortlist_size,
+                search_config.max_entry,
+                &blind_set,
+            );
+        }
     }
 
     Ok(())
@@ -163,6 +201,7 @@ fn parse_args() -> Result<Cli, String> {
     let mut top_k = 6usize;
     let mut probe_lag = None;
     let mut probe_shortlist_k = 4usize;
+    let mut probe_refined_prefix = None::<usize>;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -220,12 +259,24 @@ fn parse_args() -> Result<Cli, String> {
                     .parse()
                     .map_err(|_| "invalid --probe-shortlist-k".to_string())?;
             }
+            "--probe-refined-prefix" => {
+                probe_refined_prefix = Some(
+                    args.next()
+                        .ok_or("--probe-refined-prefix requires a value")?
+                        .parse()
+                        .map_err(|_| "invalid --probe-refined-prefix".to_string())?,
+                );
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
             }
             _ => return Err(format!("unknown argument: {arg}")),
         }
+    }
+
+    if probe_refined_prefix.is_some() && probe_lag.is_none() {
+        return Err("--probe-refined-prefix requires --probe-lag".to_string());
     }
 
     Ok(Cli {
@@ -238,6 +289,7 @@ fn parse_args() -> Result<Cli, String> {
         top_k: top_k.max(1),
         probe_lag,
         probe_shortlist_k: probe_shortlist_k.max(1),
+        probe_refined_prefix: probe_refined_prefix.map(|value| value.max(1)),
     })
 }
 
@@ -254,7 +306,8 @@ fn print_usage() {
            --no-zigzag                 disable zig-zag proposal generation\n\
            --top-k N                   number of top candidates to print per surface (default: 6)\n\
            --probe-lag N               graph-only lag bound for realizing best-gap proposals\n\
-           --probe-shortlist-k N       cap the probed best-gap shortlist (default: 4)"
+           --probe-shortlist-k N       cap the probed proposal shortlist (default: 4)\n\
+           --probe-refined-prefix N    additionally probe refined-gap order within the top-N coarse-ranked proposals"
     );
 }
 
@@ -362,19 +415,22 @@ fn print_top_proposals(proposals: &[GraphProposal], top_k: usize) {
 }
 
 fn print_proposal_probe(
+    heading: &str,
+    shortlist_order: &str,
     probe: &sse_core::search::GraphProposalProbeResult,
     probe_lag: usize,
     shortlist_cap: usize,
     realization_max_entry: u32,
     blind_set: &BTreeSet<DynMatrix>,
 ) {
-    println!("Best-gap proposal probe");
+    println!("{heading}");
     println!("  raw proposal candidates: {}", probe.raw_candidates);
     println!("  unique canonical proposals: {}", probe.unique_candidates);
     if let Some(best_gap) = probe.best_gap {
         println!("  best target signature gap: {}", format_gap(best_gap));
     }
     println!("  best-gap shortlist: {}", probe.best_gap_candidates);
+    println!("  shortlist order: {}", shortlist_order);
     println!("  shortlist cap: {}", shortlist_cap);
     println!("  probed proposals: {}", probe.attempts.len());
     println!("  realization surface: graph-only bfs");

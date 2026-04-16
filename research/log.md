@@ -649,3 +649,18 @@
   distinguished the same-dimension waypoint seam numerically but did not yet
   shrink any real best-gap tie bucket. Details are in
   `research/notes/2026-04-16-partition-refined-quotient-score-experiment.md`.
+
+- `sse-rust-cym` Added one bounded refined-order proposal probe on top of the
+  existing coarse shortlist seam.
+  Kept as analysis-only. `src/graph_moves.rs` now exposes a refined-gap
+  reorder of a bounded coarse proposal prefix, `src/search.rs` threads that as
+  an opt-in probe mode, and `src/bin/compare_graph_move_proposals.rs` can run
+  it via `--probe-refined-prefix N`. On `brix_ruiz_k3` source -> target, the
+  refined alternate probe simply reordered already-blind `3x3` successors and
+  did not improve coarse target quality. On `guide:1 -> guide:15`, it surfaced
+  a realizable `3x3` zig-zag proposal with slightly lower realization effort
+  than the coarse-best candidate, but that refined-first proposal still had a
+  worse coarse target gap. The refined quotient signal therefore earns a small
+  bounded proposal-analysis role, but still does not justify any default
+  ranking or shortlist promotion. Details are in
+  `research/notes/2026-04-16-partition-refined-quotient-tiebreak-probe.md`.

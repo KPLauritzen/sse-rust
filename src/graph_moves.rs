@@ -133,6 +133,27 @@ impl GraphProposals {
             .cloned()
             .collect()
     }
+
+    pub fn refined_shortlist_from_coarse_prefix(
+        &self,
+        coarse_prefix: usize,
+        limit: usize,
+    ) -> Vec<GraphProposal> {
+        let mut shortlist = self
+            .nodes
+            .iter()
+            .take(coarse_prefix)
+            .cloned()
+            .collect::<Vec<_>>();
+        shortlist.sort_by(|left, right| {
+            left.target_partition_refined_gap
+                .cmp(&right.target_partition_refined_gap)
+                .then_with(|| left.target_signature_gap.cmp(&right.target_signature_gap))
+                .then_with(|| left.matrix.cmp(&right.matrix))
+        });
+        shortlist.truncate(limit);
+        shortlist
+    }
 }
 
 /// Two successive out-splits starting from a 2x2 matrix.
@@ -1555,6 +1576,27 @@ mod tests {
         assert_eq!(proposals.best_gap_shortlist(4).len(), 1);
         assert_eq!(
             proposals.best_gap_shortlist(4)[0].matrix,
+            DynMatrix::new(3, 3, vec![0, 0, 1, 1, 1, 1, 3, 3, 1])
+        );
+    }
+
+    #[test]
+    fn test_graph_proposals_refined_shortlist_reorders_coarse_prefix() {
+        let current = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 1, 2, 2, 1]);
+        let target = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 4, 1, 1, 1]);
+
+        let proposals = enumerate_graph_proposals(&current, &target, 4, Some(8));
+        let shortlist = proposals.refined_shortlist_from_coarse_prefix(4, 4);
+
+        assert_eq!(shortlist.len(), 4);
+        assert_eq!(shortlist[0].target_partition_refined_gap, 38);
+        assert_eq!(
+            shortlist[0].matrix,
+            DynMatrix::new(3, 3, vec![0, 0, 1, 1, 1, 2, 2, 2, 1])
+        );
+        assert_eq!(shortlist[1].target_partition_refined_gap, 42);
+        assert_eq!(
+            shortlist[1].matrix,
             DynMatrix::new(3, 3, vec![0, 0, 1, 1, 1, 1, 3, 3, 1])
         );
     }

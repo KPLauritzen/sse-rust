@@ -87,6 +87,8 @@ pub struct GraphProposalProbeConfig {
     pub shortlist_size: usize,
     pub realization_max_lag: usize,
     pub max_zigzag_bridge_entry: Option<u32>,
+    pub shortlist_mode: GraphProposalShortlistMode,
+    pub refined_coarse_prefix: usize,
 }
 
 impl Default for GraphProposalProbeConfig {
@@ -95,8 +97,16 @@ impl Default for GraphProposalProbeConfig {
             shortlist_size: 4,
             realization_max_lag: 3,
             max_zigzag_bridge_entry: Some(8),
+            shortlist_mode: GraphProposalShortlistMode::BestGap,
+            refined_coarse_prefix: 4,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GraphProposalShortlistMode {
+    BestGap,
+    CoarsePrefixRefined,
 }
 
 #[derive(Clone, Debug)]
@@ -187,6 +197,13 @@ pub fn probe_graph_proposal_shortlist(
     if probe_config.realization_max_lag == 0 {
         return Err("graph proposal probe requires realization_max_lag >= 1".to_string());
     }
+    if probe_config.shortlist_mode == GraphProposalShortlistMode::CoarsePrefixRefined
+        && probe_config.refined_coarse_prefix == 0
+    {
+        return Err(
+            "graph proposal probe requires refined_coarse_prefix >= 1 in refined mode".to_string(),
+        );
+    }
 
     let proposals = enumerate_graph_proposals(
         current,
@@ -196,7 +213,16 @@ pub fn probe_graph_proposal_shortlist(
     );
     let best_gap = proposals.best_gap();
     let best_gap_candidates = proposals.best_gap_shortlist_len();
-    let shortlist = proposals.best_gap_shortlist(probe_config.shortlist_size);
+    let shortlist = match probe_config.shortlist_mode {
+        GraphProposalShortlistMode::BestGap => {
+            proposals.best_gap_shortlist(probe_config.shortlist_size)
+        }
+        GraphProposalShortlistMode::CoarsePrefixRefined => proposals
+            .refined_shortlist_from_coarse_prefix(
+                probe_config.refined_coarse_prefix,
+                probe_config.shortlist_size,
+            ),
+    };
     let realization_config = SearchConfig {
         max_lag: probe_config.realization_max_lag,
         max_intermediate_dim: search_config.max_intermediate_dim,
@@ -5910,6 +5936,8 @@ mod tests {
             shortlist_size: 4,
             realization_max_lag: 3,
             max_zigzag_bridge_entry: Some(8),
+            shortlist_mode: GraphProposalShortlistMode::BestGap,
+            refined_coarse_prefix: 4,
         };
 
         let result = probe_graph_proposal_shortlist(&current, &target, &config, &probe)
@@ -5941,6 +5969,38 @@ mod tests {
         }
         assert!(attempt.telemetry.frontier_nodes_expanded >= 1);
         assert_eq!(attempt.telemetry.factorisations_enumerated, 0);
+    }
+
+    #[test]
+    fn test_probe_graph_proposal_shortlist_supports_refined_coarse_prefix_order() {
+        let current = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 1, 2, 2, 1]);
+        let target = DynMatrix::new(3, 3, vec![0, 0, 2, 1, 1, 4, 1, 1, 1]);
+        let config = SearchConfig {
+            max_intermediate_dim: 4,
+            ..default_config()
+        };
+        let probe = GraphProposalProbeConfig {
+            shortlist_size: 4,
+            realization_max_lag: 3,
+            max_zigzag_bridge_entry: Some(8),
+            shortlist_mode: GraphProposalShortlistMode::CoarsePrefixRefined,
+            refined_coarse_prefix: 4,
+        };
+
+        let result = probe_graph_proposal_shortlist(&current, &target, &config, &probe)
+            .expect("refined shortlist probe should be valid");
+
+        assert_eq!(result.best_gap_candidates, 1);
+        assert_eq!(result.attempts.len(), 4);
+        assert_eq!(result.attempts[0].proposal.target_partition_refined_gap, 38);
+        assert_eq!(
+            result.attempts[0].proposal.matrix,
+            DynMatrix::new(3, 3, vec![0, 0, 1, 1, 1, 2, 2, 2, 1])
+        );
+        assert!(
+            result.attempts[0].proposal.target_signature_gap
+                > result.best_gap.expect("best gap should be present")
+        );
     }
 
     #[test]
