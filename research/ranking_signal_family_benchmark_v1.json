@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "ranking_signal_family_holdout_v1",
+  "purpose": "stable family-aware split contract for ranking-signal evaluation before model fitting",
+  "contract_note": "research/notes/2026-04-16-family-aware-ranking-signal-eval-contract.md",
+  "pair_unit": "canonical_endpoint_pair",
+  "split_unit": "evaluation_family_id",
+  "primary_benchmark_unit": "bounded_endpoint_case_per_pair",
+  "families": [
+    {
+      "evaluation_family_id": "brix_ruiz",
+      "benchmark_role": "development_only",
+      "pairs": [
+        {
+          "pair_id": "brix_ruiz_k3_lind_marcus_baker_reference",
+          "benchmark_case_id": null,
+          "evidence_status": "validated_witness"
+        },
+        {
+          "pair_id": "brix_ruiz_k3_search_witness_pool",
+          "benchmark_case_id": null,
+          "evidence_status": "validated_witness"
+        }
+      ],
+      "notes": "Current witness-rich family. Use for signal development and ablations, but exclude from headline held-out generalization claims."
+    },
+    {
+      "evaluation_family_id": "riedel_baker",
+      "benchmark_role": "heldout_benchmark",
+      "pairs": [
+        {
+          "pair_id": "riedel_baker_k4",
+          "benchmark_case_id": "riedel_baker_k4",
+          "evidence_status": "endpoint_case_only"
+        },
+        {
+          "pair_id": "riedel_baker_k6",
+          "benchmark_case_id": "riedel_baker_k6",
+          "evidence_status": "endpoint_case_only"
+        },
+        {
+          "pair_id": "riedel_baker_k8",
+          "benchmark_case_id": "riedel_baker_k8",
+          "evidence_status": "endpoint_case_only"
+        },
+        {
+          "pair_id": "riedel_baker_k10",
+          "benchmark_case_id": "riedel_baker_k10",
+          "evidence_status": "endpoint_case_only"
+        },
+        {
+          "pair_id": "riedel_baker_k12",
+          "benchmark_case_id": "riedel_baker_k12",
+          "evidence_status": "endpoint_case_only"
+        }
+      ]
+    },
+    {
+      "evaluation_family_id": "lind_marcus",
+      "benchmark_role": "heldout_benchmark",
+      "pairs": [
+        {
+          "pair_id": "lind_marcus_a_to_c",
+          "benchmark_case_id": "lind_marcus_a_to_c",
+          "evidence_status": "endpoint_case_only"
+        }
+      ]
+    },
+    {
+      "evaluation_family_id": "higher_block",
+      "benchmark_role": "heldout_benchmark",
+      "pairs": [
+        {
+          "pair_id": "full_2_shift_higher_block_1x1_to_4x4",
+          "benchmark_case_id": "full_2_shift_higher_block_1x1_to_4x4",
+          "evidence_status": "endpoint_case_only"
+        }
+      ]
+    },
+    {
+      "evaluation_family_id": "fixture_permutation",
+      "benchmark_role": "sanity_only",
+      "pairs": [
+        {
+          "pair_id": "generic_guided_permutation_3x3",
+          "benchmark_case_id": null,
+          "evidence_status": "validated_witness"
+        }
+      ],
+      "notes": "Tiny non-k3 fixture family for schema/sanity checks. Do not let it rescue held-out coverage."
+    }
+  ],
+  "heldout_benchmark_families": [
+    "riedel_baker",
+    "lind_marcus",
+    "higher_block"
+  ],
+  "sanity_only_families": [
+    "fixture_permutation"
+  ],
+  "minimum_meaningful_result": {
+    "min_heldout_families_present": 3,
+    "min_heldout_families_rankable": 2,
+    "min_rankable_heldout_pairs": 4,
+    "min_ranked_heldout_observations": 20,
+    "coverage_failure_label": "exploratory_only"
+  },
+  "primary_metrics": [
+    "heldout_family_macro_mean_percentile",
+    "heldout_family_macro_top1_rate"
+  ],
+  "mandatory_coverage_metrics": [
+    "heldout_families_present",
+    "heldout_families_rankable",
+    "rankable_heldout_pairs",
+    "ranked_heldout_observations",
+    "unranked_solved_heldout_pairs"
+  ],
+  "leakage_rules": [
+    "Canonicalize endpoints and witness states with canonical_perm before grouping or deduping.",
+    "Keep every artifact, sqlite row, path segment, and endpoint case for one pair_id on one split side.",
+    "Do not use provenance source_kind, artifact_id, or path-db row identity as a split axis.",
+    "Treat path-segment expansion as development-only for the primary benchmark.",
+    "If future pairs share a canonical interior witness state across provisional splits, collapse them into one leakage group and keep them on one side."
+  ]
+}

@@ -519,6 +519,17 @@
   surface until non-path proof kinds or stronger cross-source queries require
   it.
 
+- `sse-rust-byw` Defined the family-aware evaluation contract for
+  ranking-signal experiments.
+  Added
+  `research/notes/2026-04-16-family-aware-ranking-signal-eval-contract.md`
+  plus `research/ranking_signal_family_benchmark_v1.json`. The contract fixes
+  `evaluation_family_id` and canonical `pair_id` as the split atoms, treats
+  path-segment expansion as development-only rather than a headline benchmark,
+  pins down leakage and dedup rules around canonical endpoints and witness
+  states, and sets the first meaningful held-out gate at the three non-Brix
+  literature families with at least two rankable families.
+
 - `sse-rust-oci` Re-profiled the current hard shortcut control and trimmed the
   hot `4x4` cofactor path in structured sparse factorisations.
   Kept. A bounded hard-control `pprof` sample on rebuilt `target/dist/search`
