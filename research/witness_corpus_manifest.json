@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "purpose": "first durable manifest for repo evidence that can seed a broader solved SSE witness corpus for ranking-signal analysis",
+  "corpus_unit": "solved_endpoint_pair",
+  "loader_caveat": "This manifest lives outside research/guide_artifacts because directory loading there expects every JSON file to deserialize as guide artifacts.",
+  "phase_decision": {
+    "materialization": "normalized_guide_artifacts_plus_pair_manifest",
+    "sqlite_role": "raw_backfill_and_provenance_source",
+    "reason": [
+      "GuideArtifact already stores endpoints, full_path witness payloads, validation, compatibility, quality, and provenance.",
+      "analyze_path_signal_corpus already consumes guide artifacts, the legacy sqlite path DB, and research cases together.",
+      "A new sqlite witness corpus would mostly duplicate current path payloads before non-path witness kinds need a shared storage surface."
+    ]
+  },
+  "validated_witness_sources": [
+    {
+      "id": "k3_normalized_guide_pool",
+      "role": "primary_witness_source",
+      "kind": "guide_artifact_envelope",
+      "path": "research/guide_artifacts/k3_normalized_guide_pool.json",
+      "artifact_count": 12,
+      "endpoint_pair_count": 2,
+      "source_kind_counts": {
+        "benchmark_fixture": 1,
+        "literature_reference": 1,
+        "sqlite_graph": 3,
+        "sqlite_hardcoded": 1,
+        "sqlite_shortcut": 6
+      }
+    },
+    {
+      "id": "k3_quotient_retained_guide_pool",
+      "role": "derived_normalized_subset",
+      "kind": "guide_artifact_envelope",
+      "path": "research/guide_artifacts/k3_quotient_retained_guide_pool.json",
+      "artifact_count": 5,
+      "endpoint_pair_count": 2,
+      "source_kind_counts": {
+        "benchmark_fixture": 1,
+        "literature_reference": 1,
+        "sqlite_graph": 1,
+        "sqlite_shortcut": 2
+      }
+    },
+    {
+      "id": "generic_guided_permutation_3x3",
+      "role": "fixture_sanity_pair",
+      "kind": "guide_artifact_envelope",
+      "path": "research/guide_artifacts/generic_guided_permutation_3x3.json",
+      "artifact_count": 1,
+      "endpoint_pair_count": 1
+    },
+    {
+      "id": "generic_shortcut_permutation_3x3_pool",
+      "role": "fixture_sanity_pair",
+      "kind": "guide_artifact_envelope",
+      "path": "research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json",
+      "artifact_count": 2,
+      "endpoint_pair_count": 1
+    },
+    {
+      "id": "k3_legacy_path_db",
+      "role": "raw_backfill_source",
+      "kind": "legacy_sqlite_path_db",
+      "path": "research/k3-graph-paths.sqlite",
+      "table_counts": {
+        "graph_path_results": 2,
+        "shortcut_path_results": 12
+      }
+    }
+  ],
+  "first_ingestion_slice": {
+    "validated_pairs": [
+      {
+        "pair_id": "brix_ruiz_k3_lind_marcus_baker_reference",
+        "family_tags": [
+          "brix_ruiz",
+          "lind_marcus",
+          "baker",
+          "literature_reference"
+        ],
+        "evidence_status": "validated_witness",
+        "witness_kind": "full_path",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [1, 3, 2, 1]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [1, 6, 1, 1]
+        },
+        "evidence_refs": [
+          {
+            "source_id": "k3_normalized_guide_pool",
+            "artifact_ids": ["k3-lind-marcus-baker-lag7"]
+          },
+          {
+            "source_id": "k3_quotient_retained_guide_pool",
+            "artifact_ids": ["k3-lind-marcus-baker-lag7"]
+          }
+        ]
+      },
+      {
+        "pair_id": "brix_ruiz_k3_search_witness_pool",
+        "family_tags": [
+          "brix_ruiz",
+          "graph_search",
+          "shortcut_search"
+        ],
+        "evidence_status": "validated_witness",
+        "witness_kind": "full_path",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [1, 2, 3, 1]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [1, 1, 6, 1]
+        },
+        "evidence_refs": [
+          {
+            "source_id": "k3_normalized_guide_pool",
+            "artifact_ids": [
+              "k3-sqlite-shortcut-7",
+              "k3-sqlite-shortcut-9",
+              "k3-sqlite-shortcut-2",
+              "k3-sqlite-shortcut-1",
+              "k3-sqlite-shortcut-11",
+              "k3-sqlite-shortcut-12",
+              "k3-sqlite-shortcut-4",
+              "k3-sqlite-shortcut-6",
+              "k3-sqlite-shortcut-8",
+              "k3-sqlite-graph-2",
+              "k3-seeded-endpoint-16-path"
+            ]
+          },
+          {
+            "source_id": "k3_quotient_retained_guide_pool",
+            "artifact_ids": [
+              "k3-sqlite-shortcut-7",
+              "k3-sqlite-shortcut-9",
+              "k3-sqlite-graph-2",
+              "k3-seeded-endpoint-16-path"
+            ]
+          },
+          {
+            "source_id": "k3_legacy_path_db",
+            "result_refs": {
+              "graph_path_results": [1, 2],
+              "shortcut_path_results": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            }
+          }
+        ]
+      },
+      {
+        "pair_id": "generic_guided_permutation_3x3",
+        "family_tags": [
+          "fixture",
+          "non_k3",
+          "permutation"
+        ],
+        "evidence_status": "validated_witness",
+        "witness_kind": "full_path",
+        "source": {
+          "rows": 3,
+          "cols": 3,
+          "data": [1, 0, 1, 2, 1, 0, 0, 1, 2]
+        },
+        "target": {
+          "rows": 3,
+          "cols": 3,
+          "data": [2, 0, 1, 1, 1, 0, 0, 2, 1]
+        },
+        "evidence_refs": [
+          {
+            "source_id": "generic_guided_permutation_3x3",
+            "artifact_ids": ["generic_guided_permutation_3x3_two_hop"]
+          },
+          {
+            "source_id": "generic_shortcut_permutation_3x3_pool",
+            "artifact_ids": [
+              "generic_guided_permutation_3x3_direct",
+              "generic_guided_permutation_3x3_two_hop"
+            ]
+          }
+        ]
+      }
+    ],
+    "endpoint_case_only_pairs": [
+      {
+        "case_id": "riedel_baker_k4",
+        "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      },
+      {
+        "case_id": "riedel_baker_k6",
+        "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      },
+      {
+        "case_id": "riedel_baker_k8",
+        "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      },
+      {
+        "case_id": "riedel_baker_k10",
+        "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      },
+      {
+        "case_id": "riedel_baker_k12",
+        "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      },
+      {
+        "case_id": "lind_marcus_a_to_c",
+        "family_tags": [
+          "lind_marcus",
+          "literature_positive",
+          "lag_2",
+          "non_esse"
+        ],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      },
+      {
+        "case_id": "full_2_shift_higher_block_1x1_to_4x4",
+        "family_tags": [
+          "higher_block",
+          "literature_positive",
+          "mixed_dimension"
+        ],
+        "evidence_status": "endpoint_case_only",
+        "case_source": "research/cases.json",
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+      }
+    ]
+  },
+  "deferred_until_materialized": [
+    "golden-mean split examples from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+    "toy balanced-elementary witnesses from src/balanced.rs tests",
+    "toy concrete-shift witnesses from src/concrete_shift.rs tests"
+  ]
+}

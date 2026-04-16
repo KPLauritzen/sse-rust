@@ -459,3 +459,13 @@
   out, so the losing control is not rescued just by dropping retained overflow.
   No sub-beam cap earned a corpus change; details are in
   `research/notes/2026-04-16-beam-bfs-handoff-subbeam-cap-sweep-graph-only-k3.md`.
+
+- `sse-rust-5d9` Scoped the first durable witness-corpus slice for
+  ranking-signal analysis.
+  Added `research/notes/2026-04-16-witness-corpus-first-slice.md` plus
+  `research/witness_corpus_manifest.json`. The recommendation is to treat
+  solved endpoint pairs as the corpus unit, reuse guide-artifact full paths as
+  the first witness payload surface, keep `research/cases.json` as the
+  endpoint-only literature manifest, and defer a wider sqlite witness-corpus
+  surface until non-path proof kinds or stronger cross-source queries require
+  it.
