@@ -37,6 +37,16 @@ pub struct BalancedElementaryNeighborHit2x2 {
     pub witness: BalancedElementaryWitness2x2,
 }
 
+/// A canonical `3x3` state reached by a bounded
+/// `3x3 -> 2x2 <-balanced-> 2x2 -> 3x3` seam.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BalancedBridgeReturnNeighbor3x3 {
+    pub matrix: DynMatrix,
+    pub source_bridge: SqMatrix<2>,
+    pub target_bridge: SqMatrix<2>,
+    pub witness: BalancedElementaryWitness2x2,
+}
+
 /// Configuration for bounded balanced-elementary search on 2x2 matrices.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BalancedSearchConfig2x2 {
@@ -216,6 +226,46 @@ pub fn enumerate_balanced_neighbor_set_hits_2x2(
     }
 
     unique_hits.into_values().collect()
+}
+
+/// Enumerate canonical `3x3` neighbors reached by one bounded
+/// `3x3 -> 2x2 <-balanced-> 2x2 -> 3x3` seam.
+pub fn enumerate_balanced_bridge_return_neighbors_3x3(
+    source: &DynMatrix,
+    bridge_max_entry: u32,
+    config: &BalancedSearchConfig2x2,
+) -> Vec<BalancedBridgeReturnNeighbor3x3> {
+    assert_eq!(source.rows, 3);
+    assert_eq!(source.cols, 3);
+
+    let mut source_bridges = BTreeSet::new();
+    for (u, v) in enumerate_factorisations_3x3_to_2(source, bridge_max_entry) {
+        let bridge = v
+            .mul(&u)
+            .to_sq::<2>()
+            .expect("3x3-to-2 factorisation should produce a 2x2 bridge")
+            .canonical();
+        source_bridges.insert(bridge);
+    }
+
+    let mut unique_neighbors = BTreeMap::<DynMatrix, BalancedBridgeReturnNeighbor3x3>::new();
+    for source_bridge in source_bridges {
+        for neighbor in enumerate_balanced_elementary_neighbors_2x2(&source_bridge, config) {
+            for witness in enumerate_outsplits_2x2_to_3x3(&neighbor.matrix) {
+                let matrix = witness.outsplit.canonical_perm();
+                unique_neighbors.entry(matrix.clone()).or_insert_with(|| {
+                    BalancedBridgeReturnNeighbor3x3 {
+                        matrix,
+                        source_bridge: source_bridge.clone(),
+                        target_bridge: neighbor.matrix.clone(),
+                        witness: neighbor.witness.clone(),
+                    }
+                });
+            }
+        }
+    }
+
+    unique_neighbors.into_values().collect()
 }
 
 /// Search for a balanced-elementary equivalence witness with a fixed common dimension.
@@ -503,6 +553,40 @@ impl Iterator for MatrixDataIter {
 mod tests {
     use super::*;
 
+    fn canonical_outsplit_states_3x3(source: &SqMatrix<2>) -> Vec<DynMatrix> {
+        let mut seen = BTreeSet::new();
+        let mut states = Vec::new();
+        for witness in enumerate_outsplits_2x2_to_3x3(source) {
+            let canon = witness.outsplit.canonical_perm();
+            if seen.insert(canon.clone()) {
+                states.push(canon);
+            }
+        }
+        states
+    }
+
+    fn collect_balanced_bridge_return_hits_3x3(
+        source_candidates: &[DynMatrix],
+        target_candidates: &[DynMatrix],
+        bridge_max_entry: u32,
+        config: &BalancedSearchConfig2x2,
+    ) -> Vec<(DynMatrix, BalancedBridgeReturnNeighbor3x3)> {
+        let target_set = target_candidates.iter().cloned().collect::<BTreeSet<_>>();
+        let mut hits = Vec::new();
+
+        for source in source_candidates {
+            for neighbor in
+                enumerate_balanced_bridge_return_neighbors_3x3(source, bridge_max_entry, config)
+            {
+                if target_set.contains(&neighbor.matrix) {
+                    hits.push((source.clone(), neighbor));
+                }
+            }
+        }
+
+        hits
+    }
+
     #[test]
     fn test_verify_balanced_elementary_positive_example() {
         let a = SqMatrix::new([[1, 0], [1, 0]]);
@@ -664,6 +748,77 @@ mod tests {
         let hits = enumerate_balanced_neighbor_set_hits_2x2(
             &a_bridges,
             &b_bridges,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn test_toy_balanced_bridge_return_hits_3x3_outsplit_state() {
+        let a = SqMatrix::new([[1, 0], [1, 0]]);
+        let b = SqMatrix::new([[0, 1], [0, 1]]);
+        let a_states = canonical_outsplit_states_3x3(&a);
+        let b_states = canonical_outsplit_states_3x3(&b);
+
+        let hits = collect_balanced_bridge_return_hits_3x3(
+            &a_states,
+            &b_states,
+            1,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 1,
+                max_entry: 1,
+            },
+        );
+
+        assert_eq!(hits.len(), 4);
+        for (_, hit) in hits {
+            assert!(b_states.contains(&hit.matrix));
+            assert_eq!(hit.matrix.rows, 3);
+            assert_eq!(hit.matrix.cols, 3);
+            assert!(verify_balanced_elementary_witness_2x2(
+                &hit.source_bridge,
+                &hit.target_bridge,
+                &hit.witness
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn test_brix_ruiz_k3_has_no_balanced_bridge_return_hit() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let a_states = canonical_outsplit_states_3x3(&a);
+        let b_states = canonical_outsplit_states_3x3(&b);
+
+        let hits = collect_balanced_bridge_return_hits_3x3(
+            &a_states,
+            &b_states,
+            8,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn test_brix_ruiz_k4_has_no_balanced_bridge_return_hit() {
+        let a = SqMatrix::new([[1, 4], [3, 1]]);
+        let b = SqMatrix::new([[1, 12], [1, 1]]);
+        let a_states = canonical_outsplit_states_3x3(&a);
+        let b_states = canonical_outsplit_states_3x3(&b);
+
+        let hits = collect_balanced_bridge_return_hits_3x3(
+            &a_states,
+            &b_states,
+            8,
             &BalancedSearchConfig2x2 {
                 max_common_dim: 2,
                 max_entry: 8,
