@@ -1,5 +1,6 @@
 use sse_core::balanced::{
-    enumerate_balanced_elementary_neighbors_2x2, find_balanced_elementary_equivalence_2x2,
+    enumerate_balanced_elementary_neighbors_2x2, enumerate_balanced_neighbor_set_hits_2x2,
+    enumerate_outsplit_bridge_states_2x2, find_balanced_elementary_equivalence_2x2,
     find_balanced_elementary_zigzag_meeting_2x2, BalancedSearchConfig2x2, BalancedSearchResult2x2,
 };
 use sse_core::matrix::SqMatrix;
@@ -12,6 +13,8 @@ fn main() {
     let mut max_entry = 8u32;
     let mut print_neighbors = false;
     let mut search_zigzag = false;
+    let mut bridge_max_entry = 8u32;
+    let mut search_bridge_neighbor_seam = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -39,9 +42,19 @@ fn main() {
             "--zigzag" => {
                 search_zigzag = true;
             }
+            "--bridge-max-entry" => {
+                bridge_max_entry = args
+                    .next()
+                    .expect("--bridge-max-entry requires a value")
+                    .parse()
+                    .expect("invalid bridge max entry");
+            }
+            "--bridge-neighbor-seam" => {
+                search_bridge_neighbor_seam = true;
+            }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_balanced [--case brix_k3|brix_k4|toy] [--max-common-dim N] [--max-entry N] [--neighbors] [--zigzag]"
+                    "usage: find_balanced [--case brix_k3|brix_k4|toy] [--max-common-dim N] [--max-entry N] [--neighbors] [--zigzag] [--bridge-max-entry N] [--bridge-neighbor-seam]"
                 );
                 return;
             }
@@ -112,6 +125,33 @@ fn main() {
             }
             None => {
                 println!("No bounded balanced zig-zag meeting found");
+            }
+        }
+    }
+
+    if search_bridge_neighbor_seam {
+        println!();
+        let a_bridges = enumerate_outsplit_bridge_states_2x2(&a, bridge_max_entry);
+        let b_bridges = enumerate_outsplit_bridge_states_2x2(&b, bridge_max_entry);
+        println!(
+            "A-side canonical outsplit bridge states ({}): {:?}",
+            a_bridges.len(),
+            a_bridges
+        );
+        println!(
+            "B-side canonical outsplit bridge states ({}): {:?}",
+            b_bridges.len(),
+            b_bridges
+        );
+
+        let hits = enumerate_balanced_neighbor_set_hits_2x2(&a_bridges, &b_bridges, &config);
+        println!("A->B balanced bridge-neighbor hits: {}", hits.len());
+        if hits.is_empty() {
+            println!("No bounded balanced bridge-neighbor seam found");
+        } else {
+            for hit in hits {
+                println!("  {:?} -> {:?}", hit.source, hit.target);
+                println!("    via S = {:?}", hit.witness.s);
             }
         }
     }

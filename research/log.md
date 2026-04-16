@@ -371,6 +371,18 @@
   no local room to start. Details in
   `research/notes/2026-04-16-balanced-neighbor-zigzag-first-slice.md`.
 
+- `working tree` Added a bounded balanced bridge-neighbor seam on outsplit
+  bridge states for `sse-rust-ckj`.
+  Kept as evidence. `src/balanced.rs` now exposes canonical `2x2` outsplit
+  bridge-state enumeration plus bounded balanced-neighbor hits between candidate
+  bridge sets, and `find_balanced --bridge-neighbor-seam` reports the seam on
+  named controls. The toy pair has a tiny positive bridge-state seam, but the
+  Brix-Ruiz `k=3` and `k=4` controls still have zero bounded hits at
+  `bridge_max_entry=8`, `max_common_dim=2`, `max_entry=8`, so even one
+  dimension-changing bridge step does not yet create a balanced proposal path
+  between the two sides. Details in
+  `research/notes/2026-04-16-balanced-outsplit-bridge-neighbor-seam.md`.
+
 - `working tree` Audited the measurement-only corpus baselines after the lane
   split.
   Retired the non-reproducing shared `beam_bfs_handoff` `cap10` probe,

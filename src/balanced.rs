@@ -1,5 +1,7 @@
+use crate::factorisation::enumerate_factorisations_3x3_to_2;
+use crate::graph_moves::enumerate_outsplits_2x2_to_3x3;
 use crate::matrix::{DynMatrix, SqMatrix};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// A balanced elementary equivalence witness for a pair of 2x2 matrices.
 ///
@@ -25,6 +27,14 @@ pub struct BalancedElementaryZigzag2x2 {
     pub bridge: SqMatrix<2>,
     pub left_witness: BalancedElementaryWitness2x2,
     pub right_witness: BalancedElementaryWitness2x2,
+}
+
+/// A bounded balanced-neighbor hit from one candidate `2x2` state into another.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BalancedElementaryNeighborHit2x2 {
+    pub source: SqMatrix<2>,
+    pub target: SqMatrix<2>,
+    pub witness: BalancedElementaryWitness2x2,
 }
 
 /// Configuration for bounded balanced-elementary search on 2x2 matrices.
@@ -158,6 +168,54 @@ pub fn find_balanced_elementary_zigzag_meeting_2x2(
     }
 
     None
+}
+
+/// Enumerate canonical `2x2` bridge states reached by one bounded
+/// `2x2 -> 3x3 -> 2x2` out-split/factorisation seam.
+pub fn enumerate_outsplit_bridge_states_2x2(
+    source: &SqMatrix<2>,
+    bridge_max_entry: u32,
+) -> Vec<SqMatrix<2>> {
+    let mut bridges = BTreeSet::new();
+    for witness in enumerate_outsplits_2x2_to_3x3(source) {
+        for (u, v) in enumerate_factorisations_3x3_to_2(&witness.outsplit, bridge_max_entry) {
+            let bridge = v
+                .mul(&u)
+                .to_sq::<2>()
+                .expect("3x3-to-2 factorisation should produce a 2x2 bridge")
+                .canonical();
+            bridges.insert(bridge);
+        }
+    }
+    bridges.into_iter().collect()
+}
+
+/// Enumerate bounded balanced-neighbor hits from one candidate set into another.
+pub fn enumerate_balanced_neighbor_set_hits_2x2(
+    source_candidates: &[SqMatrix<2>],
+    target_candidates: &[SqMatrix<2>],
+    config: &BalancedSearchConfig2x2,
+) -> Vec<BalancedElementaryNeighborHit2x2> {
+    let target_set = target_candidates.iter().cloned().collect::<BTreeSet<_>>();
+    let mut unique_hits =
+        BTreeMap::<(SqMatrix<2>, SqMatrix<2>), BalancedElementaryNeighborHit2x2>::new();
+
+    for source in source_candidates {
+        for neighbor in enumerate_balanced_elementary_neighbors_2x2(source, config) {
+            if !target_set.contains(&neighbor.matrix) {
+                continue;
+            }
+            unique_hits
+                .entry((source.clone(), neighbor.matrix.clone()))
+                .or_insert_with(|| BalancedElementaryNeighborHit2x2 {
+                    source: source.clone(),
+                    target: neighbor.matrix,
+                    witness: neighbor.witness,
+                });
+        }
+    }
+
+    unique_hits.into_values().collect()
 }
 
 /// Search for a balanced-elementary equivalence witness with a fixed common dimension.
@@ -549,5 +607,69 @@ mod tests {
             },
         );
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_toy_outsplit_bridge_states_admit_balanced_neighbor_hit() {
+        let a = SqMatrix::new([[1, 0], [1, 0]]);
+        let b = SqMatrix::new([[0, 1], [0, 1]]);
+        let a_bridges = enumerate_outsplit_bridge_states_2x2(&a, 1);
+        let b_bridges = enumerate_outsplit_bridge_states_2x2(&b, 1);
+
+        let hits = enumerate_balanced_neighbor_set_hits_2x2(
+            &a_bridges,
+            &b_bridges,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 1,
+                max_entry: 1,
+            },
+        );
+
+        assert!(!hits.is_empty());
+        for hit in hits {
+            assert!(b_bridges.contains(&hit.target));
+            assert!(
+                verify_balanced_elementary_witness_2x2(&hit.source, &hit.target, &hit.witness)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn test_brix_ruiz_k3_outsplit_bridges_have_no_balanced_neighbor_hit() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let a_bridges = enumerate_outsplit_bridge_states_2x2(&a, 8);
+        let b_bridges = enumerate_outsplit_bridge_states_2x2(&b, 8);
+
+        let hits = enumerate_balanced_neighbor_set_hits_2x2(
+            &a_bridges,
+            &b_bridges,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn test_brix_ruiz_k4_outsplit_bridges_have_no_balanced_neighbor_hit() {
+        let a = SqMatrix::new([[1, 4], [3, 1]]);
+        let b = SqMatrix::new([[1, 12], [1, 1]]);
+        let a_bridges = enumerate_outsplit_bridge_states_2x2(&a, 8);
+        let b_bridges = enumerate_outsplit_bridge_states_2x2(&b, 8);
+
+        let hits = enumerate_balanced_neighbor_set_hits_2x2(
+            &a_bridges,
+            &b_bridges,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(hits.is_empty());
     }
 }
