@@ -530,6 +530,20 @@
   states, and sets the first meaningful held-out gate at the three non-Brix
   literature families with at least two rankable families.
 
+- `sse-rust-5r1` Extracted first-pass within-layer continuation labels from
+  solved witness and endpoint searches.
+  Added `research/notes/2026-04-16-layer-contrast-ranking-labels.md` plus
+  `research/layer_contrast_signal_corpus_first_pass.json`, and extended
+  `src/bin/analyze_path_signal_corpus.rs` with bounded JSON export support that
+  resolves `pair_id` / `evaluation_family_id` from the witness and family
+  manifests. The new label contract keeps supervision inside one observed
+  sibling layer (`best_continuation`, `supporting_continuation`,
+  `non_continuation`) instead of reusing trivial endpoint reachability. The
+  first pass covers `brix_ruiz` development-only `k3` path segments and the
+  rankable `riedel_baker` endpoint family, yielding `44` rankable layers and
+  `44` matched witness candidates while keeping the other held-out families out
+  until the current analyzer surface can rank them.
+
 - `sse-rust-oci` Re-profiled the current hard shortcut control and trimmed the
   hot `4x4` cofactor path in structured sparse factorisations.
   Kept. A bounded hard-control `pprof` sample on rebuilt `target/dist/search`

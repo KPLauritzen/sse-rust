@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::path_scoring::{candidate_score_specs, new_summaries, rank_target, ScoreSummary};
@@ -16,10 +16,11 @@ use sse_core::types::{
 
 fn main() -> Result<(), String> {
     let cli = parse_cli(std::env::args().skip(1))?;
-    let source_paths = load_source_paths(&cli)?;
+    let pair_catalog = load_pair_catalog(&cli)?;
+    let source_paths = load_source_paths(&cli, &pair_catalog)?;
     let path_cases = derive_path_cases(&source_paths, &cli);
     let path_case_count = path_cases.len();
-    let endpoint_cases = load_research_cases(&cli)?;
+    let endpoint_cases = load_research_cases(&cli, &pair_catalog)?;
     let endpoint_case_count = endpoint_cases.len();
     let mut cases = path_cases;
     cases.extend(endpoint_cases);
@@ -108,6 +109,19 @@ fn main() -> Result<(), String> {
         println!("    ... {} more case(s)", analyzed_cases.len() - 12);
     }
 
+    write_layer_contrast_artifact(
+        &cli,
+        source_paths.len(),
+        path_case_count,
+        endpoint_case_count,
+        solved_cases,
+        unmatched_cases,
+        unranked_solved_cases,
+        total_ranked_nodes,
+        total_solution_nodes,
+        &analyzed_cases,
+    )?;
+
     Ok(())
 }
 
@@ -125,12 +139,16 @@ struct Cli {
     max_intermediate_dim: usize,
     max_entry: u32,
     search_mode: MoveFamilyPolicy,
+    witness_manifest_path: Option<PathBuf>,
+    family_benchmark_path: Option<PathBuf>,
+    emit_layer_contrasts_path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
 struct SourcePath {
     label: String,
     matrices: Vec<DynMatrix>,
+    pair_metadata: PairMetadata,
 }
 
 #[derive(Clone)]
@@ -143,8 +161,11 @@ struct SegmentCase {
     stage: SearchStage,
     guided_refinement: GuidedRefinementConfig,
     shortcut_search: ShortcutSearchConfig,
+    pair_metadata: PairMetadata,
+    contrast_source_kind: ContrastSourceKind,
 }
 
+#[derive(Clone, Debug, Serialize)]
 struct CaseAnalysis {
     label: String,
     budget_lag: usize,
@@ -152,6 +173,203 @@ struct CaseAnalysis {
     solution_nodes: usize,
     ranked_nodes: usize,
     layer_count: usize,
+    pair_metadata: PairMetadata,
+    contrast_source_kind: ContrastSourceKind,
+    rankable_layers: Vec<LayerContrast>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PairCatalog {
+    path_pairs_by_endpoints: HashMap<String, String>,
+    family_by_pair_id: HashMap<String, FamilyMetadata>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct PairMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pair_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evaluation_family_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    benchmark_role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    benchmark_case_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct FamilyMetadata {
+    evaluation_family_id: String,
+    benchmark_role: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContrastSourceKind {
+    PathSegment,
+    EndpointCase,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationLabel {
+    BestContinuation,
+    SupportingContinuation,
+    NonContinuation,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct LayerContrast {
+    layer_index: usize,
+    direction: SearchDirection,
+    layer_size: usize,
+    matched_witness_candidates: usize,
+    best_remaining_witness_lag: usize,
+    layer_signature: String,
+    dedup_scope_key: String,
+    candidate_labels: Vec<CandidateLabel>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct CandidateLabel {
+    candidate_key: String,
+    continuation_label: ContinuationLabel,
+    remaining_witness_lag: Option<usize>,
+    solution_path_index: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct SolutionStateInfo {
+    solution_path_index: usize,
+    remaining_witness_lag: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct LayerContrastArtifact {
+    schema_version: usize,
+    artifact_kind: &'static str,
+    label_contract: &'static str,
+    witness_manifest_path: Option<PathBuf>,
+    family_benchmark_path: Option<PathBuf>,
+    config: ArtifactConfig,
+    summary: ArtifactSummary,
+    matrix_catalog: Vec<MatrixCatalogEntry>,
+    cases: Vec<ArtifactCaseAnalysis>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactConfig {
+    guide_artifact_paths: Vec<PathBuf>,
+    path_dbs: Vec<PathBuf>,
+    cases_paths: Vec<PathBuf>,
+    case_ids: Vec<String>,
+    campaign_ids: Vec<String>,
+    min_gap: usize,
+    max_gap: usize,
+    max_cases: usize,
+    max_endpoint_dim: usize,
+    max_intermediate_dim: usize,
+    max_entry: u32,
+    search_mode: MoveFamilyPolicy,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactSummary {
+    source_paths: usize,
+    path_segment_cases: usize,
+    endpoint_cases: usize,
+    solved_cases: usize,
+    unsolved_cases: usize,
+    unranked_solved_cases: usize,
+    ranked_solution_nodes: usize,
+    solution_nodes: usize,
+    exported_cases: usize,
+    exported_rankable_cases: usize,
+    exported_rankable_layers: usize,
+    exported_layer_candidates: usize,
+    exported_matched_candidates: usize,
+    matrix_catalog_size: usize,
+    exported_families: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MatrixCatalogEntry {
+    matrix_id: usize,
+    matrix_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactCaseAnalysis {
+    label: String,
+    budget_lag: usize,
+    solved_lag: usize,
+    solution_nodes: usize,
+    ranked_nodes: usize,
+    layer_count: usize,
+    pair_metadata: PairMetadata,
+    contrast_source_kind: ContrastSourceKind,
+    rankable_layers: Vec<ArtifactLayerContrast>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactLayerContrast {
+    layer_index: usize,
+    direction: SearchDirection,
+    layer_size: usize,
+    matched_witness_candidates: usize,
+    best_remaining_witness_lag: usize,
+    dedup_scope_key: String,
+    candidate_ids: Vec<usize>,
+    matched_candidates: Vec<ArtifactMatchedCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactMatchedCandidate {
+    candidate_id: usize,
+    continuation_label: ContinuationLabel,
+    remaining_witness_lag: usize,
+    solution_path_index: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct WitnessCorpusManifest {
+    first_ingestion_slice: WitnessCorpusFirstSlice,
+}
+
+#[derive(Debug, Deserialize)]
+struct WitnessCorpusFirstSlice {
+    #[serde(default)]
+    validated_pairs: Vec<WitnessCorpusPair>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WitnessCorpusPair {
+    pair_id: String,
+    source: ManifestMatrix,
+    target: ManifestMatrix,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManifestMatrix {
+    rows: usize,
+    cols: usize,
+    data: Vec<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RankingSignalFamilyBenchmark {
+    families: Vec<RankingSignalFamily>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RankingSignalFamily {
+    evaluation_family_id: String,
+    benchmark_role: String,
+    pairs: Vec<RankingSignalPair>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RankingSignalPair {
+    pair_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,6 +431,43 @@ struct ObservedLayer {
     candidates: Vec<DynMatrix>,
 }
 
+impl PairCatalog {
+    fn resolve_path(&self, source: Option<&DynMatrix>, target: Option<&DynMatrix>) -> PairMetadata {
+        let Some(source) = source else {
+            return PairMetadata::default();
+        };
+        let Some(target) = target else {
+            return PairMetadata::default();
+        };
+        let Some(pair_id) = self
+            .path_pairs_by_endpoints
+            .get(&endpoint_pair_key(source, target))
+            .cloned()
+        else {
+            return PairMetadata::default();
+        };
+        self.build_pair_metadata(pair_id, None)
+    }
+
+    fn resolve_case(&self, pair_id: &str) -> PairMetadata {
+        self.build_pair_metadata(pair_id.to_string(), Some(pair_id.to_string()))
+    }
+
+    fn build_pair_metadata(
+        &self,
+        pair_id: String,
+        benchmark_case_id: Option<String>,
+    ) -> PairMetadata {
+        let family = self.family_by_pair_id.get(&pair_id);
+        PairMetadata {
+            pair_id: Some(pair_id),
+            evaluation_family_id: family.map(|family| family.evaluation_family_id.clone()),
+            benchmark_role: family.map(|family| family.benchmark_role.clone()),
+            benchmark_case_id,
+        }
+    }
+}
+
 impl SearchObserver for LayerCollector {
     fn on_event(&mut self, event: &SearchEvent) {
         let SearchEvent::Layer(edges) = event else {
@@ -266,6 +521,9 @@ where
         max_intermediate_dim: 5,
         max_entry: 6,
         search_mode: MoveFamilyPolicy::Mixed,
+        witness_manifest_path: None,
+        family_benchmark_path: None,
+        emit_layer_contrasts_path: None,
     };
 
     while let Some(arg) = args.next() {
@@ -345,6 +603,22 @@ where
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
             }
+            "--witness-manifest" => {
+                cli.witness_manifest_path = Some(PathBuf::from(
+                    args.next().ok_or("--witness-manifest requires a path")?,
+                ));
+            }
+            "--family-benchmark" => {
+                cli.family_benchmark_path = Some(PathBuf::from(
+                    args.next().ok_or("--family-benchmark requires a path")?,
+                ));
+            }
+            "--emit-layer-contrasts" => {
+                cli.emit_layer_contrasts_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--emit-layer-contrasts requires a path")?,
+                ));
+            }
             "--help" | "-h" => {
                 return Err(
                     "usage: analyze_path_signal_corpus [options]\n\n\
@@ -362,6 +636,10 @@ where
                                               search config bound for derived cases (default: 5)\n\
                        --max-entry N           search config entry bound (default: 6)\n\
                        --search-mode MODE      mixed | graph-plus-structured | graph-only (default: mixed)\n\
+                       --witness-manifest PATH resolve full-path sources to durable pair ids\n\
+                       --family-benchmark PATH resolve pair ids to evaluation families / roles\n\
+                       --emit-layer-contrasts PATH\n\
+                                             write rankable within-layer continuation labels as JSON\n\
                      \n\
                      If no inputs are supplied and research/k3-graph-paths.sqlite exists,\n\
                      it is used as the default path source."
@@ -375,6 +653,14 @@ where
     if cli.max_gap < cli.min_gap {
         return Err("--max-gap must be >= --min-gap".to_string());
     }
+    if cli.emit_layer_contrasts_path.is_some() {
+        if cli.witness_manifest_path.is_none() {
+            return Err("--emit-layer-contrasts requires --witness-manifest".to_string());
+        }
+        if cli.family_benchmark_path.is_none() {
+            return Err("--emit-layer-contrasts requires --family-benchmark".to_string());
+        }
+    }
 
     if cli.guide_artifact_paths.is_empty() && cli.path_dbs.is_empty() && cli.cases_paths.is_empty()
     {
@@ -387,13 +673,49 @@ where
     Ok(cli)
 }
 
-fn load_source_paths(cli: &Cli) -> Result<Vec<SourcePath>, String> {
+fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
+    let mut catalog = PairCatalog::default();
+    if let Some(path) = &cli.witness_manifest_path {
+        let raw = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        let manifest: WitnessCorpusManifest = serde_json::from_str(&raw)
+            .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+        for pair in manifest.first_ingestion_slice.validated_pairs {
+            let source = manifest_matrix(&pair.source)?.canonical_perm();
+            let target = manifest_matrix(&pair.target)?.canonical_perm();
+            catalog
+                .path_pairs_by_endpoints
+                .insert(endpoint_pair_key(&source, &target), pair.pair_id);
+        }
+    }
+    if let Some(path) = &cli.family_benchmark_path {
+        let raw = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        let manifest: RankingSignalFamilyBenchmark = serde_json::from_str(&raw)
+            .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+        for family in manifest.families {
+            let metadata = FamilyMetadata {
+                evaluation_family_id: family.evaluation_family_id,
+                benchmark_role: family.benchmark_role,
+            };
+            for pair in family.pairs {
+                catalog
+                    .family_by_pair_id
+                    .insert(pair.pair_id, metadata.clone());
+            }
+        }
+    }
+
+    Ok(catalog)
+}
+
+fn load_source_paths(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<SourcePath>, String> {
     let mut paths = Vec::new();
     for path in &cli.guide_artifact_paths {
-        paths.extend(load_paths_from_guide_artifacts(path)?);
+        paths.extend(load_paths_from_guide_artifacts(path, pair_catalog)?);
     }
     for path in &cli.path_dbs {
-        paths.extend(load_paths_from_sqlite(path)?);
+        paths.extend(load_paths_from_sqlite(path, pair_catalog)?);
     }
 
     let mut seen = HashSet::new();
@@ -401,7 +723,10 @@ fn load_source_paths(cli: &Cli) -> Result<Vec<SourcePath>, String> {
     Ok(paths)
 }
 
-fn load_paths_from_guide_artifacts(path: &Path) -> Result<Vec<SourcePath>, String> {
+fn load_paths_from_guide_artifacts(
+    path: &Path,
+    pair_catalog: &PairCatalog,
+) -> Result<Vec<SourcePath>, String> {
     let mut paths = Vec::new();
     for artifact in load_guide_artifacts_from_path(path)? {
         let GuideArtifactPayload::FullPath { path } = artifact.payload;
@@ -409,15 +734,20 @@ fn load_paths_from_guide_artifacts(path: &Path) -> Result<Vec<SourcePath>, Strin
             .artifact_id
             .or(artifact.provenance.label)
             .unwrap_or_else(|| "guide_artifact_path".to_string());
+        let matrices = canonicalize_path(&path.matrices);
         paths.push(SourcePath {
             label,
-            matrices: canonicalize_path(&path.matrices),
+            pair_metadata: pair_catalog.resolve_path(matrices.first(), matrices.last()),
+            matrices,
         });
     }
     Ok(paths)
 }
 
-fn load_paths_from_sqlite(path: &Path) -> Result<Vec<SourcePath>, String> {
+fn load_paths_from_sqlite(
+    path: &Path,
+    pair_catalog: &PairCatalog,
+) -> Result<Vec<SourcePath>, String> {
     let conn = Connection::open(path)
         .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
     let mut stmt = conn
@@ -455,9 +785,11 @@ fn load_paths_from_sqlite(path: &Path) -> Result<Vec<SourcePath>, String> {
 
         if current_id != Some(result_id) {
             if let Some(prev_id) = current_id {
+                let matrices = std::mem::take(&mut current_matrices);
                 paths.push(SourcePath {
                     label: format!("sqlite:{}:{}", prev_id, current_label),
-                    matrices: std::mem::take(&mut current_matrices),
+                    pair_metadata: pair_catalog.resolve_path(matrices.first(), matrices.last()),
+                    matrices,
                 });
             }
             current_id = Some(result_id);
@@ -467,9 +799,11 @@ fn load_paths_from_sqlite(path: &Path) -> Result<Vec<SourcePath>, String> {
     }
 
     if let Some(result_id) = current_id {
+        let matrices = current_matrices;
         paths.push(SourcePath {
             label: format!("sqlite:{}:{}", result_id, current_label),
-            matrices: current_matrices,
+            pair_metadata: pair_catalog.resolve_path(matrices.first(), matrices.last()),
+            matrices,
         });
     }
 
@@ -484,7 +818,7 @@ fn canonicalize_path(path: &[DynMatrix]) -> Vec<DynMatrix> {
     path.iter().map(DynMatrix::canonical_perm).collect()
 }
 
-fn load_research_cases(cli: &Cli) -> Result<Vec<SegmentCase>, String> {
+fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<SegmentCase>, String> {
     let mut loaded = Vec::new();
     let requested_case_ids = cli.case_ids.iter().cloned().collect::<BTreeSet<_>>();
     let requested_campaign_ids = cli.campaign_ids.iter().cloned().collect::<BTreeSet<_>>();
@@ -510,7 +844,7 @@ fn load_research_cases(cli: &Cli) -> Result<Vec<SegmentCase>, String> {
             let source = case_matrix(&case.a)?.canonical_perm();
             let target = case_matrix(&case.b)?.canonical_perm();
             loaded.push(SegmentCase {
-                label: case.id,
+                label: case.id.clone(),
                 budget_lag: case.config.max_lag,
                 source,
                 target,
@@ -527,6 +861,8 @@ fn load_research_cases(cli: &Cli) -> Result<Vec<SegmentCase>, String> {
                 stage: case.config.stage,
                 guided_refinement: case.config.guided_refinement,
                 shortcut_search: case.config.shortcut_search,
+                pair_metadata: pair_catalog.resolve_case(&case.id),
+                contrast_source_kind: ContrastSourceKind::EndpointCase,
             });
         }
     }
@@ -586,6 +922,8 @@ fn derive_path_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
                     stage: SearchStage::EndpointSearch,
                     guided_refinement: GuidedRefinementConfig::default(),
                     shortcut_search: ShortcutSearchConfig::default(),
+                    pair_metadata: path.pair_metadata.clone(),
+                    contrast_source_kind: ContrastSourceKind::PathSegment,
                 });
             }
         }
@@ -625,7 +963,7 @@ fn analyze_case(
         return Ok(None);
     };
 
-    let mut remaining = path
+    let mut remaining_summary = path
         .matrices
         .iter()
         .skip(1)
@@ -633,24 +971,32 @@ fn analyze_case(
         .map(DynMatrix::canonical_perm)
         .collect::<HashSet<_>>();
 
-    let solution_nodes = remaining.len();
+    let solution_nodes = remaining_summary.len();
     let mut ranked_nodes = 0usize;
+    let mut forward_remaining =
+        solution_lookup_by_direction(&path.matrices, SearchDirection::Forward);
+    let mut backward_remaining =
+        solution_lookup_by_direction(&path.matrices, SearchDirection::Backward);
+    let mut rankable_layers = Vec::new();
 
-    for layer in &observer.layers {
-        if remaining.is_empty() {
+    for (layer_index, layer) in observer.layers.iter().enumerate() {
+        if remaining_summary.is_empty()
+            && forward_remaining.is_empty()
+            && backward_remaining.is_empty()
+        {
             break;
         }
         let endpoint_target = match layer.direction {
             SearchDirection::Forward => &case.target,
             SearchDirection::Backward => &case.source,
         };
-        let matched = layer
+        let matched_for_summary = layer
             .candidates
             .iter()
-            .filter(|candidate| remaining.contains(*candidate))
+            .filter(|candidate| remaining_summary.contains(*candidate))
             .cloned()
             .collect::<Vec<_>>();
-        for candidate in matched {
+        for candidate in matched_for_summary {
             for spec in specs {
                 if let Some(rank) = rank_target(
                     &layer.candidates,
@@ -665,8 +1011,67 @@ fn analyze_case(
                         .add(rank);
                 }
             }
-            remaining.remove(&candidate);
+            remaining_summary.remove(&candidate);
             ranked_nodes += 1;
+        }
+
+        let remaining_labels = match layer.direction {
+            SearchDirection::Forward => &mut forward_remaining,
+            SearchDirection::Backward => &mut backward_remaining,
+        };
+        let matched_for_labels = layer
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                remaining_labels
+                    .get(&matrix_key(candidate))
+                    .cloned()
+                    .map(|info| (candidate.clone(), info))
+            })
+            .collect::<Vec<_>>();
+        if matched_for_labels.is_empty() {
+            continue;
+        }
+
+        let best_remaining_witness_lag = matched_for_labels
+            .iter()
+            .map(|(_, info)| info.remaining_witness_lag)
+            .min()
+            .expect("matched layer has at least one witness candidate");
+        let dedup_scope_key = case_dedup_scope_key(case, layer.direction);
+        let candidate_labels = layer
+            .candidates
+            .iter()
+            .map(|candidate| {
+                let candidate_key = matrix_key(candidate);
+                let solution_info = remaining_labels.get(&candidate_key);
+                let continuation_label = match solution_info {
+                    Some(info) if info.remaining_witness_lag == best_remaining_witness_lag => {
+                        ContinuationLabel::BestContinuation
+                    }
+                    Some(_) => ContinuationLabel::SupportingContinuation,
+                    None => ContinuationLabel::NonContinuation,
+                };
+                CandidateLabel {
+                    candidate_key,
+                    continuation_label,
+                    remaining_witness_lag: solution_info.map(|info| info.remaining_witness_lag),
+                    solution_path_index: solution_info.map(|info| info.solution_path_index),
+                }
+            })
+            .collect::<Vec<_>>();
+        rankable_layers.push(LayerContrast {
+            layer_index,
+            direction: layer.direction,
+            layer_size: layer.candidates.len(),
+            matched_witness_candidates: matched_for_labels.len(),
+            best_remaining_witness_lag,
+            layer_signature: layer_signature(&layer.candidates),
+            dedup_scope_key,
+            candidate_labels,
+        });
+        for (candidate, _) in matched_for_labels {
+            remaining_labels.remove(&matrix_key(&candidate));
         }
     }
 
@@ -677,7 +1082,257 @@ fn analyze_case(
         solution_nodes,
         ranked_nodes,
         layer_count: observer.layers.len(),
+        pair_metadata: case.pair_metadata.clone(),
+        contrast_source_kind: case.contrast_source_kind,
+        rankable_layers,
     }))
+}
+
+fn write_layer_contrast_artifact(
+    cli: &Cli,
+    source_paths: usize,
+    path_segment_cases: usize,
+    endpoint_cases: usize,
+    solved_cases: usize,
+    unsolved_cases: usize,
+    unranked_solved_cases: usize,
+    ranked_solution_nodes: usize,
+    solution_nodes: usize,
+    analyzed_cases: &[CaseAnalysis],
+) -> Result<(), String> {
+    let Some(path) = &cli.emit_layer_contrasts_path else {
+        return Ok(());
+    };
+
+    let mut matrix_ids = BTreeMap::new();
+    let mut matrix_catalog = Vec::new();
+    let artifact_cases = analyzed_cases
+        .iter()
+        .map(|case| compact_case_analysis(case, &mut matrix_ids, &mut matrix_catalog))
+        .collect::<Vec<_>>();
+    let exported_rankable_cases = analyzed_cases
+        .iter()
+        .filter(|case| !case.rankable_layers.is_empty())
+        .count();
+    let exported_rankable_layers = analyzed_cases
+        .iter()
+        .map(|case| case.rankable_layers.len())
+        .sum::<usize>();
+    let exported_layer_candidates = artifact_cases
+        .iter()
+        .flat_map(|case| case.rankable_layers.iter())
+        .map(|layer| layer.candidate_ids.len())
+        .sum::<usize>();
+    let exported_matched_candidates = artifact_cases
+        .iter()
+        .flat_map(|case| case.rankable_layers.iter())
+        .map(|layer| layer.matched_candidates.len())
+        .sum::<usize>();
+    let exported_families = analyzed_cases
+        .iter()
+        .filter_map(|case| case.pair_metadata.evaluation_family_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let artifact = LayerContrastArtifact {
+        schema_version: 1,
+        artifact_kind: "layer_contrast_signal_corpus",
+        label_contract: "within_layer_continuation_quality_v1",
+        witness_manifest_path: cli.witness_manifest_path.clone(),
+        family_benchmark_path: cli.family_benchmark_path.clone(),
+        config: ArtifactConfig {
+            guide_artifact_paths: cli.guide_artifact_paths.clone(),
+            path_dbs: cli.path_dbs.clone(),
+            cases_paths: cli.cases_paths.clone(),
+            case_ids: cli.case_ids.clone(),
+            campaign_ids: cli.campaign_ids.clone(),
+            min_gap: cli.min_gap,
+            max_gap: cli.max_gap,
+            max_cases: cli.max_cases,
+            max_endpoint_dim: cli.max_endpoint_dim,
+            max_intermediate_dim: cli.max_intermediate_dim,
+            max_entry: cli.max_entry,
+            search_mode: cli.search_mode,
+        },
+        summary: ArtifactSummary {
+            source_paths,
+            path_segment_cases,
+            endpoint_cases,
+            solved_cases,
+            unsolved_cases,
+            unranked_solved_cases,
+            ranked_solution_nodes,
+            solution_nodes,
+            exported_cases: analyzed_cases.len(),
+            exported_rankable_cases,
+            exported_rankable_layers,
+            exported_layer_candidates,
+            exported_matched_candidates,
+            matrix_catalog_size: matrix_catalog.len(),
+            exported_families,
+        },
+        matrix_catalog,
+        cases: artifact_cases,
+    };
+    let json = serde_json::to_string_pretty(&artifact)
+        .map_err(|err| format!("failed to serialize {}: {err}", path.display()))?;
+    fs::write(path, format!("{json}\n"))
+        .map_err(|err| format!("failed to write {}: {err}", path.display()))
+}
+
+fn compact_case_analysis(
+    case: &CaseAnalysis,
+    matrix_ids: &mut BTreeMap<String, usize>,
+    matrix_catalog: &mut Vec<MatrixCatalogEntry>,
+) -> ArtifactCaseAnalysis {
+    ArtifactCaseAnalysis {
+        label: case.label.clone(),
+        budget_lag: case.budget_lag,
+        solved_lag: case.solved_lag,
+        solution_nodes: case.solution_nodes,
+        ranked_nodes: case.ranked_nodes,
+        layer_count: case.layer_count,
+        pair_metadata: case.pair_metadata.clone(),
+        contrast_source_kind: case.contrast_source_kind,
+        rankable_layers: case
+            .rankable_layers
+            .iter()
+            .map(|layer| compact_layer_contrast(layer, matrix_ids, matrix_catalog))
+            .collect(),
+    }
+}
+
+fn compact_layer_contrast(
+    layer: &LayerContrast,
+    matrix_ids: &mut BTreeMap<String, usize>,
+    matrix_catalog: &mut Vec<MatrixCatalogEntry>,
+) -> ArtifactLayerContrast {
+    let mut candidate_ids = Vec::with_capacity(layer.candidate_labels.len());
+    let mut matched_candidates = Vec::new();
+
+    for candidate in &layer.candidate_labels {
+        let candidate_id = intern_matrix(&candidate.candidate_key, matrix_ids, matrix_catalog);
+        candidate_ids.push(candidate_id);
+        if candidate.continuation_label == ContinuationLabel::NonContinuation {
+            continue;
+        }
+        matched_candidates.push(ArtifactMatchedCandidate {
+            candidate_id,
+            continuation_label: candidate.continuation_label,
+            remaining_witness_lag: candidate
+                .remaining_witness_lag
+                .expect("matched candidate should carry remaining lag"),
+            solution_path_index: candidate
+                .solution_path_index
+                .expect("matched candidate should carry a solution-path index"),
+        });
+    }
+
+    ArtifactLayerContrast {
+        layer_index: layer.layer_index,
+        direction: layer.direction,
+        layer_size: layer.layer_size,
+        matched_witness_candidates: layer.matched_witness_candidates,
+        best_remaining_witness_lag: layer.best_remaining_witness_lag,
+        dedup_scope_key: layer.dedup_scope_key.clone(),
+        candidate_ids,
+        matched_candidates,
+    }
+}
+
+fn intern_matrix(
+    matrix_key: &str,
+    matrix_ids: &mut BTreeMap<String, usize>,
+    matrix_catalog: &mut Vec<MatrixCatalogEntry>,
+) -> usize {
+    if let Some(id) = matrix_ids.get(matrix_key).copied() {
+        return id;
+    }
+    let matrix_id = matrix_catalog.len();
+    matrix_catalog.push(MatrixCatalogEntry {
+        matrix_id,
+        matrix_key: matrix_key.to_string(),
+    });
+    matrix_ids.insert(matrix_key.to_string(), matrix_id);
+    matrix_id
+}
+
+fn manifest_matrix(matrix: &ManifestMatrix) -> Result<DynMatrix, String> {
+    if matrix.rows == 0 || matrix.cols == 0 {
+        return Err("manifest matrix must have positive dimensions".to_string());
+    }
+    if matrix.data.len() != matrix.rows * matrix.cols {
+        return Err("manifest matrix data length does not match dimensions".to_string());
+    }
+    Ok(DynMatrix::new(
+        matrix.rows,
+        matrix.cols,
+        matrix.data.clone(),
+    ))
+}
+
+fn solution_lookup_by_direction(
+    path: &[DynMatrix],
+    direction: SearchDirection,
+) -> HashMap<String, SolutionStateInfo> {
+    let mut lookup = HashMap::new();
+    for (index, matrix) in path
+        .iter()
+        .enumerate()
+        .skip(1)
+        .take(path.len().saturating_sub(2))
+    {
+        let canonical = matrix.canonical_perm();
+        let remaining_witness_lag = match direction {
+            SearchDirection::Forward => path.len() - 1 - index,
+            SearchDirection::Backward => index,
+        };
+        let key = matrix_key(&canonical);
+        let info = SolutionStateInfo {
+            solution_path_index: index,
+            remaining_witness_lag,
+        };
+        lookup
+            .entry(key)
+            .and_modify(|existing: &mut SolutionStateInfo| {
+                if info.remaining_witness_lag < existing.remaining_witness_lag {
+                    *existing = info.clone();
+                }
+            })
+            .or_insert(info);
+    }
+    lookup
+}
+
+fn endpoint_pair_key(source: &DynMatrix, target: &DynMatrix) -> String {
+    format!("{}=>{}", matrix_key(source), matrix_key(target))
+}
+
+fn case_dedup_scope_key(case: &SegmentCase, direction: SearchDirection) -> String {
+    let pair_scope = case
+        .pair_metadata
+        .pair_id
+        .clone()
+        .unwrap_or_else(|| endpoint_pair_key(&case.source, &case.target));
+    let case_scope = case
+        .pair_metadata
+        .benchmark_case_id
+        .clone()
+        .unwrap_or_else(|| case.label.clone());
+    format!("{pair_scope}|{case_scope}|{}", direction_label(direction))
+}
+
+fn direction_label(direction: SearchDirection) -> &'static str {
+    match direction {
+        SearchDirection::Forward => "forward",
+        SearchDirection::Backward => "backward",
+    }
+}
+
+fn layer_signature(candidates: &[DynMatrix]) -> String {
+    let mut keys = candidates.iter().map(matrix_key).collect::<Vec<_>>();
+    keys.sort();
+    keys.join("|")
 }
 
 fn path_signature(path: &[DynMatrix]) -> String {
