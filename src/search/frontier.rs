@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
@@ -8,12 +7,13 @@ use crate::graph_moves::{
     enumerate_graph_move_successors, same_future_past_signature, SameFuturePastSignature,
 };
 use crate::matrix::DynMatrix;
-use crate::types::{EsseStep, MoveFamilyPolicy, SearchMoveFamilyTelemetry};
+use crate::types::{EsseStep, MoveFamilyPolicy};
 
 use rayon::prelude::*;
 
 use super::{
-    accumulate_move_family_telemetry, deadline_reached, elapsed_nanos, move_family_telemetry_mut,
+    accumulate_move_family_telemetry_accumulator, deadline_reached, elapsed_nanos,
+    move_family_telemetry_mut, MoveFamilyTelemetryAccumulator,
 };
 
 const SAME_FUTURE_PAST_REPRESENTATIVE_LAYER_THRESHOLD: usize = 8;
@@ -54,7 +54,7 @@ pub(super) struct FrontierExpansionStats {
     pub(super) pruned_by_size: usize,
     pub(super) pruned_by_spectrum: usize,
     pub(super) same_future_past_collisions: usize,
-    pub(super) move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
+    pub(super) move_family_telemetry: MoveFamilyTelemetryAccumulator,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -396,7 +396,7 @@ fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &Frontie
     total.candidates_generated += delta.candidates_generated;
     total.pruned_by_size += delta.pruned_by_size;
     total.pruned_by_spectrum += delta.pruned_by_spectrum;
-    accumulate_move_family_telemetry(
+    accumulate_move_family_telemetry_accumulator(
         &mut total.move_family_telemetry,
         &delta.move_family_telemetry,
     );
@@ -404,7 +404,7 @@ fn accumulate_frontier_stats(total: &mut FrontierExpansionStats, delta: &Frontie
 
 fn record_candidates_after_pruning_by_family(
     expansions: &[FrontierExpansion],
-    telemetry: &mut BTreeMap<String, SearchMoveFamilyTelemetry>,
+    telemetry: &mut MoveFamilyTelemetryAccumulator,
 ) {
     for expansion in expansions {
         move_family_telemetry_mut(telemetry, expansion.move_family).candidates_after_pruning += 1;

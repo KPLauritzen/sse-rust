@@ -80,6 +80,8 @@ struct ApproxSignature {
 
 const TIMED_SEARCH_FRONTIER_CHUNK_SIZE: usize = 256;
 
+pub(super) type MoveFamilyTelemetryAccumulator = HashMap<&'static str, SearchMoveFamilyTelemetry>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GraphProposalProbeConfig {
     pub shortlist_size: usize,
@@ -628,7 +630,9 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                         merge_nanos,
                         finalize_nanos,
                     ),
-                    move_family_telemetry: layer_move_family_telemetry,
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
                 });
                 return finish_search_dyn(
                     observer,
@@ -712,7 +716,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             next_frontier_nodes: next_frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
-            move_family_telemetry: layer_move_family_telemetry,
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
 
         if timed_out {
@@ -1117,7 +1121,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                         merge_nanos,
                         finalize_nanos,
                     ),
-                    move_family_telemetry: layer_move_family_telemetry,
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
                 });
                 return finish_search_2x2(
                     observer,
@@ -1224,7 +1230,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             next_frontier_nodes: next_frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
-            move_family_telemetry: layer_move_family_telemetry,
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
 
         if next_frontier.is_empty() {
@@ -1528,7 +1534,9 @@ fn search_beam_2x2_with_telemetry_and_observer(
                         merge_nanos,
                         finalize_nanos,
                     ),
-                    move_family_telemetry: layer_move_family_telemetry,
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
                 });
                 return finish_search_2x2(
                     observer,
@@ -1630,7 +1638,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
             next_frontier_nodes: frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
-            move_family_telemetry: layer_move_family_telemetry,
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
@@ -1953,7 +1961,9 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
                         merge_nanos,
                         finalize_nanos,
                     ),
-                    move_family_telemetry: layer_move_family_telemetry,
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
                 });
                 let best_exact_meet = best_exact_meet
                     .as_ref()
@@ -2061,7 +2071,7 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
             next_frontier_nodes: frontier.pending_len(),
             total_visited_nodes: telemetry.total_visited_nodes,
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
-            move_family_telemetry: layer_move_family_telemetry,
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
@@ -2382,7 +2392,9 @@ fn search_beam_dyn_with_telemetry(
                         merge_nanos,
                         finalize_nanos,
                     ),
-                    move_family_telemetry: layer_move_family_telemetry,
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
                 });
                 return finish_search_dyn(
                     observer,
@@ -2484,7 +2496,7 @@ fn search_beam_dyn_with_telemetry(
             next_frontier_nodes: frontier.len(),
             total_visited_nodes: telemetry.total_visited_nodes,
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
-            move_family_telemetry: layer_move_family_telemetry,
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
@@ -2806,7 +2818,9 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
                         merge_nanos,
                         finalize_nanos,
                     ),
-                    move_family_telemetry: layer_move_family_telemetry,
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
                 });
                 let best_exact_meet = best_exact_meet
                     .as_ref()
@@ -2914,7 +2928,7 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
             next_frontier_nodes: frontier.pending_len(),
             total_visited_nodes: telemetry.total_visited_nodes,
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
-            move_family_telemetry: layer_move_family_telemetry,
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
@@ -3057,6 +3071,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
             frontier_nodes: current_frontier_len,
             ..SearchLayerTelemetry::default()
         };
+        let mut layer_move_family_telemetry = MoveFamilyTelemetryAccumulator::default();
         let mut layer_records = observer
             .as_ref()
             .map(|_| Vec::with_capacity(layer.candidates_after_pruning.max(8)));
@@ -3071,7 +3086,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 .clone();
             layer.candidates_generated += successors.candidates;
             for (family, count) in successors.family_candidates {
-                move_family_telemetry_mut(&mut layer.move_family_telemetry, family)
+                move_family_telemetry_mut(&mut layer_move_family_telemetry, family)
                     .candidates_generated += count;
             }
 
@@ -3091,7 +3106,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 if successor.orig_matrix.max_entry() > config.max_entry {
                     continue;
                 }
-                move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
+                move_family_telemetry_mut(&mut layer_move_family_telemetry, successor.family)
                     .candidates_after_pruning += 1;
                 layer.candidates_after_pruning += 1;
 
@@ -3124,7 +3139,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 depths.insert(successor.matrix.clone(), next_depth);
                 orig.insert(successor.matrix.clone(), successor.orig_matrix.clone());
                 layer.discovered_nodes += 1;
-                move_family_telemetry_mut(&mut layer.move_family_telemetry, successor.family)
+                move_family_telemetry_mut(&mut layer_move_family_telemetry, successor.family)
                     .discovered_nodes += 1;
                 parents_with_progress.insert(current_canon.clone());
                 let mut record_status = SearchEdgeStatus::Discovered;
@@ -3132,7 +3147,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 if let Some(&other_depth) = other_depths.get(&successor.matrix) {
                     layer.collisions_with_other_frontier += 1;
                     move_family_telemetry_mut(
-                        &mut layer.move_family_telemetry,
+                        &mut layer_move_family_telemetry,
                         successor.family,
                     )
                     .exact_meets += 1;
@@ -3159,7 +3174,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                         layer.total_visited_nodes = telemetry.total_visited_nodes;
                         accumulate_move_family_telemetry(
                             &mut telemetry.move_family_telemetry,
-                            &layer.move_family_telemetry,
+                            &layer_move_family_telemetry,
                         );
                         if let Some(records) = layer_records.as_mut() {
                             records.push(SearchEdgeRecord {
@@ -3181,6 +3196,8 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                         if let Some(records) = layer_records.as_ref() {
                             emit_layer(&mut observer, records);
                         }
+                        layer.move_family_telemetry =
+                            finalize_move_family_telemetry(layer_move_family_telemetry);
                         telemetry.layers.push(layer);
                         return finish_search_2x2(
                             observer,
@@ -3239,11 +3256,12 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         telemetry.enqueued_nodes += layer.enqueued_nodes;
         accumulate_move_family_telemetry(
             &mut telemetry.move_family_telemetry,
-            &layer.move_family_telemetry,
+            &layer_move_family_telemetry,
         );
         if let Some(records) = layer_records.as_ref() {
             emit_layer(&mut observer, records);
         }
+        layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
 
         if next_frontier.is_empty() {
@@ -3364,6 +3382,7 @@ fn search_graph_only_dyn_with_telemetry(
             frontier_nodes: current_frontier_len,
             ..SearchLayerTelemetry::default()
         };
+        let mut layer_move_family_telemetry = MoveFamilyTelemetryAccumulator::default();
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
@@ -3390,7 +3409,7 @@ fn search_graph_only_dyn_with_telemetry(
             for (current_canon, successors) in computed {
                 layer.candidates_generated += successors.candidates;
                 for (family, count) in successors.family_candidates {
-                    move_family_telemetry_mut(&mut layer.move_family_telemetry, family)
+                    move_family_telemetry_mut(&mut layer_move_family_telemetry, family)
                         .candidates_generated += count;
                 }
 
@@ -3411,7 +3430,7 @@ fn search_graph_only_dyn_with_telemetry(
                         continue;
                     }
                     move_family_telemetry_mut(
-                        &mut layer.move_family_telemetry,
+                        &mut layer_move_family_telemetry,
                         successor.family,
                     )
                     .candidates_after_pruning += 1;
@@ -3430,7 +3449,7 @@ fn search_graph_only_dyn_with_telemetry(
                     orig.insert(successor.matrix.clone(), successor.orig_matrix.clone());
                     layer.discovered_nodes += 1;
                     move_family_telemetry_mut(
-                        &mut layer.move_family_telemetry,
+                        &mut layer_move_family_telemetry,
                         successor.family,
                     )
                     .discovered_nodes += 1;
@@ -3439,7 +3458,7 @@ fn search_graph_only_dyn_with_telemetry(
                     if let Some(&other_depth) = other_depths.get(&successor.matrix) {
                         layer.collisions_with_other_frontier += 1;
                         move_family_telemetry_mut(
-                            &mut layer.move_family_telemetry,
+                            &mut layer_move_family_telemetry,
                             successor.family,
                         )
                         .exact_meets += 1;
@@ -3465,8 +3484,10 @@ fn search_graph_only_dyn_with_telemetry(
                             layer.total_visited_nodes = telemetry.total_visited_nodes;
                             accumulate_move_family_telemetry(
                                 &mut telemetry.move_family_telemetry,
-                                &layer.move_family_telemetry,
+                                &layer_move_family_telemetry,
                             );
+                            layer.move_family_telemetry =
+                                finalize_move_family_telemetry(layer_move_family_telemetry);
                             telemetry.layers.push(layer);
                             return finish_search_dyn(
                                 observer,
@@ -3509,8 +3530,9 @@ fn search_graph_only_dyn_with_telemetry(
         telemetry.enqueued_nodes += layer.enqueued_nodes;
         accumulate_move_family_telemetry(
             &mut telemetry.move_family_telemetry,
-            &layer.move_family_telemetry,
+            &layer_move_family_telemetry,
         );
+        layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
 
         if timed_out {
@@ -3574,24 +3596,53 @@ fn approx_signature(m: &DynMatrix) -> ApproxSignature {
 }
 
 fn move_family_telemetry_mut<'a>(
-    map: &'a mut BTreeMap<String, SearchMoveFamilyTelemetry>,
-    family: &str,
+    map: &'a mut MoveFamilyTelemetryAccumulator,
+    family: &'static str,
 ) -> &'a mut SearchMoveFamilyTelemetry {
-    map.entry(family.to_string()).or_default()
+    map.entry(family).or_default()
+}
+
+fn accumulate_search_move_family_telemetry(
+    total: &mut SearchMoveFamilyTelemetry,
+    delta: &SearchMoveFamilyTelemetry,
+) {
+    total.candidates_generated += delta.candidates_generated;
+    total.candidates_after_pruning += delta.candidates_after_pruning;
+    total.discovered_nodes += delta.discovered_nodes;
+    total.exact_meets += delta.exact_meets;
+    total.approximate_other_side_hits += delta.approximate_other_side_hits;
+}
+
+fn accumulate_move_family_telemetry_accumulator(
+    total: &mut MoveFamilyTelemetryAccumulator,
+    delta: &MoveFamilyTelemetryAccumulator,
+) {
+    for (&family, family_delta) in delta {
+        let family_total = total.entry(family).or_default();
+        accumulate_search_move_family_telemetry(family_total, family_delta);
+    }
 }
 
 fn accumulate_move_family_telemetry(
     total: &mut BTreeMap<String, SearchMoveFamilyTelemetry>,
-    delta: &BTreeMap<String, SearchMoveFamilyTelemetry>,
+    delta: &MoveFamilyTelemetryAccumulator,
 ) {
-    for (family, family_delta) in delta {
-        let family_total = total.entry(family.clone()).or_default();
-        family_total.candidates_generated += family_delta.candidates_generated;
-        family_total.candidates_after_pruning += family_delta.candidates_after_pruning;
-        family_total.discovered_nodes += family_delta.discovered_nodes;
-        family_total.exact_meets += family_delta.exact_meets;
-        family_total.approximate_other_side_hits += family_delta.approximate_other_side_hits;
+    for (&family, family_delta) in delta {
+        if let Some(family_total) = total.get_mut(family) {
+            accumulate_search_move_family_telemetry(family_total, family_delta);
+        } else {
+            total.insert(family.to_string(), family_delta.clone());
+        }
     }
+}
+
+fn finalize_move_family_telemetry(
+    telemetry: MoveFamilyTelemetryAccumulator,
+) -> BTreeMap<String, SearchMoveFamilyTelemetry> {
+    telemetry
+        .into_iter()
+        .map(|(family, family_telemetry)| (family.to_string(), family_telemetry))
+        .collect()
 }
 
 fn visited_union_size(

@@ -511,3 +511,19 @@
   fast path stayed slightly above the current kept baseline across three reruns
   (`23076 ms`, `23004 ms`, `23082 ms` vs `22951 ms`). Details are in
   `research/notes/2026-04-16-k3-runtime-round-reverted-square-prep-and-telemetry-map.md`.
+
+- `sse-rust-5qq` Kept the telemetry follow-up by moving hot move-family
+  accumulation onto borrowed family labels.
+  Kept. Fresh rebuilt-binary profiles still sampled `move_family_telemetry_mut`
+  on the bounded hard shortcut control, including a `BTreeMap::entry` frame on
+  the pre-change tree. `src/search.rs` and `src/search/frontier.rs` now keep
+  hot expansion telemetry in an internal `AHashMap<&'static str, ...>` and
+  convert back to the public `BTreeMap<String, ...>` only when finalizing layer
+  or aggregate telemetry. On the same attempts-8 hard control, lag and guide
+  outcomes stayed flat while wall dropped from `6.83s` to `6.55s`. Because the
+  historical `research/runs/` baselines were absent locally, aggregate
+  confirmation used a clean `c70d511` snapshot harness rerun: baseline
+  `22722 ms` and `22712 ms` versus patched `22631 ms` and `22686 ms`, with
+  required hits, total points, and telemetry-focus score unchanged. Details are
+  in
+  `research/notes/2026-04-16-k3-telemetry-accumulator-borrowed-family-keys.md`.
