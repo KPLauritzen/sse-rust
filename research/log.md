@@ -119,6 +119,13 @@
 - `2c87aaa` Added a tightly bounded visible-coincidence `3x3 -> 3x3` refined split family.
   Failed. It preserved correctness but mostly duplicated existing `3x3` successors, so the hard-case telemetry stayed flat.
 
+## 2026-04-16 Balanced Sidecar Follow-up
+
+- `bc39307` Added a bounded `3x3 -> 2x2 <-balanced-> 2x2 -> 3x3` return-seam probe.
+  Kept as evidence. It turns the toy bridge hit into a genuine bounded `3x3`
+  move, but both Brix-Ruiz controls still stay disconnected at the same return
+  seam.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.
