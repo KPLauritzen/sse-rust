@@ -232,7 +232,7 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> Option<ReducedForm> {
     // so that |b'| < sqrt(D) and b' has same parity as b (i.e., b' ≡ b mod 2c).
 
     let mut seen_pre_reduction = HashSet::new();
-    while !is_positive_reduced(cur_a, cur_b, sqrt_d) {
+    while !is_positive_reduced(cur_a, cur_b, disc) {
         if !seen_pre_reduction.insert((cur_a, cur_b, cur_c)) {
             return None;
         }
@@ -272,8 +272,12 @@ fn reduce_form_positive(a: i64, b: i64, c: i64) -> Option<ReducedForm> {
     Some(best)
 }
 
-fn is_positive_reduced(a: i64, b: i64, sqrt_d: i64) -> bool {
-    a > 0 && b > 0 && sqrt_d - b < 2 * a && 2 * a < sqrt_d + b
+fn is_positive_reduced(a: i64, b: i64, disc: i64) -> bool {
+    a > 0
+        && b > 0
+        && b * b < disc
+        && (2 * a - b) * (2 * a - b) < disc
+        && disc < (2 * a + b) * (2 * a + b)
 }
 
 fn reduce_form_positive_step(b: i64, c: i64, disc: i64, sqrt_d: i64) -> Option<(i64, i64, i64)> {
