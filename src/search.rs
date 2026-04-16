@@ -553,10 +553,11 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         let merge_started = Instant::now();
 
         for expansion in &expansions {
-            let parent_orig = orig
-                .get(&expansion.parent_canon)
-                .expect("parent node should have an original matrix")
-                .clone();
+            let parent_orig = layer_records.as_ref().map(|_| {
+                orig.get(&expansion.parent_canon)
+                    .expect("parent node should have an original matrix")
+                    .clone()
+            });
             if parent.contains_key(&expansion.next_canon) {
                 collisions_with_seen += 1;
                 if let Some(records) = layer_records.as_mut() {
@@ -565,7 +566,9 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                         direction,
                         move_family: expansion.move_family,
                         from_canonical: expansion.parent_canon.clone(),
-                        from_orig: parent_orig.clone(),
+                        from_orig: parent_orig
+                            .clone()
+                            .expect("observer layer records need a parent matrix"),
                         to_canonical: expansion.next_canon.clone(),
                         to_orig: expansion.next_orig.clone(),
                         from_depth: layer_depth,
@@ -616,7 +619,9 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                             direction,
                             move_family: expansion.move_family,
                             from_canonical: expansion.parent_canon.clone(),
-                            from_orig: parent_orig.clone(),
+                            from_orig: parent_orig
+                                .clone()
+                                .expect("observer layer records need a parent matrix"),
                             to_canonical: expansion.next_canon.clone(),
                             to_orig: expansion.next_orig.clone(),
                             from_depth: layer_depth,
@@ -653,7 +658,9 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                         direction,
                         move_family: expansion.move_family,
                         from_canonical: expansion.parent_canon.clone(),
-                        from_orig: parent_orig.clone(),
+                        from_orig: parent_orig
+                            .clone()
+                            .expect("observer layer records need a parent matrix"),
                         to_canonical: expansion.next_canon.clone(),
                         to_orig: expansion.next_orig.clone(),
                         from_depth: layer_depth,
@@ -736,7 +743,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     direction,
                     move_family: expansion.move_family,
                     from_canonical: expansion.parent_canon.clone(),
-                    from_orig: parent_orig,
+                    from_orig: parent_orig.expect("observer layer records need a parent matrix"),
                     to_canonical: expansion.next_canon.clone(),
                     to_orig: expansion.next_orig.clone(),
                     from_depth: layer_depth,
