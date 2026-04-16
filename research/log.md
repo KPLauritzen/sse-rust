@@ -150,6 +150,14 @@
   zero `SearchEvent::Layer` payloads for those runs, so a collector/export-only
   tweak could not make either held-out family rankable this round.
 
+- `working tree` Emitted observer layer events for dynamic mixed endpoint BFS searches.
+  Kept. `search_sse_with_telemetry_dyn_with_deadline_and_observer` now mirrors
+  its telemetry layers onto `SearchEvent::Layer`, and a bounded rerun of
+  `lind_marcus_a_to_c` turned that held-out family slice from `ranked=0/1`
+  and `layers=0` into `ranked=1/1` and `layers=2`. Durable evidence lives in
+  `research/notes/2026-04-16-dynamic-mixed-endpoint-layer-events.md` and
+  `research/layer_contrast_signal_corpus_lind_marcus_2026-04-16.json`.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.

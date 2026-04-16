@@ -546,12 +546,36 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         let mut parents_with_progress = HashSet::new();
         let mut enqueued_nodes = 0usize;
         let mut layer_move_family_telemetry = expansion_stats.move_family_telemetry.clone();
+        let mut layer_records = observer
+            .as_ref()
+            .map(|_| Vec::with_capacity(expansions.len()));
         let next_depth = layer_depth + 1;
         let merge_started = Instant::now();
 
         for expansion in &expansions {
+            let parent_orig = orig
+                .get(&expansion.parent_canon)
+                .expect("parent node should have an original matrix")
+                .clone();
             if parent.contains_key(&expansion.next_canon) {
                 collisions_with_seen += 1;
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: SearchEdgeStatus::SeenCollision,
+                        approximate_other_side_hit: false,
+                        enqueued: false,
+                    });
+                }
                 continue;
             }
 
@@ -568,6 +592,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 other_signatures.contains(&approx_signature(&expansion.next_canon));
             let enqueued =
                 expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry;
+            let mut record_status = SearchEdgeStatus::Discovered;
 
             if let Some(&other_depth) = other_depths.get(&expansion.next_canon) {
                 collisions_with_other_frontier += 1;
@@ -582,8 +607,26 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     expansion.move_family,
                 )
                 .discovered_nodes += 1;
+                record_status = SearchEdgeStatus::ExactMeet;
                 let path_depth = next_depth + other_depth;
                 if path_depth > config.max_lag {
+                    if let Some(records) = layer_records.as_mut() {
+                        records.push(SearchEdgeRecord {
+                            layer_index,
+                            direction,
+                            move_family: expansion.move_family,
+                            from_canonical: expansion.parent_canon.clone(),
+                            from_orig: parent_orig.clone(),
+                            to_canonical: expansion.next_canon.clone(),
+                            to_orig: expansion.next_orig.clone(),
+                            from_depth: layer_depth,
+                            to_depth: next_depth,
+                            step: expansion.step.clone(),
+                            status: record_status,
+                            approximate_other_side_hit: approximate_hit,
+                            enqueued,
+                        });
+                    }
                     continue;
                 }
                 let merge_nanos = elapsed_nanos(merge_started);
@@ -604,6 +647,26 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     &mut telemetry.move_family_telemetry,
                     &layer_move_family_telemetry,
                 );
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: record_status,
+                        approximate_other_side_hit: approximate_hit,
+                        enqueued,
+                    });
+                }
+                if let Some(records) = layer_records.as_ref() {
+                    emit_layer(&mut observer, records);
+                }
                 let finalize_nanos = elapsed_nanos(finalize_started);
                 telemetry.layers.push(SearchLayerTelemetry {
                     layer_index,
@@ -667,6 +730,23 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 next_frontier.push_back(expansion.next_canon.clone());
                 enqueued_nodes += 1;
             }
+            if let Some(records) = layer_records.as_mut() {
+                records.push(SearchEdgeRecord {
+                    layer_index,
+                    direction,
+                    move_family: expansion.move_family,
+                    from_canonical: expansion.parent_canon.clone(),
+                    from_orig: parent_orig,
+                    to_canonical: expansion.next_canon.clone(),
+                    to_orig: expansion.next_orig.clone(),
+                    from_depth: layer_depth,
+                    to_depth: next_depth,
+                    step: expansion.step.clone(),
+                    status: record_status,
+                    approximate_other_side_hit: approximate_hit,
+                    enqueued,
+                });
+            }
         }
 
         let merge_nanos = elapsed_nanos(merge_started);
@@ -695,6 +775,9 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
         );
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
+        }
         let finalize_nanos = elapsed_nanos(finalize_started);
         telemetry.layers.push(SearchLayerTelemetry {
             layer_index,
@@ -3695,6 +3778,7 @@ mod tests {
     use std::cmp::Ordering;
 
     use super::*;
+    use crate::search_observer::{SearchEvent, SearchObserver};
     use crate::types::{
         GuideArtifact, GuideArtifactCompatibility, GuideArtifactPayload, GuideArtifactProvenance,
         GuideArtifactValidation, GuidedRefinementConfig,
@@ -3710,6 +3794,19 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+        }
+    }
+
+    #[derive(Default)]
+    struct LayerEventProbe {
+        layer_sizes: Vec<usize>,
+    }
+
+    impl SearchObserver for LayerEventProbe {
+        fn on_event(&mut self, event: &SearchEvent) {
+            if let SearchEvent::Layer(edges) = event {
+                self.layer_sizes.push(edges.len());
+            }
         }
     }
 
@@ -5262,6 +5359,31 @@ mod tests {
             assert!(telemetry.frontier_nodes_expanded >= 1);
             assert!(telemetry.factorisations_enumerated >= telemetry.candidates_after_pruning);
         }
+    }
+
+    #[test]
+    fn test_dyn_mixed_search_observer_emits_layers_for_lind_marcus_case() {
+        let a = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 0, 1, 1, 1, 1]);
+        let b = DynMatrix::new(1, 1, vec![2]);
+        let config = SearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 2,
+            max_entry: 2,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        };
+        let mut observer = LayerEventProbe::default();
+
+        let (result, telemetry) =
+            search_sse_with_telemetry_dyn_and_observer(&a, &b, &config, Some(&mut observer));
+
+        assert!(matches!(result, DynSseResult::Equivalent(_)));
+        assert!(!telemetry.layers.is_empty());
+        assert_eq!(observer.layer_sizes.len(), telemetry.layers.len());
+        assert!(observer.layer_sizes.iter().all(|size| *size > 0));
     }
 
     #[test]

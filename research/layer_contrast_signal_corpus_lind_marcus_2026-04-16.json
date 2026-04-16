@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "layer_contrast_signal_corpus",
+  "label_contract": "within_layer_continuation_quality_v1",
+  "witness_manifest_path": "research/witness_corpus_manifest.json",
+  "family_benchmark_path": "research/ranking_signal_family_benchmark_v1.json",
+  "config": {
+    "guide_artifact_paths": [],
+    "path_dbs": [],
+    "cases_paths": [
+      "research/cases.json"
+    ],
+    "case_ids": [
+      "lind_marcus_a_to_c"
+    ],
+    "campaign_ids": [],
+    "min_gap": 2,
+    "max_gap": 4,
+    "max_cases": 48,
+    "max_endpoint_dim": 3,
+    "max_intermediate_dim": 5,
+    "max_entry": 6,
+    "search_mode": "mixed"
+  },
+  "summary": {
+    "source_paths": 0,
+    "path_segment_cases": 0,
+    "endpoint_cases": 1,
+    "solved_cases": 1,
+    "unsolved_cases": 0,
+    "unranked_solved_cases": 0,
+    "ranked_solution_nodes": 1,
+    "solution_nodes": 1,
+    "exported_cases": 1,
+    "exported_rankable_cases": 1,
+    "exported_rankable_layers": 2,
+    "exported_matched_candidates": 2,
+    "exported_families": [
+      "lind_marcus"
+    ]
+  },
+  "cases": [
+    {
+      "label": "lind_marcus_a_to_c",
+      "budget_lag": 2,
+      "solved_lag": 2,
+      "solution_nodes": 1,
+      "ranked_nodes": 1,
+      "layer_count": 2,
+      "pair_metadata": {
+        "pair_id": "lind_marcus_a_to_c",
+        "evaluation_family_id": "lind_marcus",
+        "benchmark_role": "heldout_benchmark",
+        "benchmark_case_id": "lind_marcus_a_to_c"
+      },
+      "contrast_source_kind": "endpoint_case",
+      "rankable_layers": [
+        {
+          "layer_index": 0,
+          "direction": "forward",
+          "layer_size": 1,
+          "matched_witness_candidates": 1,
+          "best_remaining_witness_lag": 1,
+          "dedup_scope_key": "lind_marcus_a_to_c|lind_marcus_a_to_c|forward",
+          "matched_candidates": [
+            {
+              "candidate_key": "2x2:1,1,1,1",
+              "continuation_label": "best_continuation",
+              "remaining_witness_lag": 1,
+              "solution_path_index": 1
+            }
+          ]
+        },
+        {
+          "layer_index": 1,
+          "direction": "backward",
+          "layer_size": 2,
+          "matched_witness_candidates": 1,
+          "best_remaining_witness_lag": 1,
+          "dedup_scope_key": "lind_marcus_a_to_c|lind_marcus_a_to_c|backward",
+          "matched_candidates": [
+            {
+              "candidate_key": "2x2:1,1,1,1",
+              "continuation_label": "best_continuation",
+              "remaining_witness_lag": 1,
+              "solution_path_index": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
