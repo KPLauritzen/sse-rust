@@ -21,6 +21,7 @@ fn main() {
     let mut search_bridge_neighbor_seam = false;
     let mut search_bridge_return_seam = false;
     let mut search_bridge_insplit_return_seam = false;
+    let mut search_bridge_insplit_source_return_seam = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -64,9 +65,12 @@ fn main() {
             "--bridge-insplit-return-seam" => {
                 search_bridge_insplit_return_seam = true;
             }
+            "--bridge-insplit-source-return-seam" => {
+                search_bridge_insplit_source_return_seam = true;
+            }
             "--help" | "-h" => {
                 println!(
-                    "usage: find_balanced [--case brix_k3|brix_k4|toy] [--max-common-dim N] [--max-entry N] [--neighbors] [--zigzag] [--bridge-max-entry N] [--bridge-neighbor-seam] [--bridge-return-seam] [--bridge-insplit-return-seam]"
+                    "usage: find_balanced [--case brix_k3|brix_k4|toy] [--max-common-dim N] [--max-entry N] [--neighbors] [--zigzag] [--bridge-max-entry N] [--bridge-neighbor-seam] [--bridge-return-seam] [--bridge-insplit-return-seam] [--bridge-insplit-source-return-seam]"
                 );
                 return;
             }
@@ -258,6 +262,67 @@ fn main() {
         );
         if b_hits.is_empty() {
             println!("No bounded B(out)->A(in) balanced bridge-return seam found");
+        } else {
+            print_bridge_return_hits(&b_hits);
+        }
+    }
+
+    if search_bridge_insplit_source_return_seam {
+        println!();
+        let a_source_states = canonical_insplit_states(&a);
+        let b_source_states = canonical_insplit_states(&b);
+        let a_target_states = canonical_outsplit_states(&a);
+        let b_target_states = canonical_outsplit_states(&b);
+        println!(
+            "A-side canonical 3x3 insplit source states ({}): {:?}",
+            a_source_states.len(),
+            a_source_states
+        );
+        println!(
+            "B-side canonical 3x3 outsplit target states ({}): {:?}",
+            b_target_states.len(),
+            b_target_states
+        );
+
+        let a_hits = collect_balanced_bridge_return_hits(
+            &a_source_states,
+            &b_target_states,
+            bridge_max_entry,
+            &config,
+        );
+        println!(
+            "A(in)->B(out) balanced bridge-return hits: {}",
+            a_hits.len()
+        );
+        if a_hits.is_empty() {
+            println!("No bounded A(in)->B(out) balanced bridge-return seam found");
+        } else {
+            print_bridge_return_hits(&a_hits);
+        }
+
+        println!(
+            "B-side canonical 3x3 insplit source states ({}): {:?}",
+            b_source_states.len(),
+            b_source_states
+        );
+        println!(
+            "A-side canonical 3x3 outsplit target states ({}): {:?}",
+            a_target_states.len(),
+            a_target_states
+        );
+
+        let b_hits = collect_balanced_bridge_return_hits(
+            &b_source_states,
+            &a_target_states,
+            bridge_max_entry,
+            &config,
+        );
+        println!(
+            "B(in)->A(out) balanced bridge-return hits: {}",
+            b_hits.len()
+        );
+        if b_hits.is_empty() {
+            println!("No bounded B(in)->A(out) balanced bridge-return seam found");
         } else {
             print_bridge_return_hits(&b_hits);
         }

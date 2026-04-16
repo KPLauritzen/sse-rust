@@ -899,6 +899,77 @@ mod tests {
     }
 
     #[test]
+    fn test_toy_insplit_source_balanced_bridge_return_hits_3x3_outsplit_state() {
+        let a = SqMatrix::new([[1, 0], [1, 0]]);
+        let b = SqMatrix::new([[0, 1], [0, 1]]);
+        let a_source_states = canonical_insplit_states_3x3(&a);
+        let b_target_states = canonical_outsplit_states_3x3(&b);
+
+        let hits = collect_balanced_bridge_return_hits_3x3(
+            &a_source_states,
+            &b_target_states,
+            1,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 1,
+                max_entry: 1,
+            },
+        );
+
+        assert_eq!(hits.len(), 4);
+        for (_, hit) in hits {
+            assert!(b_target_states.contains(&hit.matrix));
+            assert_eq!(hit.matrix.rows, 3);
+            assert_eq!(hit.matrix.cols, 3);
+            assert!(verify_balanced_elementary_witness_2x2(
+                &hit.source_bridge,
+                &hit.target_bridge,
+                &hit.witness
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn test_brix_ruiz_k3_has_no_insplit_source_balanced_bridge_return_hit() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let a_source_states = canonical_insplit_states_3x3(&a);
+        let b_target_states = canonical_outsplit_states_3x3(&b);
+
+        let hits = collect_balanced_bridge_return_hits_3x3(
+            &a_source_states,
+            &b_target_states,
+            8,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn test_brix_ruiz_k4_has_no_insplit_source_balanced_bridge_return_hit() {
+        let a = SqMatrix::new([[1, 4], [3, 1]]);
+        let b = SqMatrix::new([[1, 12], [1, 1]]);
+        let a_source_states = canonical_insplit_states_3x3(&a);
+        let b_target_states = canonical_outsplit_states_3x3(&b);
+
+        let hits = collect_balanced_bridge_return_hits_3x3(
+            &a_source_states,
+            &b_target_states,
+            8,
+            &BalancedSearchConfig2x2 {
+                max_common_dim: 2,
+                max_entry: 8,
+            },
+        );
+
+        assert!(hits.is_empty());
+    }
+
+    #[test]
     fn test_toy_balanced_bridge_insplit_return_hits_3x3_insplit_state() {
         let a = SqMatrix::new([[1, 0], [1, 0]]);
         let b = SqMatrix::new([[0, 1], [0, 1]]);
