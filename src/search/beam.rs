@@ -131,6 +131,11 @@ impl BeamBfsHandoffFrontier {
     pub(super) fn push_beam(&mut self, entry: BeamFrontierEntry) {
         if let Some(overflow) = self.active.push(entry) {
             self.defer_entry(overflow);
+            if let Some(cap) = self.deferred_cap {
+                while self.deferred.len() > cap {
+                    self.deferred.pop_back();
+                }
+            }
         }
     }
 
@@ -145,11 +150,6 @@ impl BeamBfsHandoffFrontier {
             .position(|pending| compare_deferred_beam_entries(&entry, pending) == Ordering::Less)
             .unwrap_or(self.deferred.len());
         self.deferred.insert(insert_at, entry);
-        if let Some(cap) = self.deferred_cap {
-            while self.deferred.len() > cap {
-                self.deferred.pop_back();
-            }
-        }
     }
 
     pub(super) fn pop_beam_batch(&mut self) -> Vec<BeamFrontierEntry> {
@@ -456,25 +456,46 @@ mod tests {
 
     #[test]
     fn test_beam_bfs_handoff_frontier_caps_deferred_overflow() {
-        let mut frontier = BeamBfsHandoffFrontier::new(2, Some(2));
+        let mut frontier = BeamBfsHandoffFrontier::new(1, Some(1));
         frontier.push_beam(beam_entry(1, 1, 1, false, 0));
         frontier.push_beam(beam_entry(2, 1, 2, false, 1));
         frontier.push_beam(beam_entry(3, 1, 3, false, 2));
+
+        assert_eq!(frontier.active_len(), 1);
+        assert_eq!(frontier.pending_len(), 2);
+
+        let bfs_batch = frontier.pop_bfs_batch();
+        assert_eq!(bfs_batch.len(), 1);
+        assert_eq!(bfs_batch[0].canonical, DynMatrix::new(1, 1, vec![2]));
+        assert_eq!(bfs_batch[0].depth, 1);
+        assert!(frontier.pop_bfs_batch().is_empty());
+    }
+
+    #[test]
+    fn test_beam_bfs_handoff_frontier_does_not_cap_bfs_insertions() {
+        let mut frontier = BeamBfsHandoffFrontier::new(1, Some(1));
+        frontier.push_beam(beam_entry(1, 1, 1, false, 0));
+        frontier.push_beam(beam_entry(2, 1, 2, false, 1));
         frontier.push_bfs(beam_entry(4, 2, 4, false, 3));
         frontier.push_bfs(beam_entry(5, 3, 5, false, 4));
 
-        assert_eq!(frontier.active_len(), 2);
+        assert_eq!(frontier.active_len(), 1);
         assert_eq!(frontier.pending_len(), 4);
 
         let first_batch = frontier.pop_bfs_batch();
         assert_eq!(first_batch.len(), 1);
-        assert_eq!(first_batch[0].canonical, DynMatrix::new(1, 1, vec![3]));
+        assert_eq!(first_batch[0].canonical, DynMatrix::new(1, 1, vec![2]));
         assert_eq!(first_batch[0].depth, 1);
 
         let second_batch = frontier.pop_bfs_batch();
         assert_eq!(second_batch.len(), 1);
         assert_eq!(second_batch[0].canonical, DynMatrix::new(1, 1, vec![4]));
         assert_eq!(second_batch[0].depth, 2);
+
+        let third_batch = frontier.pop_bfs_batch();
+        assert_eq!(third_batch.len(), 1);
+        assert_eq!(third_batch[0].canonical, DynMatrix::new(1, 1, vec![5]));
+        assert_eq!(third_batch[0].depth, 3);
 
         assert!(frontier.pop_bfs_batch().is_empty());
     }
