@@ -376,3 +376,15 @@
   `profile_gl2z_similarity_2x2` binary exposes this as a research-facing dossier
   for named or explicit pairs without touching the main search. Focused tests
   cover irreducible, split, repeated-eigenvalue, and band-classification cases.
+
+- `working tree` Wrote a durable last-day repo summary note.
+  Added `research/notes/2026-04-16-last-24h-repo-summary.md` to summarize the
+  highest-signal `git` and `bd` changes across solver behavior, harness and
+  benchmark surfaces, literature findings, terminology rollout, and backlog
+  shifts over roughly `2026-04-15 04:15 UTC` through `2026-04-16 04:15 UTC`.
+
+- `working tree` Wrote autoresearch-round recommendations from the same review.
+  Added `research/notes/2026-04-16-autoresearch-round-recommendations.md` with
+  concrete suggestions for `research/program.md`, `research/cases.json`,
+  harness-case tuning, supporting doc wording, and which fresh ideas should be
+  elevated into program-level guidance.
