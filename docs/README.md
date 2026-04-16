@@ -28,6 +28,9 @@ This repo now uses three documentation layers with different jobs:
 - [`graph-proposal-shortlist-rounds.md`](graph-proposal-shortlist-rounds.md)
   standardizes the default bounded graph-proposal shortlist evidence round,
   including the runner, output fields, and keep/revert interpretation.
+- [`autoresearch-round-scorecards.md`](autoresearch-round-scorecards.md)
+  standardizes the default useful-reach and budget scorecards for common
+  autoresearch round types so workers can cite a reusable keep/revert contract.
 - [`research-ideas.md`](research-ideas.md) is the long-horizon idea bank from
   paper reading and code review. It should collect plausible directions and
   synthesis, not a ranked backlog.

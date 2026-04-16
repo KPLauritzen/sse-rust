@@ -45,6 +45,11 @@ for repository changes to that policy.
 
 Benchmark-style case policy is documented in
 [`../docs/research-harness-benchmark-policy.md`](../docs/research-harness-benchmark-policy.md).
+Default per-round useful-reach and budget scorecards are documented in
+[`../docs/autoresearch-round-scorecards.md`](../docs/autoresearch-round-scorecards.md).
+Round-specific contracts such as
+[`../docs/graph-proposal-shortlist-rounds.md`](../docs/graph-proposal-shortlist-rounds.md)
+override that default.
 
 When a run emits JSON, each case result includes a case-level summary plus
 `result_model`, aggregate telemetry, and per-layer telemetry. Use that shape to

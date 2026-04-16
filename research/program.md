@@ -120,6 +120,11 @@ Read the evidence in three ledgers:
   - `factorisations_enumerated`,
   - other work counters.
 
+For common round types, use the reusable scorecards in
+`docs/autoresearch-round-scorecards.md`. Before a new round family, record the
+round type, fixed bound, useful-reach fields, and budget fields in the `bd`
+issue or round note so later workers can rerun the same judgment.
+
 Raw work counters by themselves are **not** success metrics. Fewer candidates,
 more pruning, or lower factorisation counts are only good if they preserve or
 improve useful reach.
@@ -131,14 +136,7 @@ Use this decision order:
 2. Direct project win:
    - keep immediately if it moves a project goal directly.
 3. Otherwise judge by round type:
-   - throughput round:
-     - keep if useful reach stays flat and budget improves.
-   - pruning round:
-     - keep if useful reach improves, or stays flat while budget improves.
-   - widening round:
-     - keep if useful reach improves under the same cap, even if raw work rises.
-   - ranking or admission round:
-     - keep if productive continuity signals improve under the same cap.
+   - use `docs/autoresearch-round-scorecards.md` as the default contract.
 4. Revert if the change only improves vanity counters:
    - fewer candidates,
    - more pruning,
