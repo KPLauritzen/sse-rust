@@ -145,6 +145,7 @@ pub struct PositiveConjugacyWitness2x2 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PositiveConjugacyProposalKind2x2 {
     RoundedSampleWaypoint,
+    InvariantCompatibleReprojection,
 }
 
 /// Ranked discrete proposal derived from a sampled positive-conjugacy witness.
@@ -334,6 +335,109 @@ pub fn derive_positive_conjugacy_proposals_2x2(
     proposals
 }
 
+/// Reproject a sampled positive-conjugacy witness onto exact `2x2` integer
+/// candidates that already match the endpoints' cheap arithmetic invariants.
+///
+/// This stays in the evidence lane: we still use sampled positive conjugacy as a
+/// proposal source, but instead of retaining raw floor/ceil shadows we snap
+/// each sampled real matrix to the nearest positive integer matrix with the
+/// endpoints' shared trace/determinant data. When the endpoints share both
+/// diagonal entries, the reprojection keeps that diagonal pair exactly; in the
+/// general `2x2` case it keeps the shared trace and determinant.
+pub fn derive_invariant_compatible_positive_conjugacy_proposals_2x2(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    witness: &PositiveConjugacyWitness2x2,
+    config: &PositiveConjugacyProposalConfig2x2,
+) -> Vec<PositiveConjugacyProposal2x2> {
+    if config.max_proposals == 0 || witness.sampled_path.is_empty() {
+        return Vec::new();
+    }
+
+    let invariant_candidates = enumerate_invariant_compatible_candidates_2x2(source, target)
+        .into_iter()
+        .filter(|candidate| {
+            config.include_endpoints || (candidate != source && candidate != target)
+        })
+        .collect::<Vec<_>>();
+    if invariant_candidates.is_empty() {
+        return Vec::new();
+    }
+
+    #[derive(Clone, Copy)]
+    struct BestProjection {
+        nearest_sample_index: usize,
+        shadow_l1_distance: f64,
+    }
+
+    let mut best_by_matrix: BTreeMap<SqMatrix<2>, BestProjection> = BTreeMap::new();
+    for (sample_index, sample) in witness.sampled_path.iter().enumerate() {
+        let Some((candidate, shadow_l1_distance)) = invariant_candidates
+            .iter()
+            .map(|candidate| (candidate, sample.entrywise_l1_to_sq(candidate)))
+            .min_by(|left, right| {
+                left.1
+                    .total_cmp(&right.1)
+                    .then(
+                        l1_distance_to_nearest_endpoint(left.0, source, target)
+                            .cmp(&l1_distance_to_nearest_endpoint(right.0, source, target)),
+                    )
+                    .then(left.0.max_entry().cmp(&right.0.max_entry()))
+                    .then(left.0.cmp(right.0))
+            })
+        else {
+            continue;
+        };
+
+        match best_by_matrix.get_mut(candidate) {
+            Some(best) if shadow_l1_distance < best.shadow_l1_distance => {
+                *best = BestProjection {
+                    nearest_sample_index: sample_index,
+                    shadow_l1_distance,
+                };
+            }
+            None => {
+                best_by_matrix.insert(
+                    candidate.clone(),
+                    BestProjection {
+                        nearest_sample_index: sample_index,
+                        shadow_l1_distance,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let sample_count = witness.sampled_path.len();
+    let mut proposals = best_by_matrix
+        .into_iter()
+        .map(|(matrix, best)| PositiveConjugacyProposal2x2 {
+            endpoint_l1_distance: l1_distance_to_nearest_endpoint(&matrix, source, target),
+            preserves_endpoint_diagonal: matrix.data[0][0] == source.data[0][0]
+                && matrix.data[0][0] == target.data[0][0]
+                && matrix.data[1][1] == source.data[1][1]
+                && matrix.data[1][1] == target.data[1][1],
+            stays_within_endpoint_box: stays_within_endpoint_box(&matrix, source, target),
+            nearest_sample_index: best.nearest_sample_index,
+            nearest_sample_t: sample_parameter(best.nearest_sample_index, sample_count),
+            shadow_l1_distance: best.shadow_l1_distance,
+            kind: PositiveConjugacyProposalKind2x2::InvariantCompatibleReprojection,
+            matrix,
+        })
+        .collect::<Vec<_>>();
+
+    proposals.sort_by(|left, right| {
+        left.shadow_l1_distance
+            .total_cmp(&right.shadow_l1_distance)
+            .then(left.endpoint_l1_distance.cmp(&right.endpoint_l1_distance))
+            .then(left.matrix.max_entry().cmp(&right.matrix.max_entry()))
+            .then(left.matrix.cmp(&right.matrix))
+    });
+    proposals.truncate(config.max_proposals);
+    proposals
+}
+
 /// Rank actual local 2x2 move candidates by proximity to sampled
 /// positive-conjugacy proposals.
 ///
@@ -500,6 +604,81 @@ fn stays_within_endpoint_box(
     true
 }
 
+fn enumerate_invariant_compatible_candidates_2x2(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+) -> Vec<SqMatrix<2>> {
+    if source.trace() != target.trace() || source.det() != target.det() {
+        return Vec::new();
+    }
+
+    let mut candidates = BTreeMap::<SqMatrix<2>, ()>::new();
+
+    if source.data[0][0] == target.data[0][0] && source.data[1][1] == target.data[1][1] {
+        let diag00 = source.data[0][0];
+        let diag11 = source.data[1][1];
+        let product = i128::from(diag00) * i128::from(diag11) - i128::from(source.det());
+        if let Ok(product) = u64::try_from(product) {
+            let mut upper_right = 1u64;
+            while upper_right * upper_right <= product {
+                if product % upper_right == 0 {
+                    let lower_left = product / upper_right;
+                    for (upper_right, lower_left) in
+                        [(upper_right, lower_left), (lower_left, upper_right)]
+                    {
+                        let (Ok(upper_right), Ok(lower_left)) =
+                            (u32::try_from(upper_right), u32::try_from(lower_left))
+                        else {
+                            continue;
+                        };
+                        candidates.insert(
+                            SqMatrix::new([[diag00, upper_right], [lower_left, diag11]]),
+                            (),
+                        );
+                    }
+                }
+                upper_right += 1;
+            }
+        }
+    } else {
+        let trace = source.trace();
+        let det = source.det();
+        for upper_left in 1..trace {
+            let lower_right = trace - upper_left;
+            let product = i128::from(upper_left) * i128::from(lower_right) - i128::from(det);
+            let Ok(product) = u64::try_from(product) else {
+                continue;
+            };
+
+            let mut upper_right = 1u64;
+            while upper_right * upper_right <= product {
+                if product % upper_right == 0 {
+                    let lower_left = product / upper_right;
+                    for (upper_right, lower_left) in
+                        [(upper_right, lower_left), (lower_left, upper_right)]
+                    {
+                        let (Ok(upper_left), Ok(upper_right), Ok(lower_left), Ok(lower_right)) = (
+                            u32::try_from(upper_left),
+                            u32::try_from(upper_right),
+                            u32::try_from(lower_left),
+                            u32::try_from(lower_right),
+                        ) else {
+                            continue;
+                        };
+                        candidates.insert(
+                            SqMatrix::new([[upper_left, upper_right], [lower_left, lower_right]]),
+                            (),
+                        );
+                    }
+                }
+                upper_right += 1;
+            }
+        }
+    }
+
+    candidates.into_keys().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,6 +826,83 @@ mod tests {
     }
 
     #[test]
+    fn test_brix_ruiz_k3_invariant_reprojection_recovers_nearest_exact_interior_candidate() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
+            &a,
+            &b,
+            &PositiveConjugacySearchConfig2x2 {
+                max_conjugator_entry: 4,
+                sample_points: 64,
+            },
+        ) else {
+            panic!("expected a witness for the k=3 pair");
+        };
+
+        let proposals = derive_invariant_compatible_positive_conjugacy_proposals_2x2(
+            &a,
+            &b,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2 {
+                max_proposals: 4,
+                include_endpoints: false,
+            },
+        );
+
+        let proposal_matrices = proposals
+            .iter()
+            .map(|proposal| proposal.matrix.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(proposal_matrices, vec![SqMatrix::new([[1, 2], [3, 1]])]);
+        assert!(proposals.iter().all(|proposal| {
+            proposal.kind == PositiveConjugacyProposalKind2x2::InvariantCompatibleReprojection
+        }));
+        assert!(proposals
+            .iter()
+            .all(|proposal| proposal.matrix.det() == a.det()));
+    }
+
+    #[test]
+    fn test_riedel_baker_k3_invariant_reprojection_uses_trace_determinant_family() {
+        let a = SqMatrix::new([[3, 2], [1, 3]]);
+        let b = SqMatrix::new([[2, 1], [1, 4]]);
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
+            &a,
+            &b,
+            &PositiveConjugacySearchConfig2x2 {
+                max_conjugator_entry: 4,
+                sample_points: 64,
+            },
+        ) else {
+            panic!("expected a witness for the Riedel/Baker k=3 pair");
+        };
+
+        let proposals = derive_invariant_compatible_positive_conjugacy_proposals_2x2(
+            &a,
+            &b,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2 {
+                max_proposals: 4,
+                include_endpoints: false,
+            },
+        );
+
+        assert_eq!(proposals.len(), 1);
+        assert!(matches!(
+            proposals[0].matrix,
+            SqMatrix {
+                data: [[3, 1], [2, 3]]
+            } | SqMatrix {
+                data: [[4, 1], [1, 2]]
+            }
+        ));
+        assert_eq!(proposals[0].matrix.trace(), a.trace());
+        assert_eq!(proposals[0].matrix.det(), a.det());
+        assert!(!proposals[0].preserves_endpoint_diagonal);
+    }
+
+    #[test]
     fn test_constant_positive_witness_has_no_interior_waypoint_proposals() {
         let a = SqMatrix::new([[1, 2], [2, 1]]);
         let PositiveConjugacySearchResult2x2::Equivalent(witness) = find_positive_conjugacy_2x2(
@@ -667,6 +923,21 @@ mod tests {
             &PositiveConjugacyProposalConfig2x2::default(),
         );
         assert!(proposals.is_empty());
+
+        let reprojected = derive_invariant_compatible_positive_conjugacy_proposals_2x2(
+            &a,
+            &a,
+            &witness,
+            &PositiveConjugacyProposalConfig2x2::default(),
+        );
+        assert!(!reprojected.is_empty());
+        assert!(reprojected.iter().all(|proposal| proposal.matrix != a));
+        assert!(reprojected
+            .iter()
+            .all(|proposal| proposal.matrix.trace() == a.trace()));
+        assert!(reprojected
+            .iter()
+            .all(|proposal| proposal.matrix.det() == a.det()));
     }
 
     #[test]

@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
 use sse_core::conjugacy::{
+    derive_invariant_compatible_positive_conjugacy_proposals_2x2,
     derive_positive_conjugacy_proposals_2x2, find_positive_conjugacy_2x2,
-    rank_positive_conjugacy_seed_candidates_2x2, PositiveConjugacyProposalConfig2x2,
+    rank_positive_conjugacy_seed_candidates_2x2, PositiveConjugacyProposal2x2,
+    PositiveConjugacyProposalConfig2x2, PositiveConjugacyProposalKind2x2,
     PositiveConjugacySearchConfig2x2, PositiveConjugacySearchResult2x2,
     PositiveConjugacySeedCandidate2x2, PositiveConjugacySeedConfig2x2,
 };
@@ -71,6 +73,14 @@ struct RankedLocalSeed {
     score: PositiveConjugacySeedCandidate2x2,
 }
 
+#[derive(Clone)]
+struct ProposalVariantEvaluation {
+    label: &'static str,
+    proposals: Vec<PositiveConjugacyProposal2x2>,
+    seeded_evaluations: Vec<SeedEvaluation>,
+    blind_evaluations: Vec<SeedEvaluation>,
+}
+
 fn main() -> Result<(), String> {
     let cli = parse_args()?;
     let case = load_case(&cli.case);
@@ -132,7 +142,13 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let proposals = derive_positive_conjugacy_proposals_2x2(
+    let rounded_proposals = derive_positive_conjugacy_proposals_2x2(
+        &case.source,
+        &case.target,
+        &witness,
+        &proposal_config,
+    );
+    let reprojected_proposals = derive_invariant_compatible_positive_conjugacy_proposals_2x2(
         &case.source,
         &case.target,
         &witness,
@@ -140,22 +156,6 @@ fn main() -> Result<(), String> {
     );
     println!("Positive-conjugacy witness:");
     println!("  G = {:?}", witness.conjugator);
-    println!("  proposal shortlist = {}", proposals.len());
-    for (index, proposal) in proposals.iter().enumerate() {
-        println!(
-            "  P{} {:?} shadow_l1={:.3} t={:.3} endpoint_l1={}",
-            index + 1,
-            proposal.matrix,
-            proposal.shadow_l1_distance,
-            proposal.nearest_sample_t,
-            proposal.endpoint_l1_distance
-        );
-    }
-    if proposals.is_empty() {
-        println!();
-        println!("No rounded sampled proposals survived the requested top-k cutoff.");
-        return Ok(());
-    }
     println!();
 
     let seeds = enumerate_exact_local_seed_family(
@@ -183,6 +183,70 @@ fn main() -> Result<(), String> {
     }
     println!();
 
+    let proposal_variants = vec![
+        evaluate_proposal_variant(
+            "rounded sampled proposals",
+            rounded_proposals,
+            &seeds,
+            &case.source,
+            &case.target,
+            &search_config,
+            seed_config.max_candidates,
+        ),
+        evaluate_proposal_variant(
+            "invariant-compatible reprojections",
+            reprojected_proposals,
+            &seeds,
+            &case.source,
+            &case.target,
+            &search_config,
+            seed_config.max_candidates,
+        ),
+    ];
+
+    for variant in &proposal_variants {
+        println!("{}:", variant.label);
+        println!("  proposal shortlist = {}", variant.proposals.len());
+        for (index, proposal) in variant.proposals.iter().enumerate() {
+            println!(
+                "  P{} {:?} kind={} shadow_l1={:.3} t={:.3} endpoint_l1={}",
+                index + 1,
+                proposal.matrix,
+                proposal_kind_label(proposal.kind),
+                proposal.shadow_l1_distance,
+                proposal.nearest_sample_t,
+                proposal.endpoint_l1_distance
+            );
+        }
+        if variant.proposals.is_empty() {
+            println!("  no proposals survived the requested top-k cutoff");
+            println!();
+            continue;
+        }
+        println!("Proposal-guided local seed shortlist:");
+        print_seed_evaluations("S", &variant.seeded_evaluations);
+        println!();
+        println!("Blind target-nearest control shortlist:");
+        print_seed_evaluations("C", &variant.blind_evaluations);
+        println!();
+        print_comparison_summary(&variant.seeded_evaluations, &variant.blind_evaluations);
+        println!();
+    }
+
+    print_variant_summary(&proposal_variants);
+
+    Ok(())
+}
+
+fn evaluate_proposal_variant(
+    label: &'static str,
+    proposals: Vec<PositiveConjugacyProposal2x2>,
+    seeds: &[LocalSeed],
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    search_config: &SearchConfig,
+    shortlist_limit: usize,
+) -> ProposalVariantEvaluation {
     let seed_matrices = seeds
         .iter()
         .map(|seed| seed.matrix.clone())
@@ -190,7 +254,7 @@ fn main() -> Result<(), String> {
         .into_iter()
         .collect::<Vec<_>>();
     let matrix_scores = rank_positive_conjugacy_seed_candidates_2x2(
-        &case.target,
+        target,
         &proposals,
         &seed_matrices,
         &PositiveConjugacySeedConfig2x2 {
@@ -203,30 +267,25 @@ fn main() -> Result<(), String> {
         .collect::<BTreeMap<_, _>>();
     let ranked_seeds = attach_seed_scores(&seeds, &score_by_matrix);
 
-    let seeded_shortlist = build_seeded_shortlist(&ranked_seeds, seed_config.max_candidates);
-    let blind_shortlist = build_blind_shortlist(&ranked_seeds, cli.seed_top_k);
-
+    let seeded_shortlist = build_seeded_shortlist(&ranked_seeds, shortlist_limit);
+    let blind_shortlist = build_blind_shortlist(&ranked_seeds, shortlist_limit);
     let seeded_evaluations = seeded_shortlist
         .iter()
         .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
-        .map(|ranked| evaluate_seed(ranked, &case.source, &case.target, &search_config))
+        .map(|ranked| evaluate_seed(ranked, source, target, search_config))
         .collect::<Vec<_>>();
     let blind_evaluations = blind_shortlist
         .iter()
         .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
-        .map(|ranked| evaluate_seed(ranked, &case.source, &case.target, &search_config))
+        .map(|ranked| evaluate_seed(ranked, source, target, search_config))
         .collect::<Vec<_>>();
 
-    println!("Proposal-guided local seed shortlist:");
-    print_seed_evaluations("S", &seeded_evaluations);
-    println!();
-    println!("Blind target-nearest control shortlist:");
-    print_seed_evaluations("C", &blind_evaluations);
-    println!();
-
-    print_comparison_summary(&seeded_evaluations, &blind_evaluations);
-
-    Ok(())
+    ProposalVariantEvaluation {
+        label,
+        proposals,
+        seeded_evaluations,
+        blind_evaluations,
+    }
 }
 
 fn parse_args() -> Result<Cli, String> {
@@ -757,6 +816,15 @@ fn print_seed_evaluations(prefix: &str, evaluations: &[SeedEvaluation]) {
     }
 }
 
+fn proposal_kind_label(kind: PositiveConjugacyProposalKind2x2) -> &'static str {
+    match kind {
+        PositiveConjugacyProposalKind2x2::RoundedSampleWaypoint => "rounded_sample",
+        PositiveConjugacyProposalKind2x2::InvariantCompatibleReprojection => {
+            "invariant_reprojection"
+        }
+    }
+}
+
 fn print_comparison_summary(seeded: &[SeedEvaluation], blind: &[SeedEvaluation]) {
     println!("Summary:");
     println!("  seeded: {}", summarize_attempts(seeded));
@@ -793,6 +861,19 @@ fn print_comparison_summary(seeded: &[SeedEvaluation], blind: &[SeedEvaluation])
         (None, None) => {
             println!("  bounded improvement: none observed under the requested lag bound");
         }
+    }
+}
+
+fn print_variant_summary(variants: &[ProposalVariantEvaluation]) {
+    println!("Variant summary:");
+    for variant in variants {
+        println!(
+            "  {}: proposals={}, seeded={}, blind={}",
+            variant.label,
+            variant.proposals.len(),
+            summarize_attempts(&variant.seeded_evaluations),
+            summarize_attempts(&variant.blind_evaluations)
+        );
     }
 }
 
