@@ -3,7 +3,8 @@ use std::time::Instant;
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::factorisation::{
-    square_factorisation_3x3_permutation_orbit_key, visit_factorisations_with_family_for_policy,
+    binary_sparse_factorisation_3x3_to_4_orbit_key, square_factorisation_3x3_permutation_orbit_key,
+    visit_factorisations_with_family_for_policy,
 };
 use crate::graph_moves::{
     enumerate_graph_move_successors, same_future_past_signature, SameFuturePastSignature,
@@ -322,6 +323,7 @@ fn expand_frontier_node(
     let mut expansions = Vec::new();
     let mut seen_successors = HashSet::new();
     let mut seen_square_factorisation_orbits = HashSet::new();
+    let mut seen_binary_sparse_3x3_to_4_orbits = HashSet::new();
     let mut stats = FrontierExpansionStats {
         frontier_nodes: 1,
         factorisation_calls: 1,
@@ -367,6 +369,12 @@ fn expand_frontier_node(
                 if move_family == "square_factorisation_3x3"
                     && square_factorisation_3x3_permutation_orbit_key(&u, &v)
                         .is_some_and(|key| !seen_square_factorisation_orbits.insert(key))
+                {
+                    return;
+                }
+                if move_family == "binary_sparse_rectangular_factorisation_3x3_to_4"
+                    && binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, settings.max_entry)
+                        .is_some_and(|key| !seen_binary_sparse_3x3_to_4_orbits.insert(key))
                 {
                     return;
                 }

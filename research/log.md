@@ -850,3 +850,15 @@
   invariant; it is exact canonical-augmentation style orbit reduction plus
   bounded structured-family certificates. Details are in
   `research/notes/2026-04-17-exact-pruning-obstruction-literature-survey.md`.
+
+- `working tree` Added an exact early orbit-dedup seam for
+  `binary_sparse_rectangular_factorisation_3x3_to_4`.
+  Kept. A bounded mixed-control probe lifted to `max_intermediate_dim=4` showed
+  large exact orbit collapse inside this family on real hotspots
+  (`raw=2448 -> orbit=87 -> canon=65` on one representative source), so the
+  frontier now drops family-preserving intermediate-slot renamings before
+  `VU` materialization. The same round also confirmed that
+  `single_row_split_3x3_to_4x4` already consumes its obvious mirror symmetry
+  locally via `split <= twin`, so there was no second analogous frontier seam
+  to land there. Durable note:
+  `research/notes/2026-04-17-binary-sparse-3x3-to-4-orbit-representative-seam.md`.

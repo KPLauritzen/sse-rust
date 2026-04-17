@@ -1043,6 +1043,33 @@ fn is_binary_sparse_row_len4(row: [u32; 4]) -> bool {
     nonzero >= 1 && nonzero <= 2 && row.iter().all(|&v| v <= 1)
 }
 
+fn is_weighted_sparse_row_len3(row: [u32; 3], max_entry: u32) -> bool {
+    let mut first = None;
+    let mut second = None;
+    for value in row {
+        if value == 0 {
+            continue;
+        }
+        if value > max_entry {
+            return false;
+        }
+        if first.is_none() {
+            first = Some(value);
+        } else if second.is_none() {
+            second = Some(value);
+        } else {
+            return false;
+        }
+    }
+    let Some(first) = first else {
+        return false;
+    };
+    let Some(second) = second else {
+        return true;
+    };
+    first == 1 || second == 1 || first == second
+}
+
 fn push_unique_row_len4(rows: &mut Vec<[u32; 4]>, row: [u32; 4]) {
     if !rows.contains(&row) {
         rows.push(row);
@@ -3807,6 +3834,137 @@ fn permuted_square_factorisation_3x3_pair_data(
     data
 }
 
+/// Canonicalize a `binary_sparse_rectangular_factorisation_3x3_to_4` witness
+/// pair up to simultaneous renaming of the intermediate basis that keeps the
+/// pair inside the same exact structured family.
+///
+/// This family has one distinguished slot and three symmetric core slots. Some
+/// witnesses also admit multiple valid distinguished-slot presentations. The
+/// key therefore minimizes over every intermediate-basis permutation whose
+/// renamed witness still satisfies the family's exact structural vocabulary.
+pub fn binary_sparse_factorisation_3x3_to_4_orbit_key(
+    u: &DynMatrix,
+    v: &DynMatrix,
+    max_entry: u32,
+) -> Option<[u32; 24]> {
+    if u.rows != 3 || u.cols != 4 || v.rows != 4 || v.cols != 3 {
+        return None;
+    }
+
+    const PERMS: [[usize; 4]; 24] = [
+        [0, 1, 2, 3],
+        [0, 1, 3, 2],
+        [0, 2, 1, 3],
+        [0, 2, 3, 1],
+        [0, 3, 1, 2],
+        [0, 3, 2, 1],
+        [1, 0, 2, 3],
+        [1, 0, 3, 2],
+        [1, 2, 0, 3],
+        [1, 2, 3, 0],
+        [1, 3, 0, 2],
+        [1, 3, 2, 0],
+        [2, 0, 1, 3],
+        [2, 0, 3, 1],
+        [2, 1, 0, 3],
+        [2, 1, 3, 0],
+        [2, 3, 0, 1],
+        [2, 3, 1, 0],
+        [3, 0, 1, 2],
+        [3, 0, 2, 1],
+        [3, 1, 0, 2],
+        [3, 1, 2, 0],
+        [3, 2, 0, 1],
+        [3, 2, 1, 0],
+    ];
+
+    let mut best = None;
+    for perm in PERMS {
+        if !binary_sparse_factorisation_3x3_to_4_permuted_pair_is_witness(u, v, &perm, max_entry) {
+            continue;
+        }
+        let candidate = permuted_binary_sparse_factorisation_3x3_to_4_pair_data(u, v, &perm);
+        if best.map_or(true, |best_candidate| candidate < best_candidate) {
+            best = Some(candidate);
+        }
+    }
+
+    best
+}
+
+fn binary_sparse_factorisation_3x3_to_4_permuted_pair_is_witness(
+    u: &DynMatrix,
+    v: &DynMatrix,
+    perm: &[usize; 4],
+    max_entry: u32,
+) -> bool {
+    let col = |slot: usize| -> [u32; 3] {
+        let source = perm[slot];
+        [u.get(0, source), u.get(1, source), u.get(2, source)]
+    };
+    let row = |slot: usize| -> [u32; 3] {
+        let source = perm[slot];
+        [v.get(source, 0), v.get(source, 1), v.get(source, 2)]
+    };
+
+    for distinguished_slot in 0..4 {
+        if !is_weighted_sparse_row_len3(col(distinguished_slot), max_entry)
+            || !is_binary_sparse_row_len3(row(distinguished_slot))
+        {
+            continue;
+        }
+
+        let mut weighted_core_rows = 0usize;
+        let mut ok = true;
+        for slot in 0..4 {
+            if slot == distinguished_slot {
+                continue;
+            }
+            if !is_binary_sparse_row_len3(col(slot))
+                || !is_weighted_sparse_row_len3(row(slot), max_entry)
+            {
+                ok = false;
+                break;
+            }
+            if !is_binary_sparse_row_len3(row(slot)) {
+                weighted_core_rows += 1;
+            }
+        }
+
+        if ok && weighted_core_rows <= 1 {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn permuted_binary_sparse_factorisation_3x3_to_4_pair_data(
+    u: &DynMatrix,
+    v: &DynMatrix,
+    perm: &[usize; 4],
+) -> [u32; 24] {
+    let mut data = [0u32; 24];
+
+    for row in 0..3 {
+        let base = row * 4;
+        data[base] = u.get(row, perm[0]);
+        data[base + 1] = u.get(row, perm[1]);
+        data[base + 2] = u.get(row, perm[2]);
+        data[base + 3] = u.get(row, perm[3]);
+    }
+
+    for row in 0..4 {
+        let source_row = perm[row];
+        let base = 12 + row * 3;
+        data[base] = v.get(source_row, 0);
+        data[base + 1] = v.get(source_row, 1);
+        data[base + 2] = v.get(source_row, 2);
+    }
+
+    data
+}
+
 /// Unified factorisation dispatcher for square matrices.
 ///
 /// Family selection is described by dimension-grouped descriptors so policy
@@ -4146,6 +4304,60 @@ mod tests {
         assert_eq!(
             square_factorisation_3x3_permutation_orbit_key(&u, &v),
             square_factorisation_3x3_permutation_orbit_key(&permuted_u, &permuted_v)
+        );
+    }
+
+    #[test]
+    fn test_binary_sparse_factorisation_3x3_to_4_orbit_key_collapses_family_preserving_slot_renaming(
+    ) {
+        let u = DynMatrix::new(3, 4, vec![2, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1]);
+        let v = DynMatrix::new(4, 3, vec![1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0]);
+        let perm = [0usize, 2, 3, 1];
+        let permuted_u = DynMatrix::new(
+            3,
+            4,
+            vec![
+                u.get(0, perm[0]),
+                u.get(0, perm[1]),
+                u.get(0, perm[2]),
+                u.get(0, perm[3]),
+                u.get(1, perm[0]),
+                u.get(1, perm[1]),
+                u.get(1, perm[2]),
+                u.get(1, perm[3]),
+                u.get(2, perm[0]),
+                u.get(2, perm[1]),
+                u.get(2, perm[2]),
+                u.get(2, perm[3]),
+            ],
+        );
+        let permuted_v = DynMatrix::new(
+            4,
+            3,
+            vec![
+                v.get(perm[0], 0),
+                v.get(perm[0], 1),
+                v.get(perm[0], 2),
+                v.get(perm[1], 0),
+                v.get(perm[1], 1),
+                v.get(perm[1], 2),
+                v.get(perm[2], 0),
+                v.get(perm[2], 1),
+                v.get(perm[2], 2),
+                v.get(perm[3], 0),
+                v.get(perm[3], 1),
+                v.get(perm[3], 2),
+            ],
+        );
+
+        assert_eq!(u.mul(&v), permuted_u.mul(&permuted_v));
+        assert_eq!(
+            v.mul(&u).canonical_perm(),
+            permuted_v.mul(&permuted_u).canonical_perm()
+        );
+        assert_eq!(
+            binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, 6),
+            binary_sparse_factorisation_3x3_to_4_orbit_key(&permuted_u, &permuted_v, 6)
         );
     }
 
