@@ -509,7 +509,7 @@
         "max_intermediate_dim": 2,
         "max_entry": 6
       },
-      "timeout_ms": 1000,
+      "timeout_ms": 5000,
       "allowed_outcomes": ["unknown"],
       "target_outcome": "unknown",
       "points": {
