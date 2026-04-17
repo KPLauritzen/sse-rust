@@ -1,0 +1,125 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "riedel_baker_k16__graph_plus_structured__repeat_probe",
+      "description": "Riedel-Baker k=16 repeat probe under graph_plus_structured moves.",
+      "required": false,
+      "a": [
+        [
+          16,
+          2
+        ],
+        [
+          1,
+          16
+        ]
+      ],
+      "b": [
+        [
+          15,
+          1
+        ],
+        [
+          1,
+          17
+        ]
+      ],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 3,
+        "max_entry": 16,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "measurement": {
+        "warmup_runs": 0,
+        "repeat_runs": 3
+      },
+      "timeout_ms": 16000,
+      "allowed_outcomes": [
+        "equivalent",
+        "timeout",
+        "unknown"
+      ],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "riedel-baker",
+        "policy-reach",
+        "repeat-probe",
+        "graph_plus_structured"
+      ],
+      "campaign": {
+        "id": "riedel_baker_k16_repeat_probe",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k16__mixed__repeat_probe",
+      "description": "Riedel-Baker k=16 repeat probe under mixed moves.",
+      "required": false,
+      "a": [
+        [
+          16,
+          2
+        ],
+        [
+          1,
+          16
+        ]
+      ],
+      "b": [
+        [
+          15,
+          1
+        ],
+        [
+          1,
+          17
+        ]
+      ],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 3,
+        "max_entry": 16,
+        "move_family_policy": "mixed"
+      },
+      "measurement": {
+        "warmup_runs": 0,
+        "repeat_runs": 3
+      },
+      "timeout_ms": 16000,
+      "allowed_outcomes": [
+        "equivalent",
+        "timeout",
+        "unknown"
+      ],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "riedel-baker",
+        "policy-reach",
+        "repeat-probe",
+        "mixed"
+      ],
+      "campaign": {
+        "id": "riedel_baker_k16_repeat_probe",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    }
+  ]
+}
