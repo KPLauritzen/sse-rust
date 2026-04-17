@@ -1,5 +1,6 @@
 use ahash::AHashMap as HashMap;
 
+use super::frontier::{expand_frontier_layer, FrontierExpansionSettings};
 use crate::graph_moves::find_exact_graph_move_witness_between;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
@@ -239,7 +240,7 @@ fn walk_parent_chain(
     (matrices, steps)
 }
 
-fn walk_graph_only_parent_chain(
+fn walk_canon_parent_chain(
     node: &DynMatrix,
     parent: &HashMap<DynMatrix, Option<DynMatrix>>,
     orig: &HashMap<DynMatrix, DynMatrix>,
@@ -256,6 +257,22 @@ fn walk_graph_only_parent_chain(
 
     matrices.reverse();
     matrices
+}
+
+fn find_exact_policy_step_between(
+    from: &DynMatrix,
+    to: &DynMatrix,
+    settings: FrontierExpansionSettings,
+) -> Option<EsseStep> {
+    let current_canon = from.canonical_perm();
+    let current_frontier = vec![current_canon.clone()];
+    let mut orig = HashMap::new();
+    orig.insert(current_canon, from.clone());
+    let (expansions, _stats, _timing) = expand_frontier_layer(&current_frontier, &orig, settings);
+    expansions
+        .into_iter()
+        .find(|expansion| expansion.next_orig == *to)
+        .map(|expansion| expansion.step)
 }
 
 fn reconstruct_deferred_step(from: &DynMatrix, to: &DynMatrix) -> EsseStep {
@@ -281,6 +298,41 @@ fn reconstruct_deferred_steps(matrices: &[DynMatrix]) -> Vec<EsseStep> {
     matrices
         .windows(2)
         .map(|pair| reconstruct_deferred_step(&pair[0], &pair[1]))
+        .collect()
+}
+
+fn reconstruct_policy_bounded_step(
+    from: &DynMatrix,
+    to: &DynMatrix,
+    settings: FrontierExpansionSettings,
+) -> EsseStep {
+    if let Some(step) = permutation_step_between(from, to) {
+        return step;
+    }
+
+    if let Some(step) = find_exact_policy_step_between(from, to, settings) {
+        return step;
+    }
+
+    if let Some(step) = find_exact_policy_step_between(to, from, settings) {
+        return EsseStep {
+            u: step.v,
+            v: step.u,
+        };
+    }
+
+    panic!(
+        "policy-bounded matrix path should admit an exact one-step witness: from={from:?} to={to:?}"
+    )
+}
+
+fn reconstruct_policy_bounded_steps(
+    matrices: &[DynMatrix],
+    settings: FrontierExpansionSettings,
+) -> Vec<EsseStep> {
+    matrices
+        .windows(2)
+        .map(|pair| reconstruct_policy_bounded_step(&pair[0], &pair[1], settings))
         .collect()
 }
 
@@ -435,7 +487,7 @@ pub(super) fn reconstruct_graph_only_bidirectional_path(
 ) -> SsePath<2> {
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
-    let mut all_dyn_matrices = reconstruct_graph_only_bidirectional_dyn_matrices(
+    let mut all_dyn_matrices = reconstruct_bidirectional_dyn_matrices_from_canon_parents(
         &a_dyn,
         &b_dyn,
         meeting_canon,
@@ -488,8 +540,28 @@ fn reconstruct_graph_only_bidirectional_dyn_matrices(
     bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
     bwd_orig: &HashMap<DynMatrix, DynMatrix>,
 ) -> Vec<DynMatrix> {
-    let fwd_matrices = walk_graph_only_parent_chain(meeting_canon, fwd_parent, fwd_orig);
-    let bwd_matrices = walk_graph_only_parent_chain(meeting_canon, bwd_parent, bwd_orig);
+    reconstruct_bidirectional_dyn_matrices_from_canon_parents(
+        a,
+        b,
+        meeting_canon,
+        fwd_parent,
+        fwd_orig,
+        bwd_parent,
+        bwd_orig,
+    )
+}
+
+fn reconstruct_bidirectional_dyn_matrices_from_canon_parents(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    meeting_canon: &DynMatrix,
+    fwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+) -> Vec<DynMatrix> {
+    let fwd_matrices = walk_canon_parent_chain(meeting_canon, fwd_parent, fwd_orig);
+    let bwd_matrices = walk_canon_parent_chain(meeting_canon, bwd_parent, bwd_orig);
 
     let fwd_meeting = fwd_matrices
         .last()
@@ -517,4 +589,37 @@ fn reconstruct_graph_only_bidirectional_dyn_matrices(
     }
 
     all_dyn_matrices
+}
+
+pub(super) fn reconstruct_graph_plus_structured_bidirectional_path(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    meeting_canon: &DynMatrix,
+    fwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    settings: FrontierExpansionSettings,
+) -> SsePath<2> {
+    let a_dyn = DynMatrix::from_sq(a);
+    let b_dyn = DynMatrix::from_sq(b);
+    let mut all_dyn_matrices = reconstruct_bidirectional_dyn_matrices_from_canon_parents(
+        &a_dyn,
+        &b_dyn,
+        meeting_canon,
+        fwd_parent,
+        fwd_orig,
+        bwd_parent,
+        bwd_orig,
+    );
+    let all_steps = reconstruct_policy_bounded_steps(&all_dyn_matrices, settings);
+    let sq_matrices: Vec<SqMatrix<2>> = all_dyn_matrices
+        .drain(..)
+        .filter_map(|dm| dm.to_sq::<2>())
+        .collect();
+
+    SsePath {
+        matrices: sq_matrices,
+        steps: all_steps,
+    }
 }

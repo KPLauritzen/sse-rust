@@ -803,3 +803,15 @@
   surface (`2.217 s -> 2.213 s`) while requiring a large specialized BFS body,
   so the code was reverted. Details are in
   `research/notes/2026-04-17-deferred-witness-graph-plus-structured-rejection.md`.
+
+- `working tree` Revisited deferred witness reconstruction on the exact
+  `graph_plus_structured` Brix-Ruiz control with a trustworthy repo-local RSS
+  path and kept the focused prototype.
+  Added `scripts/measure-search-runtime-rss.sh` so direct `target/dist/search`
+  runs record wall time and max RSS into repo-local `tmp/` artifacts from the
+  container worktree. On the exact `lag8 + dim4 + entry5`
+  `graph_plus_structured` control, five direct baseline runs showed median
+  `2.18 s` and `649,116 KB`; the narrow deferred-parent prototype preserved
+  outcome/counters and improved the same control to median `2.07 s` and
+  `587,204 KB`. Details are in
+  `research/notes/2026-04-17-deferred-witness-graph-plus-structured-measured-keep.md`.
