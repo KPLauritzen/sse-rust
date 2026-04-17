@@ -886,3 +886,14 @@
   any design that reconstructs exact witnesses after layer emission or only on
   successful completion. Details are in
   `research/notes/2026-04-17-timeout-heavy-observer-emission-probe.md`.
+
+- `working tree` Reran the bounded graph-only `k=4` campaign on the improved
+  open Brix-Ruiz baseline.
+  Kept as evidence. The shared lag `20 / 30 / 40` graph-only baseline stayed
+  `unknown` with identical counters and improved again to
+  `1565 / 2809 / 4090 ms`, and a dedicated `beam64 + dim5 + entry12` lag-only
+  campaign extended cleanly through lag `100` in `15.2 s` with approximate
+  overlap rising from `232` to `1316` but no witness. This strengthens the
+  bounded measurement lane without changing the Goal 3 answer: graph-only still
+  shows no useful `k=4` reach on this endpoint. Details are in
+  `research/notes/2026-04-17-brix-ruiz-k4-graph-only-campaign.md`.

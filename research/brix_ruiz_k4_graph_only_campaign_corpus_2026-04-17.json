@@ -1,0 +1,190 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "brix_ruiz_k4__graph_only__control_lag40_dim5_entry12_beam64",
+      "description": "Dedicated k=4 graph-only control: beam64 at lag40/dim5/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 40,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-only",
+        "policy-reach",
+        "campaign",
+        "control"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_only_campaign",
+        "strategy": "graph_only_beam64_control",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_only__reach_1_lag50_dim5_entry12_beam64",
+      "description": "Dedicated k=4 graph-only reach ramp: beam64 at lag50/dim5/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 50,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-only",
+        "policy-reach",
+        "campaign",
+        "lag-ramp"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_only_campaign",
+        "strategy": "graph_only_beam64_lag_ramp",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_only__reach_2_lag60_dim5_entry12_beam64",
+      "description": "Dedicated k=4 graph-only reach ramp: beam64 at lag60/dim5/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 60,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 15000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-only",
+        "policy-reach",
+        "campaign",
+        "lag-ramp"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_only_campaign",
+        "strategy": "graph_only_beam64_lag_ramp",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_only__reach_3_lag80_dim5_entry12_beam64",
+      "description": "Dedicated k=4 graph-only reach ramp: beam64 at lag80/dim5/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 80,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 18000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-only",
+        "policy-reach",
+        "campaign",
+        "lag-ramp"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_only_campaign",
+        "strategy": "graph_only_beam64_lag_ramp",
+        "schedule_order": 40
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_only__reach_4_lag100_dim5_entry12_beam64",
+      "description": "Dedicated k=4 graph-only reach capstone: beam64 at lag100/dim5/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 100,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 24000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-only",
+        "policy-reach",
+        "campaign",
+        "capstone"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_only_campaign",
+        "strategy": "graph_only_beam64_lag_capstone",
+        "schedule_order": 50
+      }
+    }
+  ]
+}
