@@ -909,6 +909,7 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
         requested_benchmark_case_ids.as_ref(),
     )?;
     let mut loaded_case_ids = BTreeSet::new();
+    let mut expected_benchmark_case_ids = BTreeSet::new();
 
     for path in &cli.cases_paths {
         let raw = fs::read_to_string(path)
@@ -917,6 +918,23 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
             .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
 
         for case in corpus.cases {
+            if !matches_base_research_case_filters(
+                &case,
+                &requested_case_ids,
+                &requested_campaign_ids,
+            ) {
+                continue;
+            }
+            if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids.as_ref() {
+                if requested_benchmark_case_ids.contains(&case.id) {
+                    expected_benchmark_case_ids.insert(case.id.clone());
+                }
+            }
+            if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids.as_ref() {
+                if !requested_benchmark_case_ids.contains(&case.id) {
+                    continue;
+                }
+            }
             if !matches_research_case_filters(
                 &case,
                 &requested_case_ids,
@@ -964,8 +982,8 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
         }
     }
 
-    if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids {
-        let missing = requested_benchmark_case_ids
+    if requested_benchmark_case_ids.is_some() {
+        let missing = expected_benchmark_case_ids
             .difference(&loaded_case_ids)
             .cloned()
             .collect::<Vec<_>>();
@@ -997,13 +1015,24 @@ fn matches_research_case_filters(
     requested_campaign_ids: &BTreeSet<String>,
     requested_benchmark_case_ids: Option<&BTreeSet<String>>,
 ) -> bool {
-    if !requested_case_ids.is_empty() && !requested_case_ids.contains(&case.id) {
+    if !matches_base_research_case_filters(case, requested_case_ids, requested_campaign_ids) {
         return false;
     }
     if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids {
         if !requested_benchmark_case_ids.contains(&case.id) {
             return false;
         }
+    }
+    true
+}
+
+fn matches_base_research_case_filters(
+    case: &ResearchCase,
+    requested_case_ids: &BTreeSet<String>,
+    requested_campaign_ids: &BTreeSet<String>,
+) -> bool {
+    if !requested_case_ids.is_empty() && !requested_case_ids.contains(&case.id) {
+        return false;
     }
     if requested_campaign_ids.is_empty() {
         return true;
