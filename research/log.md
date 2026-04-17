@@ -748,6 +748,18 @@
 
 ## 2026-04-17
 
+- `sse-rust-2uy.18` Added the first durable graph-only harness baseline set.
+  Kept as measurement-first infrastructure. Reworded the existing hard
+  `brix_ruiz_k3` graph-only cases as explicit solve and performance baselines,
+  and added `brix_ruiz_k4_graph_only_boundary_ramp` as a neutral-scored
+  `beam64 + dim5 + entry12` deepening reach map over lag `20/30/40`. Focused
+  dist-harness validation on current `HEAD` kept the exact `k=3` witness
+  (`equivalent` in `8991 ms`, lag `17`), kept the cheap plain-beam frontier
+  control (`unknown` in `111 ms`), and showed the new `k=4` graph-only reach
+  ramp scaling cleanly without factorisations (`unknown` in `2578 / 4359 /
+  5923 ms`, visited `128,118 / 219,284 / 305,954`). Details are in
+  `research/notes/2026-04-17-graph-only-harness-baselines.md`.
+
 - `working tree` Summarized repo activity from `2026-04-16 04:15 UTC` through
   `2026-04-17 04:15 UTC`.
   Kept as durable context. Added

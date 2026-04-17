@@ -656,7 +656,7 @@
     },
     {
       "id": "brix_ruiz_k3_graph_only",
-      "description": "Known graph-only proof target for the blind endpoint search. This guards the recent graph-move progress directly in the main harness.",
+      "description": "Graph-only solve baseline: known blind endpoint proof target on the hard k=3 family pair. Keep this as the exact witness guard for later graph-only optimization and coverage rounds.",
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "config": {
         "max_lag": 22,
@@ -674,7 +674,7 @@
         "timeout": -4000,
         "panic": -4000
       },
-      "tags": ["hard-positive", "target", "graph-only"],
+      "tags": ["hard-positive", "target", "graph-only", "solve-baseline"],
       "campaign": {
         "id": "brix_ruiz_k3",
         "strategy": "graph_only_probe",
@@ -683,7 +683,7 @@
     },
     {
       "id": "brix_ruiz_k3_graph_only_beam_probe",
-      "description": "Benchmark-style measurement control: cheap graph-only endpoint search with the plain beam frontier on the hard k=3 family target.",
+      "description": "Graph-only performance baseline: cheap plain-beam endpoint search on the hard k=3 family pair. Keep this as the stable frontier control for later graph-only optimization work.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
@@ -708,7 +708,7 @@
         "timeout": 0,
         "panic": -2000
       },
-      "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement"],
+      "tags": ["hard-positive", "telemetry-focus", "graph-only", "frontier-measurement", "benchmark-measurement", "performance-baseline"],
       "campaign": {
         "id": "brix_ruiz_k3_frontier",
         "strategy": "graph_only_beam_probe",
@@ -958,6 +958,43 @@
         "id": "brix_ruiz_k4_boundary",
         "strategy": "mixed_wide_probe_deepening",
         "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k4_graph_only_boundary_ramp",
+      "description": "Graph-only reach baseline: ordered lag sweep on the open k=4 Brix-Ruiz pair using the cheap beam-only family surface. Keep this as the shared-corpus graph-only reach map, and leave heavier graph-only campaigns to later dedicated rounds.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 40,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph-only"
+      },
+      "deepening_schedule": {
+        "attempts": [
+          { "max_lag": 20 },
+          { "max_lag": 30 },
+          { "max_lag": 40 }
+        ]
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": -2000
+      },
+      "tags": ["hard-positive", "telemetry-focus", "graph-only", "family-probe", "deepening", "reach-baseline", "evidence"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_only_boundary",
+        "strategy": "graph_only_beam_deepening",
+        "schedule_order": 30
       }
     },
     {
