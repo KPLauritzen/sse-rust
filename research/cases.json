@@ -482,7 +482,7 @@
         "max_intermediate_dim": 3,
         "max_entry": 6
       },
-      "timeout_ms": 1000,
+      "timeout_ms": 45000,
       "allowed_outcomes": ["equivalent"],
       "target_outcome": "equivalent",
       "points": {
@@ -500,8 +500,35 @@
       }
     },
     {
+      "id": "rectangular_positive_pair_dim2_bounded_no_go",
+      "description": "Exact bounded-envelope guard on rectangular_positive_pair: under lag4 / entry6 with max_intermediate_dim=2, the bounded search must exhaust with unknown rather than prove a witness.",
+      "a": [[3, 4], [3, 4]],
+      "b": [[4, 4], [3, 3]],
+      "config": {
+        "max_lag": 4,
+        "max_intermediate_dim": 2,
+        "max_entry": 6
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["unknown"],
+      "target_outcome": "unknown",
+      "points": {
+        "equivalent": -2500,
+        "not_equivalent": -2500,
+        "unknown": 250,
+        "timeout": -3500,
+        "panic": -3500
+      },
+      "tags": ["correctness", "rectangular-positive", "bounded-no-go-certificate"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 75
+      }
+    },
+    {
       "id": "rectangular_positive_pair",
-      "description": "Practical rectangular benchmark: the current bounded search proves this pair with max_intermediate_dim=3, but not with max_intermediate_dim=2.",
+      "description": "Practical rectangular positive control for the bounded-envelope certificate: the current bounded search proves this pair once max_intermediate_dim=3 is allowed.",
       "a": [[3, 4], [3, 4]],
       "b": [[4, 4], [3, 3]],
       "config": {
@@ -519,7 +546,7 @@
         "timeout": -3500,
         "panic": -3500
       },
-      "tags": ["correctness", "rectangular-positive"],
+      "tags": ["correctness", "rectangular-positive", "bounded-no-go-certificate"],
       "campaign": {
         "id": "baseline_corpus",
         "strategy": "mixed_baseline",

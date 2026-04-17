@@ -202,6 +202,7 @@ fn push_case(out: &mut String, case: &CaseSummary) {
         case.points,
         case.elapsed_ms
     ));
+    out.push_str(&format!("  description: {}\n", case.description));
     out.push_str(&format!(
         "  endpoints: {}x{} config: frontier={:?} beam_width={:?} move_family_policy={:?} stage={:?} max_lag={} max_dim={} max_entry={} timeout={}ms\n",
         case.endpoint.source_dim,

@@ -2466,6 +2466,121 @@ mod tests {
     }
 
     #[test]
+    fn research_corpus_keeps_rectangular_positive_pair_bounded_certificate_split() {
+        let cases_path = Path::new("research/cases.json");
+        let corpus = load_corpus(cases_path).expect("research corpus should load");
+        let mut rectangular_cases = corpus
+            .cases
+            .iter()
+            .filter(|case| case.id.starts_with("rectangular_positive_pair"))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        rectangular_cases.sort_by_key(|case| case.config.max_intermediate_dim);
+
+        assert_eq!(rectangular_cases.len(), 2);
+        assert_eq!(
+            rectangular_cases
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "rectangular_positive_pair_dim2_bounded_no_go",
+                "rectangular_positive_pair",
+            ]
+        );
+        assert_eq!(
+            rectangular_cases[0].allowed_outcomes,
+            vec!["unknown".to_string()]
+        );
+        assert_eq!(
+            rectangular_cases[0].target_outcome.as_deref(),
+            Some("unknown")
+        );
+        assert_eq!(
+            rectangular_cases[1].allowed_outcomes,
+            vec!["equivalent".to_string()]
+        );
+        assert_eq!(
+            rectangular_cases[1].target_outcome.as_deref(),
+            Some("equivalent")
+        );
+
+        let cases = rectangular_cases
+            .iter()
+            .map(|case| {
+                let actual_outcome = if case.id == "rectangular_positive_pair_dim2_bounded_no_go" {
+                    "unknown"
+                } else {
+                    "equivalent"
+                };
+                summary_case(case, actual_outcome, 1)
+            })
+            .collect::<Vec<_>>();
+        let comparisons = build_comparison_summaries(&cases);
+
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(comparisons[0].variants.len(), 2);
+        assert_eq!(
+            comparisons[0]
+                .variants
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.case_id.as_str(),
+                        variant.config.max_intermediate_dim,
+                        variant.actual_outcome.as_str(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("rectangular_positive_pair_dim2_bounded_no_go", 2, "unknown",),
+                ("rectangular_positive_pair", 3, "equivalent"),
+            ]
+        );
+
+        let summary = HarnessSummary {
+            schema_version: 5,
+            cases_path: cases_path.display().to_string(),
+            reused_history_sources: 0,
+            fitness: FitnessSummary {
+                required_cases: 2,
+                passed_required_cases: 2,
+                non_required_cases: 0,
+                target_hits: 2,
+                total_points: 500,
+                total_elapsed_ms: 2,
+                current_witness_cases: 0,
+                current_witness_lag_total: 0,
+                current_lag_score: 0,
+                best_known_witness_cases: 0,
+                best_known_witness_lag_total: 0,
+                best_known_lag_score: 0,
+                best_known_improvements: 0,
+                generalized_cases: 0,
+                comparison_groups: comparisons.len(),
+                campaign_groups: 0,
+                strategy_groups: 0,
+                telemetry_focus_cases: 0,
+                telemetry_focus_score: 0,
+                telemetry_focus_reach_score: 0,
+                telemetry_focus_directed_score: 0,
+            },
+            comparisons,
+            campaigns: vec![],
+            strategies: vec![],
+            cases,
+        };
+
+        let pretty = format_pretty_summary(&summary);
+        assert!(pretty.contains("rectangular_positive_pair_dim2_bounded_no_go"));
+        assert!(pretty.contains("outcome=unknown"));
+        assert!(pretty.contains("max_dim=2"));
+        assert!(pretty
+            .contains("description: Exact bounded-envelope guard on rectangular_positive_pair"));
+    }
+
+    #[test]
     fn json_search_config_serializes_public_move_family_policy_field() {
         let config = JsonSearchConfig {
             max_lag: 2,
