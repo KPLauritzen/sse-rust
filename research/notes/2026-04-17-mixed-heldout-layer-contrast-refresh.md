@@ -19,7 +19,8 @@ cargo build --quiet --features research-tools --bin analyze_path_signal_corpus
 Refreshed the durable mixed held-out endpoint artifact directly from
 `research/cases.json`. No temporary one-case corpus was needed here because the
 seven held-out endpoint cases already use the real mixed endpoint policy by
-default.
+default. The command pins `--max-endpoint-dim 4` so the durable artifact config
+matches the included `higher_block` `1x1 <-> 4x4` case surface.
 
 ```bash
 timeout -k 10s 60s target/debug/analyze_path_signal_corpus \
@@ -31,6 +32,7 @@ timeout -k 10s 60s target/debug/analyze_path_signal_corpus \
   --case-id riedel_baker_k12 \
   --case-id lind_marcus_a_to_c \
   --case-id full_2_shift_higher_block_1x1_to_4x4 \
+  --max-endpoint-dim 4 \
   --witness-manifest research/witness_corpus_manifest.json \
   --family-benchmark research/ranking_signal_family_benchmark_v1.json \
   --emit-layer-contrasts research/layer_contrast_signal_corpus_non_brix_mixed_heldout_2026-04-17.json \

@@ -23,7 +23,7 @@
     "min_gap": 2,
     "max_gap": 4,
     "max_cases": 48,
-    "max_endpoint_dim": 3,
+    "max_endpoint_dim": 4,
     "max_intermediate_dim": 5,
     "max_entry": 6,
     "search_mode": "mixed"
