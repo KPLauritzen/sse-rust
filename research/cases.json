@@ -751,21 +751,50 @@
       }
     },
     {
-      "id": "brix_ruiz_k3_graph_plus_structured_probe",
-      "description": "Benchmark-style intermediate move-policy probe: endpoint search on the hard k=3 family target using graph_plus_structured between the graph-only frontier controls and broader mixed widening.",
+      "id": "brix_ruiz_k3_graph_plus_structured",
+      "description": "Graph-plus-structured solve baseline: bounded blind endpoint proof target on the hard k=3 family pair using the intermediate structured families. Keep this as the exact witness guard before later graph-plus-structured optimization and campaign work.",
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 4,
+        "max_entry": 5,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 300,
+        "not_equivalent": -3000,
+        "unknown": -3000,
+        "timeout": -4000,
+        "panic": -4000
+      },
+      "tags": ["hard-positive", "target", "graph-plus-structured", "solve-baseline"],
+      "campaign": {
+        "id": "brix_ruiz_k3",
+        "strategy": "graph_plus_structured_baseline",
+        "schedule_order": 35
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_graph_plus_structured_beam_probe",
+      "description": "Graph-plus-structured performance baseline: cheap plain-beam endpoint search on the hard k=3 family pair under the same bounded intermediate-family envelope. Keep this as the stable frontier control for later graph-plus-structured optimization work.",
       "required": false,
       "measurement": {
         "warmup_runs": 1,
-        "repeat_runs": 3
+        "repeat_runs": 5
       },
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "config": {
         "max_lag": 8,
         "max_intermediate_dim": 4,
-        "max_entry": 6,
+        "max_entry": 5,
+        "frontier_mode": "beam",
+        "beam_width": 10,
         "move_family_policy": "graph_plus_structured"
       },
-      "timeout_ms": 4000,
+      "timeout_ms": 1000,
       "allowed_outcomes": ["equivalent", "unknown", "timeout"],
       "target_outcome": null,
       "points": {
@@ -775,10 +804,10 @@
         "timeout": 0,
         "panic": -2000
       },
-      "tags": ["hard-positive", "telemetry-focus", "move-policy-measurement", "benchmark-measurement"],
+      "tags": ["hard-positive", "telemetry-focus", "graph-plus-structured", "frontier-measurement", "benchmark-measurement", "performance-baseline"],
       "campaign": {
-        "id": "brix_ruiz_k3_move_policy",
-        "strategy": "graph_plus_structured_probe",
+        "id": "brix_ruiz_k3_graph_plus_structured_frontier",
+        "strategy": "graph_plus_structured_beam_baseline",
         "schedule_order": 10
       }
     },

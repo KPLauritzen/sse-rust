@@ -748,6 +748,18 @@
 
 ## 2026-04-17
 
+- `sse-rust-2uy.22` Added the first durable graph-plus-structured harness
+  baseline set.
+  Kept as measurement-first infrastructure. Promoted the old generic
+  `graph_plus_structured` hard-`k=3` probe into the explicit
+  `brix_ruiz_k3_graph_plus_structured` solve baseline at `lag8 + dim4 +
+  entry5`, and added `brix_ruiz_k3_graph_plus_structured_beam_probe` as the
+  cheap repeated frontier control on the same envelope. Focused dist-harness
+  validation on current `HEAD` kept the exact witness (`equivalent` in
+  `2163 ms`, lag `8`) and the beam control (`unknown`, median `53 ms` over
+  five repeats). Details are in
+  `research/notes/2026-04-17-graph-plus-structured-harness-baselines.md`.
+
 - `sse-rust-2uy.18` Added the first durable graph-only harness baseline set.
   Kept as measurement-first infrastructure. Reworded the existing hard
   `brix_ruiz_k3` graph-only cases as explicit solve and performance baselines,
