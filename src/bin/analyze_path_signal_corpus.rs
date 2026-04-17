@@ -535,27 +535,20 @@ impl PairCatalog {
                 .validated_pair_refs_by_source_artifact
                 .get(&(source_id.to_string(), artifact_id.to_string()))
             {
-                return self.build_validated_path_metadata(
-                    pair_ref,
-                    &endpoint_key,
-                    &format!(
-                        "guide artifact {artifact_id} from {}",
-                        source_path.display()
-                    ),
-                );
+                if let Some(metadata) = self.build_validated_path_metadata(pair_ref, &endpoint_key)
+                {
+                    return Ok(metadata);
+                }
             }
         }
         if let Some(artifact_id) = artifact_id {
             if !self.ambiguous_artifact_ids.contains(artifact_id) {
                 if let Some(pair_ref) = self.validated_pair_refs_by_artifact.get(artifact_id) {
-                    return self.build_validated_path_metadata(
-                        pair_ref,
-                        &endpoint_key,
-                        &format!(
-                            "guide artifact {artifact_id} from {}",
-                            source_path.display()
-                        ),
-                    );
+                    if let Some(metadata) =
+                        self.build_validated_path_metadata(pair_ref, &endpoint_key)
+                    {
+                        return Ok(metadata);
+                    }
                 }
             }
         }
@@ -583,14 +576,10 @@ impl PairCatalog {
                 table_name.to_string(),
                 result_id,
             )) {
-                return self.build_validated_path_metadata(
-                    pair_ref,
-                    &endpoint_key,
-                    &format!(
-                        "sqlite result {result_id} from {} ({table_name})",
-                        source_path.display()
-                    ),
-                );
+                if let Some(metadata) = self.build_validated_path_metadata(pair_ref, &endpoint_key)
+                {
+                    return Ok(metadata);
+                }
             }
         }
         Ok(self.resolve_path(Some(source), Some(target)))
@@ -632,15 +621,11 @@ impl PairCatalog {
         &self,
         pair_ref: &ValidatedPathPairRef,
         actual_endpoint_key: &str,
-        evidence_label: &str,
-    ) -> Result<PairMetadata, String> {
+    ) -> Option<PairMetadata> {
         if pair_ref.endpoint_key != actual_endpoint_key {
-            return Err(format!(
-                "{evidence_label} resolved to pair {}, but its canonical endpoints do not match the manifest-backed pair endpoints",
-                pair_ref.pair_id
-            ));
+            return None;
         }
-        Ok(self.build_pair_metadata(pair_ref.pair_id.clone(), None))
+        Some(self.build_pair_metadata(pair_ref.pair_id.clone(), None))
     }
 
     fn register_validated_endpoint_pair(&mut self, endpoint_key: &str, pair_id: &str) {
@@ -2200,6 +2185,8 @@ mod tests {
         let literature_target = DynMatrix::new(2, 2, vec![1, 6, 1, 1]).canonical_perm();
         let search_source = DynMatrix::new(2, 2, vec![1, 2, 3, 1]).canonical_perm();
         let search_target = DynMatrix::new(2, 2, vec![1, 1, 6, 1]).canonical_perm();
+        let stale_source = DynMatrix::new(1, 1, vec![9]);
+        let stale_target = DynMatrix::new(1, 1, vec![10]);
 
         let literature = catalog
             .resolve_guide_artifact(
@@ -2231,6 +2218,16 @@ mod tests {
             )
             .expect("sqlite ref should resolve");
         assert_eq!(sqlite.pair_id.as_deref(), Some("search_pool_pair"));
+
+        let mismatched = catalog
+            .resolve_guide_artifact(
+                &guide_path,
+                Some("lit-artifact"),
+                Some(&stale_source),
+                Some(&stale_target),
+            )
+            .expect("mismatched artifact should fall back instead of erroring");
+        assert_eq!(mismatched.pair_id, None);
 
         let unattributed = catalog.resolve_path(Some(&search_source), Some(&search_target));
         assert_eq!(unattributed.pair_id, None);
