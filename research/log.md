@@ -862,3 +862,17 @@
   locally via `split <= twin`, so there was no second analogous frontier seam
   to land there. Durable note:
   `research/notes/2026-04-17-binary-sparse-3x3-to-4-orbit-representative-seam.md`.
+
+- `working tree` Probed cheaper observer emission against timeout-heavy
+  graph-only kills before changing the boundary.
+  Kept as evidence. On the hard exact `brix_ruiz_k3` graph-only control, the
+  uninstrumented search still finished in `6.82 s`, but `--visited-db`
+  observer runs killed at `3 / 10 / 20 s` only durably retained committed
+  layers, and the `10 s` and `20 s` kills left the same partial sqlite state:
+  layers `0 .. 4`, `11,363` nodes, `16,550` edges, no `Finished` row. The hot
+  committed layer already carried `15,410` exact edge rows from only `320`
+  parents, which supports one conservative later keep candidate
+  (same-boundary descriptor compression inside the layer buffer) but rejects
+  any design that reconstructs exact witnesses after layer emission or only on
+  successful completion. Details are in
+  `research/notes/2026-04-17-timeout-heavy-observer-emission-probe.md`.
