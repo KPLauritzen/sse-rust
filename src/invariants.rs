@@ -551,9 +551,7 @@ fn exact_positive_class_2x2(
     };
 
     match band {
-        DeterminantBand2x2::Baker
-            if source.strictly_positive && target.strictly_positive =>
-        {
+        DeterminantBand2x2::Baker if source.strictly_positive && target.strictly_positive => {
             Some(ExactPositiveClass2x2::Baker1983)
         }
         DeterminantBand2x2::ChoeShin => Some(ExactPositiveClass2x2::ChoeShin1997),
