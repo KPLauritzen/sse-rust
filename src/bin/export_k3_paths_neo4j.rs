@@ -488,7 +488,10 @@ fn fallback_factorisation_families(current: &DynMatrix, target: &DynMatrix) -> V
             "convergent_shear_conjugation_3x3".to_string(),
         ],
         (3, 4) => vec!["binary_sparse_rectangular_factorisation_3x3_to_4".to_string()],
-        (4, 3) => vec!["binary_sparse_rectangular_factorisation_4x3_to_3".to_string()],
+        (4, 3) => vec![
+            "single_row_amalgamation_4x4_to_3x3".to_string(),
+            "binary_sparse_rectangular_factorisation_4x3_to_3".to_string(),
+        ],
         (4, 4) => vec!["elementary_conjugation".to_string()],
         (4, 5) => vec![
             "single_row_split_4x4_to_5x5".to_string(),
@@ -706,6 +709,20 @@ mod tests {
                 "single_row_amalgamation_5x5_to_4x4".to_string(),
                 "single_column_amalgamation_5x5_to_4x4".to_string(),
                 "binary_sparse_rectangular_factorisation_5x5_to_4".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_factorisation_families_keep_explicit_4x4_to_3x3_labels_ahead_of_sparse() {
+        let current = DynMatrix::new(4, 4, vec![1; 16]);
+        let target = DynMatrix::new(3, 3, vec![1; 9]);
+
+        assert_eq!(
+            fallback_factorisation_families(&current, &target),
+            vec![
+                "single_row_amalgamation_4x4_to_3x3".to_string(),
+                "binary_sparse_rectangular_factorisation_4x3_to_3".to_string(),
             ]
         );
     }

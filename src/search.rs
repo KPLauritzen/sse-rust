@@ -5962,6 +5962,34 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_exposes_single_row_amalgamation_4x4_to_3x3()
+    {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 4,
+                max_entry: 3,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(expansions
+            .iter()
+            .any(|expansion| expansion.next_orig.rows == 3));
+        assert!(stats
+            .move_family_telemetry
+            .get("single_row_amalgamation_4x4_to_3x3")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_graph_plus_structured_exposes_single_row_amalgamation_5x5_to_4x4()
     {
         let current = DynMatrix::new(

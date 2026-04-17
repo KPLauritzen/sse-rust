@@ -860,6 +860,58 @@ where
     }
 }
 
+/// Enumerate a bounded explicit 4x4 -> 3x3 row-amalgamation family.
+///
+/// One chosen contiguous source-row pair is amalgamated into a single target
+/// row, while the other rows stay fixed. The matching contiguous source-column
+/// pair must already be duplicated, so the factorisation uses the fixed
+/// 3x4 duplication matrix from the `3x3 -> 4x4` row-splitting sibling.
+fn visit_single_row_amalgamation_factorisations_4x4_to_3<F>(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut F,
+) where
+    F: FnMut(DynMatrix, DynMatrix),
+{
+    assert_eq!(a.rows, 4);
+    assert_eq!(a.cols, 4);
+
+    for merge_row in 0..3 {
+        let mut clone_counts = [1usize; 3];
+        clone_counts[merge_row] = 2;
+        let v = build_contiguous_row_split_duplication_matrix(&clone_counts);
+        let mut u_data = Vec::with_capacity(12);
+        let mut valid = true;
+
+        for row in 0..4 {
+            if a.get(row, merge_row) != a.get(row, merge_row + 1) {
+                valid = false;
+                break;
+            }
+
+            let recovered = match merge_row {
+                0 => [a.get(row, 0), a.get(row, 2), a.get(row, 3)],
+                1 => [a.get(row, 0), a.get(row, 1), a.get(row, 3)],
+                2 => [a.get(row, 0), a.get(row, 1), a.get(row, 2)],
+                _ => unreachable!("merge_row is always in 0..3"),
+            };
+            if recovered.into_iter().any(|entry| entry > max_entry) {
+                valid = false;
+                break;
+            }
+            if (row == merge_row || row == merge_row + 1) && recovered == [0, 0, 0] {
+                valid = false;
+                break;
+            }
+            u_data.extend_from_slice(&recovered);
+        }
+
+        if valid {
+            visit(DynMatrix::new(4, 3, u_data), v);
+        }
+    }
+}
+
 /// Enumerate a bounded explicit 5x5 -> 4x4 row-amalgamation family.
 ///
 /// One chosen contiguous source-row pair is amalgamated into a single target
@@ -3361,7 +3413,12 @@ const THREE_BY_THREE_SAME_DIMENSION_FAMILIES: [FactorisationFamilyDescriptor; 6]
     ),
 ];
 
-const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 5] = [
+const FOUR_BY_FOUR_FACTORISATION_FAMILIES: [FactorisationFamilyDescriptor; 6] = [
+    FactorisationFamilyDescriptor::new(
+        "single_row_amalgamation_4x4_to_3x3",
+        enabled_single_row_amalgamation_4x4_to_3x3,
+        enumerate_single_row_amalgamation_4x4_to_3x3_family,
+    ),
     FactorisationFamilyDescriptor::new(
         "binary_sparse_rectangular_factorisation_4x3_to_3",
         enabled_binary_sparse_factorisation_4x4_to_3,
@@ -3481,6 +3538,14 @@ fn enabled_three_by_three_same_dimension_family(
 }
 
 fn enabled_binary_sparse_factorisation_4x4_to_3(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    _move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 4 && max_intermediate_dim >= 4
+}
+
+fn enabled_single_row_amalgamation_4x4_to_3x3(
     input_dim: usize,
     max_intermediate_dim: usize,
     _move_family_policy: MoveFamilyPolicy,
@@ -3661,6 +3726,14 @@ fn enumerate_binary_sparse_factorisation_4x4_to_3_family(
     visit: &mut dyn FnMut(DynMatrix, DynMatrix),
 ) {
     visit_binary_sparse_factorisations_4x4_to_3(a, max_entry, &mut |u, v| visit(u, v));
+}
+
+fn enumerate_single_row_amalgamation_4x4_to_3x3_family(
+    a: &DynMatrix,
+    max_entry: u32,
+    visit: &mut dyn FnMut(DynMatrix, DynMatrix),
+) {
+    visit_single_row_amalgamation_factorisations_4x4_to_3(a, max_entry, &mut |u, v| visit(u, v));
 }
 
 fn enumerate_single_row_split_4x4_to_5x5_family(
@@ -4623,6 +4696,24 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_plus_structured_policy_exposes_single_row_amalgamation_4x4_to_3x3_witness() {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
+        let mut families = BTreeSet::new();
+
+        visit_factorisations_with_family_for_policy(
+            &current,
+            4,
+            3,
+            MoveFamilyPolicy::GraphPlusStructured,
+            |family, _, _| {
+                families.insert(family);
+            },
+        );
+
+        assert!(families.contains("single_row_amalgamation_4x4_to_3x3"));
+    }
+
+    #[test]
     fn test_graph_plus_structured_policy_exposes_single_row_split_4x4_to_5x5_witness() {
         let u = DynMatrix::new(
             4,
@@ -4776,6 +4867,7 @@ mod tests {
         assert_eq!(
             selected_factorisation_family_labels(4, 5, MoveFamilyPolicy::Mixed),
             vec![
+                "single_row_amalgamation_4x4_to_3x3",
                 "binary_sparse_rectangular_factorisation_4x3_to_3",
                 "single_row_split_4x4_to_5x5",
                 "single_column_split_4x4_to_5x5",
@@ -5062,6 +5154,28 @@ mod tests {
     }
 
     #[test]
+    fn test_single_row_amalgamation_factorisations_reach_expected_4x4_to_3x3_target() {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
+        let target = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
+        let mut found = false;
+
+        visit_single_row_amalgamation_factorisations_4x4_to_3(&current, 3, &mut |u, v| {
+            if u == DynMatrix::new(4, 3, vec![1, 0, 1, 1, 1, 0, 1, 0, 2, 0, 1, 1])
+                && v == DynMatrix::new(3, 4, vec![1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+                && u.mul(&v) == current
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected bounded 4x4->3x3 single-row amalgamation factorisation"
+        );
+    }
+
+    #[test]
     fn test_single_column_split_factorisations_reach_expected_4x4_to_5x5_target() {
         let current = DynMatrix::new(4, 4, vec![1, 2, 0, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 2, 0, 1]);
         let target = DynMatrix::new(
@@ -5261,6 +5375,29 @@ mod tests {
         assert!(
             found,
             "expected main dispatcher to expose the bounded 4x4 same-size diagonal family"
+        );
+    }
+
+    #[test]
+    fn test_visit_all_factorisations_includes_single_row_amalgamation_4x4_to_3x3_family() {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
+        let target = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
+        let mut found = false;
+
+        visit_all_factorisations_with_family(&current, 4, 3, |family, u, v| {
+            if family == "single_row_amalgamation_4x4_to_3x3"
+                && u == DynMatrix::new(4, 3, vec![1, 0, 1, 1, 1, 0, 1, 0, 2, 0, 1, 1])
+                && v == DynMatrix::new(3, 4, vec![1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+                && u.mul(&v) == current
+                && v.mul(&u) == target
+            {
+                found = true;
+            }
+        });
+
+        assert!(
+            found,
+            "expected main dispatcher to expose the bounded 4x4->3x3 row-amalgamation family"
         );
     }
 
