@@ -10,7 +10,7 @@ This round stays measurement-first:
 
 - no solver rewrites;
 - one reusable evidence-lane harness corpus;
-- one durable JSON run artifact;
+- one local JSON run artifact;
 - and one current-head answer for the canonical hard `brix_ruiz_k3` pair.
 
 ## Sources and run surfaces
@@ -20,8 +20,18 @@ This round stays measurement-first:
   - `research/cases.json`
 - reusable comparison corpus added for this slice:
   - `research/known_pair_policy_coverage_corpus_2026-04-17.json`
-- saved harness artifact for this slice:
+- saved local harness artifact for this slice:
   - `research/runs/2026-04-17-known-pair-policy-coverage.json`
+
+The run artifact above is intentionally local-only: `research/runs/` is ignored
+in this repo. To reproduce the coverage tables from committed inputs, rerun:
+
+```bash
+cargo run --profile dist --features research-tools --bin research_harness -- \
+  --cases research/known_pair_policy_coverage_corpus_2026-04-17.json \
+  --format json \
+  > research/runs/2026-04-17-known-pair-policy-coverage.json
+```
 
 Coordinator-referenced post-merge artifacts
 `research/runs/2026-04-17-post-merge-2uy19.json` and
@@ -84,7 +94,8 @@ Per-pair envelopes:
 
 ## Coverage summary
 
-Strategy totals from `research/runs/2026-04-17-known-pair-policy-coverage.json`:
+Strategy totals from the local run artifact
+`research/runs/2026-04-17-known-pair-policy-coverage.json`:
 
 - `graph_only`: `4/10 equivalent`, `6/10 unknown`, `0 timeout`, total elapsed
   `8146 ms`
