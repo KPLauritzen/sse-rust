@@ -418,9 +418,7 @@ fn is_composite(n: u64) -> bool {
 }
 
 fn in_choe_shin_determinant_territory(trace: i64, determinant: i64) -> bool {
-    determinant >= -2 * trace
-        && determinant < -trace
-        && is_composite(determinant.unsigned_abs())
+    determinant >= -2 * trace && determinant < -trace && is_composite(determinant.unsigned_abs())
 }
 
 /// Evaluate a polynomial p(x) = coeffs[0] + coeffs[1]*x + coeffs[2]*x^2 + ...
