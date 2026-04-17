@@ -793,3 +793,13 @@
   `3x3 -> 4x4` through `5x5 -> 4x4`. The main current direction remains:
   prefer bounded explicit structure plus better proposal-quality evidence over
   broader generic widening.
+
+- `working tree` Rejected widening deferred witness reconstruction beyond the
+  kept graph-only BFS seam for now.
+  Measured first on the hard `graph_plus_structured` exact Brix-Ruiz control,
+  the mixed Brix-Ruiz baseline, and a dynamic higher-block control. A
+  specialized exact `graph_plus_structured` deferred-parent prototype preserved
+  counters and correctness but stayed runtime-flat on the only plausibly hot
+  surface (`2.217 s -> 2.213 s`) while requiring a large specialized BFS body,
+  so the code was reverted. Details are in
+  `research/notes/2026-04-17-deferred-witness-graph-plus-structured-rejection.md`.
