@@ -815,3 +815,14 @@
   outcome/counters and improved the same control to median `2.07 s` and
   `587,204 KB`. Details are in
   `research/notes/2026-04-17-deferred-witness-graph-plus-structured-measured-keep.md`.
+
+- `ilu4-exact-pruning-literature-survey` Added a durable literature note for
+  bead `sse-rust-ilu.4` on exact pruning, obstruction, orbit reduction, and
+  bounded no-go ideas.
+  Surveyed Baker 1983, Choe-Shin 1997, Eilers-Kiming 2008,
+  Boyle-Kim-Roush 2013, Eilers-Ruiz 2019, Brix 2022,
+  Bilich-Dor-On-Ruiz 2024, Wagoner 1990, McKay 1998, Paige-Tarjan 1987, and
+  Kim-Roush 1999. The strongest near-term direction is not a new global
+  invariant; it is exact canonical-augmentation style orbit reduction plus
+  bounded structured-family certificates. Details are in
+  `research/notes/2026-04-17-exact-pruning-obstruction-literature-survey.md`.
