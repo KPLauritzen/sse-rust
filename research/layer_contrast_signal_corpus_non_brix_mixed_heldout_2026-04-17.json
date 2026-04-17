@@ -389,7 +389,7 @@
     },
     {
       "label": "riedel_baker_k10",
-      "budget_lag": 10,
+      "budget_lag": 11,
       "solved_lag": 11,
       "solution_nodes": 9,
       "ranked_nodes": 9,

@@ -20,7 +20,10 @@ Refreshed the durable mixed held-out endpoint artifact directly from
 `research/cases.json`. No temporary one-case corpus was needed here because the
 seven held-out endpoint cases already use the real mixed endpoint policy by
 default. The command pins `--max-endpoint-dim 4` so the durable artifact config
-matches the included `higher_block` `1x1 <-> 4x4` case surface.
+matches the included `higher_block` `1x1 <-> 4x4` case surface. During review,
+`research/cases.json` was also corrected so `riedel_baker_k10` now carries
+`max_lag = 11`, matching the existing mixed witness length already observed in
+the durable analyzer outputs.
 
 ```bash
 timeout -k 10s 60s target/debug/analyze_path_signal_corpus \

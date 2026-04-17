@@ -1144,7 +1144,7 @@
       "a": [[10, 2], [1, 10]],
       "b": [[9, 1], [1, 11]],
       "config": {
-        "max_lag": 10,
+        "max_lag": 11,
         "max_intermediate_dim": 3,
         "max_entry": 10
       },

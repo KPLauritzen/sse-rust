@@ -905,6 +905,10 @@
   `lind_marcus_a_to_c`, and
   `full_2_shift_higher_block_1x1_to_4x4`, writing
   `research/layer_contrast_signal_corpus_non_brix_mixed_heldout_2026-04-17.json`.
+  Tightened the durable case surface at the same time by correcting
+  `research/cases.json` so `riedel_baker_k10` now uses `max_lag = 11`, matching
+  the already-observed mixed witness length instead of leaving the artifact with
+  inconsistent `budget_lag` vs `solved_lag` metadata.
   The refreshed held-out artifact now has all `3 / 3` non-Brix families
   present and rankable, `7` rankable held-out pairs, `45` ranked held-out
   observations, and `0` unranked solved held-out pairs, so it is
