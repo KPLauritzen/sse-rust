@@ -334,8 +334,8 @@ pub fn check_same_dimension_square_bowen_franks_invariants(
         return None;
     }
 
-    let bf_a = bowen_franks_invariants_dyn(a);
-    let bf_b = bowen_franks_invariants_dyn(b);
+    let bf_a = bowen_franks_invariants_dyn(a)?;
+    let bf_b = bowen_franks_invariants_dyn(b)?;
     if bf_a != bf_b {
         return Some(format!(
             "Bowen-Franks group mismatch: {:?} vs {:?}",
@@ -367,7 +367,7 @@ fn power_trace_mismatch_reason(power: usize) -> String {
     }
 }
 
-fn bowen_franks_invariants_dyn(matrix: &DynMatrix) -> Vec<i64> {
+fn bowen_franks_invariants_dyn(matrix: &DynMatrix) -> Option<Vec<i64>> {
     let identity_minus = (0..matrix.rows)
         .map(|row| {
             (0..matrix.cols)
@@ -381,15 +381,15 @@ fn bowen_franks_invariants_dyn(matrix: &DynMatrix) -> Vec<i64> {
     smith_normal_form_invariants_i64(&identity_minus)
 }
 
-fn smith_normal_form_invariants_i64(matrix: &[Vec<i64>]) -> Vec<i64> {
+fn smith_normal_form_invariants_i64(matrix: &[Vec<i64>]) -> Option<Vec<i64>> {
     let n = matrix.len();
     debug_assert!(matrix.iter().all(|row| row.len() == n));
 
     let mut deltas = Vec::with_capacity(n + 1);
-    deltas.push(1u64);
+    deltas.push(1u128);
     let mut rank = 0usize;
     for minor_size in 1..=n {
-        let delta = gcd_of_minors_i64(matrix, minor_size);
+        let delta = gcd_of_minors_i64(matrix, minor_size)?;
         if delta != 0 {
             rank = minor_size;
         }
@@ -397,18 +397,18 @@ fn smith_normal_form_invariants_i64(matrix: &[Vec<i64>]) -> Vec<i64> {
     }
 
     let mut invariants = Vec::with_capacity(n);
-    let mut previous_delta = 1u64;
+    let mut previous_delta = 1u128;
     for &delta in deltas.iter().take(rank + 1).skip(1) {
-        invariants.push((delta / previous_delta) as i64);
+        invariants.push(i64::try_from(delta / previous_delta).ok()?);
         previous_delta = delta;
     }
     invariants.resize(n, 0);
-    invariants
+    Some(invariants)
 }
 
-fn gcd_of_minors_i64(matrix: &[Vec<i64>], minor_size: usize) -> u64 {
+fn gcd_of_minors_i64(matrix: &[Vec<i64>], minor_size: usize) -> Option<u128> {
     let combinations = index_combinations(matrix.len(), minor_size);
-    let mut gcd_acc = 0u64;
+    let mut gcd_acc = 0u128;
 
     for row_indices in &combinations {
         for col_indices in &combinations {
@@ -416,11 +416,11 @@ fn gcd_of_minors_i64(matrix: &[Vec<i64>], minor_size: usize) -> u64 {
                 .iter()
                 .map(|&row| col_indices.iter().map(|&col| matrix[row][col]).collect())
                 .collect::<Vec<Vec<i64>>>();
-            gcd_acc = gcd(gcd_acc, determinant_i64(&minor).unsigned_abs());
+            gcd_acc = gcd_u128(gcd_acc, determinant_i128_checked(&minor)?.unsigned_abs());
         }
     }
 
-    gcd_acc
+    Some(gcd_acc)
 }
 
 fn index_combinations(n: usize, choose: usize) -> Vec<Vec<usize>> {
@@ -452,16 +452,22 @@ fn index_combinations(n: usize, choose: usize) -> Vec<Vec<usize>> {
     combinations
 }
 
-fn determinant_i64(matrix: &[Vec<i64>]) -> i64 {
+fn determinant_i128_checked(matrix: &[Vec<i64>]) -> Option<i128> {
     match matrix.len() {
-        0 => 1,
-        1 => matrix[0][0],
-        2 => matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0],
+        0 => Some(1),
+        1 => Some(matrix[0][0] as i128),
+        2 => {
+            let a = matrix[0][0] as i128;
+            let b = matrix[0][1] as i128;
+            let c = matrix[1][0] as i128;
+            let d = matrix[1][1] as i128;
+            a.checked_mul(d)?.checked_sub(b.checked_mul(c)?)
+        }
         _ => matrix[0]
             .iter()
             .enumerate()
             .filter(|(_, entry)| **entry != 0)
-            .map(|(col, &entry)| {
+            .try_fold(0i128, |acc, (col, &entry)| {
                 let minor = matrix[1..]
                     .iter()
                     .map(|row| {
@@ -471,10 +477,12 @@ fn determinant_i64(matrix: &[Vec<i64>]) -> i64 {
                             .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>();
-                let sign = if col % 2 == 0 { 1 } else { -1 };
-                sign * entry * determinant_i64(&minor)
-            })
-            .sum(),
+                let sign = if col % 2 == 0 { 1i128 } else { -1i128 };
+                let term = sign
+                    .checked_mul(entry as i128)?
+                    .checked_mul(determinant_i128_checked(&minor)?)?;
+                acc.checked_add(term)
+            }),
     }
 }
 
@@ -518,6 +526,15 @@ fn bowen_franks_2x2(m: &SqMatrix<2>) -> (i64, i64) {
 }
 
 fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
     while b != 0 {
         let t = b;
         b = a % b;
@@ -758,6 +775,43 @@ mod tests {
     fn test_same_dimension_square_bowen_franks_skips_mixed_dimensions() {
         let a = DynMatrix::new(2, 2, vec![2, 0, 0, 1]);
         let b = DynMatrix::new(3, 3, vec![2, 0, 0, 0, 1, 0, 0, 0, 0]);
+
+        assert_eq!(
+            check_same_dimension_square_bowen_franks_invariants(&a, &b),
+            None
+        );
+    }
+
+    #[test]
+    fn test_same_dimension_square_bowen_franks_skips_overflowing_cases() {
+        let max = u32::MAX;
+        let a = DynMatrix::new(
+            4,
+            4,
+            vec![max, 0, 0, 0, 0, max, 0, 0, 0, 0, max, 0, 0, 0, 0, max],
+        );
+        let b = DynMatrix::new(
+            4,
+            4,
+            vec![
+                max - 1,
+                0,
+                0,
+                0,
+                0,
+                max - 1,
+                0,
+                0,
+                0,
+                0,
+                max - 1,
+                0,
+                0,
+                0,
+                0,
+                max - 1,
+            ],
+        );
 
         assert_eq!(
             check_same_dimension_square_bowen_franks_invariants(&a, &b),
@@ -1140,7 +1194,10 @@ mod tests {
     #[test]
     fn test_smith_normal_form_invariants_i64_handles_rank_drop() {
         let matrix = vec![vec![1, 1, 0], vec![0, 0, 0], vec![0, 0, 1]];
-        assert_eq!(smith_normal_form_invariants_i64(&matrix), vec![1, 1, 0]);
+        assert_eq!(
+            smith_normal_form_invariants_i64(&matrix),
+            Some(vec![1, 1, 0])
+        );
     }
 
     #[test]
