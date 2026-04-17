@@ -133,10 +133,7 @@ fn quadratic_arithmetic_profile_2x2(
 pub fn determinant_band_2x2(trace: i64, determinant: i64) -> DeterminantBand2x2 {
     if determinant >= 0 {
         DeterminantBand2x2::Baker
-    } else if determinant >= -2 * trace
-        && determinant < -trace
-        && is_composite(determinant.unsigned_abs())
-    {
+    } else if in_choe_shin_determinant_territory(trace, determinant) {
         DeterminantBand2x2::ChoeShin
     } else {
         DeterminantBand2x2::Neither
@@ -420,6 +417,12 @@ fn is_composite(n: u64) -> bool {
     false
 }
 
+fn in_choe_shin_determinant_territory(trace: i64, determinant: i64) -> bool {
+    determinant >= -2 * trace
+        && determinant < -trace
+        && is_composite(determinant.unsigned_abs())
+}
+
 /// Evaluate a polynomial p(x) = coeffs[0] + coeffs[1]*x + coeffs[2]*x^2 + ...
 /// at a 2x2 matrix A, returning a 2x2 i64 matrix.
 fn eval_poly_at_matrix_2x2(coeffs: &[i64], a: &SqMatrix<2>) -> [[i64; 2]; 2] {
@@ -554,8 +557,14 @@ fn exact_positive_class_2x2(
         DeterminantBand2x2::Baker if source.strictly_positive && target.strictly_positive => {
             Some(ExactPositiveClass2x2::Baker1983)
         }
-        DeterminantBand2x2::ChoeShin => Some(ExactPositiveClass2x2::ChoeShin1997),
-        DeterminantBand2x2::Baker | DeterminantBand2x2::Neither => None,
+        DeterminantBand2x2::ChoeShin
+            if in_choe_shin_determinant_territory(source.trace, source.determinant) =>
+        {
+            Some(ExactPositiveClass2x2::ChoeShin1997)
+        }
+        DeterminantBand2x2::Baker | DeterminantBand2x2::ChoeShin | DeterminantBand2x2::Neither => {
+            None
+        }
     }
 }
 
