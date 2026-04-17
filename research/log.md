@@ -243,6 +243,16 @@
   note:
   `research/notes/2026-04-17-bounded-no-go-certificates-first-round.md`.
 
+## 2026-04-17 Representative Retention
+
+- `working tree` Rejected canonical-only replay handles for exact graph-only BFS.
+  Kept as evidence. A bounded graph-only probe showed that the stored
+  representative edge `[[1,3],[2,1]] -> [[0,0,0],[2,1,2],[1,3,1]]` is exactly
+  replayable, but its canonicalized pair is not, so exact replay and observer
+  `SearchEdgeRecord` semantics both still require more than the canonical node
+  id alone. Durable note:
+  `research/notes/2026-04-17-graph-only-representative-matrix-retention-probe.md`.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.

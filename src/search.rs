@@ -5670,6 +5670,21 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_only_canonical_only_handles_cannot_replay_all_discovered_edges() {
+        let current_orig = DynMatrix::from_sq(&SqMatrix::new([[1, 3], [2, 1]]));
+        let current_canon = current_orig.canonical_perm();
+        let next_orig = DynMatrix::new(3, 3, vec![0, 0, 0, 2, 1, 2, 1, 3, 1]);
+        let next_canon = DynMatrix::new(3, 3, vec![0, 0, 0, 1, 1, 3, 2, 2, 1]);
+
+        assert!(enumerate_graph_move_successor_nodes(&current_orig, 5)
+            .nodes
+            .into_iter()
+            .any(|successor| successor.matrix == next_canon && successor.orig_matrix == next_orig));
+        assert!(find_exact_graph_move_witness_between(&current_orig, &next_orig).is_some());
+        assert!(find_exact_graph_move_witness_between(&current_canon, &next_canon).is_none());
+    }
+
+    #[test]
     fn test_telemetry_for_brix_ruiz_search() {
         let a = SqMatrix::new([[1, 3], [2, 1]]);
         let b = SqMatrix::new([[1, 6], [1, 1]]);
