@@ -1,0 +1,190 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__reach_1_lag20_dim4_entry12",
+      "description": "Dedicated k=4 graph-plus-structured reach ramp: beam64 at lag20/dim4/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 20,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-plus-structured",
+        "policy-reach",
+        "campaign",
+        "dim4-ramp"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_campaign",
+        "strategy": "graph_plus_structured_beam_dim4_ramp",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__reach_2_lag30_dim4_entry12",
+      "description": "Dedicated k=4 graph-plus-structured reach ramp: beam64 at lag30/dim4/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 30,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-plus-structured",
+        "policy-reach",
+        "campaign",
+        "dim4-ramp"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_campaign",
+        "strategy": "graph_plus_structured_beam_dim4_ramp",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__reach_3_lag40_dim4_entry12",
+      "description": "Dedicated k=4 graph-plus-structured reach ramp: beam64 at lag40/dim4/entry12 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 40,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 10000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-plus-structured",
+        "policy-reach",
+        "campaign",
+        "dim4-ramp"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_campaign",
+        "strategy": "graph_plus_structured_beam_dim4_ramp",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__stress_1_lag12_dim5_entry10_beam32",
+      "description": "Dedicated k=4 graph-plus-structured stress point: beam32 at lag12/dim5/entry10 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 5,
+        "max_entry": 10,
+        "frontier_mode": "beam",
+        "beam_width": 32,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-plus-structured",
+        "policy-reach",
+        "campaign",
+        "dim5-stress"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_campaign",
+        "strategy": "graph_plus_structured_beam_dim5_stress",
+        "schedule_order": 40
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__stress_2_lag16_dim5_entry10_beam32",
+      "description": "Dedicated k=4 graph-plus-structured stress point: beam32 at lag16/dim5/entry10 on the open Brix-Ruiz pair.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 5,
+        "max_entry": 10,
+        "frontier_mode": "beam",
+        "beam_width": 32,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 15000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": [
+        "brix-ruiz",
+        "k4",
+        "graph-plus-structured",
+        "policy-reach",
+        "campaign",
+        "dim5-stress"
+      ],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_campaign",
+        "strategy": "graph_plus_structured_beam_dim5_stress",
+        "schedule_order": 50
+      }
+    }
+  ]
+}
