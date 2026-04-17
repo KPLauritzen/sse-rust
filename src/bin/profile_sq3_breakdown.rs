@@ -79,16 +79,19 @@ where
     }
 
     if scan_dup_row_support {
+        validate_scan_max_entry("duplicate-row support", scan_max_entry, 8)?;
         scan_duplicate_row_support_family(scan_max_entry, sq3_cap);
         return Ok(());
     }
 
     if scan_zero_col_support {
+        validate_scan_max_entry("zero-column support", scan_max_entry, 6)?;
         scan_zero_column_support_family(scan_max_entry, sq3_cap);
         return Ok(());
     }
 
     if scan_singular_grid {
+        validate_scan_max_entry("singular-grid", scan_max_entry, 2)?;
         scan_singular_grid_family(scan_max_entry, sq3_cap);
         return Ok(());
     }
@@ -117,6 +120,19 @@ where
         print_case(label, &matrix, sq3_cap);
     }
 
+    Ok(())
+}
+
+fn validate_scan_max_entry(
+    scan_name: &str,
+    scan_max_entry: u32,
+    max_supported: u32,
+) -> Result<(), String> {
+    if scan_max_entry > max_supported {
+        return Err(format!(
+            "{scan_name} scan only supports --scan-max-entry up to {max_supported}; got {scan_max_entry}"
+        ));
+    }
     Ok(())
 }
 
@@ -443,15 +459,15 @@ fn parse_entries(s: &str) -> Result<Vec<u32>, String> {
         .collect()
 }
 
-fn determinant_3x3(matrix: &DynMatrix) -> i64 {
-    let a00 = matrix.get(0, 0) as i64;
-    let a01 = matrix.get(0, 1) as i64;
-    let a02 = matrix.get(0, 2) as i64;
-    let a10 = matrix.get(1, 0) as i64;
-    let a11 = matrix.get(1, 1) as i64;
-    let a12 = matrix.get(1, 2) as i64;
-    let a20 = matrix.get(2, 0) as i64;
-    let a21 = matrix.get(2, 1) as i64;
-    let a22 = matrix.get(2, 2) as i64;
+fn determinant_3x3(matrix: &DynMatrix) -> i128 {
+    let a00 = matrix.get(0, 0) as i128;
+    let a01 = matrix.get(0, 1) as i128;
+    let a02 = matrix.get(0, 2) as i128;
+    let a10 = matrix.get(1, 0) as i128;
+    let a11 = matrix.get(1, 1) as i128;
+    let a12 = matrix.get(1, 2) as i128;
+    let a20 = matrix.get(2, 0) as i128;
+    let a21 = matrix.get(2, 1) as i128;
+    let a22 = matrix.get(2, 2) as i128;
     a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20)
 }
