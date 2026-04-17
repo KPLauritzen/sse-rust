@@ -219,6 +219,17 @@
   `research/notes/2026-04-16-dynamic-mixed-endpoint-layer-events.md` and
   `research/layer_contrast_signal_corpus_lind_marcus_2026-04-16.json`.
 
+## 2026-04-17 Exact Obstruction Follow-up
+
+- `working tree` Rejected quotient/support source-only hard gates for singular `square_factorisation_3x3`.
+  Kept as evidence. A bounded duplicate-row hotspot-family scan showed that
+  fixed support plus duplicate-row structure still splits into factorable and
+  unfactorable exact cases, and a bounded singular-grid scan at entry cap `2`
+  produced explicit collisions where both the coarse same-future/past signature
+  and the one-step partition-refined quotient signal agree while
+  `square_factorisation_3x3` emptiness disagrees. Durable note:
+  `research/notes/2026-04-17-square-factorisation-3x3-quotient-support-obstruction-followup.md`.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.
