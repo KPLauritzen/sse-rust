@@ -11,6 +11,21 @@ use sse_core::matrix::{DynMatrix, SqMatrix};
 use sse_core::search::search_sse_2x2_with_telemetry;
 use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SearchTelemetry, SseResult};
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum SeedAnchor {
+    Source,
+    Target,
+}
+
+impl SeedAnchor {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Target => "target",
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Cli {
     case: String,
@@ -35,6 +50,7 @@ struct Case2x2 {
 #[derive(Clone)]
 struct LocalSeed {
     matrix: SqMatrix<2>,
+    anchor: SeedAnchor,
     local_lag: usize,
     path_families: Vec<String>,
 }
@@ -42,6 +58,7 @@ struct LocalSeed {
 #[derive(Clone)]
 struct SeedEvaluation {
     seed: PositiveConjugacySeedCandidate2x2,
+    anchor: SeedAnchor,
     local_lag: usize,
     path_families: Vec<String>,
     result: SseResult<2>,
@@ -135,10 +152,14 @@ fn main() -> Result<(), String> {
     }
     println!();
 
-    let seeds =
-        enumerate_same_dimension_local_seeds(&case.source, &search_config, cli.local_seed_lag);
+    let seeds = enumerate_exact_local_seed_family(
+        &case.source,
+        &case.target,
+        &search_config,
+        cli.local_seed_lag,
+    );
     println!(
-        "Actual local same-dimension seed candidates from A within lag <= {}:",
+        "Actual exact local seed family within lag <= {}:",
         cli.local_seed_lag
     );
     println!("  candidates = {}", seeds.len());
@@ -146,8 +167,12 @@ fn main() -> Result<(), String> {
         "  lag breakdown = {}",
         format_lag_breakdown(seeds.iter().map(|seed| seed.local_lag))
     );
+    println!(
+        "  anchor breakdown = {}",
+        format_anchor_breakdown(seeds.iter().map(|seed| seed.anchor))
+    );
     if seeds.is_empty() {
-        println!("  no same-dimension candidates survived under the requested search policy");
+        println!("  no exact local seeds survived under the requested bounded family");
         return Ok(());
     }
     println!();
@@ -187,7 +212,9 @@ fn main() -> Result<(), String> {
             seed_by_matrix
                 .get(&seed.matrix)
                 .filter(|local_seed| local_seed.local_lag <= search_config.max_lag)
-                .map(|local_seed| evaluate_seed(local_seed, seed, &case.target, &search_config))
+                .map(|local_seed| {
+                    evaluate_seed(local_seed, seed, &case.source, &case.target, &search_config)
+                })
         })
         .collect::<Vec<_>>();
     let blind_evaluations = blind_shortlist
@@ -196,7 +223,9 @@ fn main() -> Result<(), String> {
             seed_by_matrix
                 .get(&seed.matrix)
                 .filter(|local_seed| local_seed.local_lag <= search_config.max_lag)
-                .map(|local_seed| evaluate_seed(local_seed, seed, &case.target, &search_config))
+                .map(|local_seed| {
+                    evaluate_seed(local_seed, seed, &case.source, &case.target, &search_config)
+                })
         })
         .collect::<Vec<_>>();
 
@@ -363,14 +392,74 @@ fn load_riedel_baker_case(case: &str) -> Option<Case2x2> {
     })
 }
 
+fn enumerate_exact_local_seed_family(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    search_config: &SearchConfig,
+    max_local_lag: usize,
+) -> Vec<LocalSeed> {
+    let mut best_by_matrix = BTreeMap::<SqMatrix<2>, LocalSeed>::new();
+    extend_seed_family(
+        &mut best_by_matrix,
+        enumerate_same_dimension_local_seeds(
+            source,
+            search_config,
+            max_local_lag,
+            SeedAnchor::Source,
+        ),
+    );
+    extend_seed_family(
+        &mut best_by_matrix,
+        enumerate_same_dimension_local_seeds(
+            target,
+            search_config,
+            max_local_lag,
+            SeedAnchor::Target,
+        ),
+    );
+    extend_seed_family(
+        &mut best_by_matrix,
+        enumerate_permutation_local_seeds(source, SeedAnchor::Source, search_config.max_entry),
+    );
+    extend_seed_family(
+        &mut best_by_matrix,
+        enumerate_permutation_local_seeds(target, SeedAnchor::Target, search_config.max_entry),
+    );
+    best_by_matrix.into_values().collect()
+}
+
+fn extend_seed_family(
+    best_by_matrix: &mut BTreeMap<SqMatrix<2>, LocalSeed>,
+    seeds: Vec<LocalSeed>,
+) {
+    for seed in seeds {
+        match best_by_matrix.get(&seed.matrix) {
+            Some(existing) if !seed_is_better(&seed, existing) => {}
+            _ => {
+                best_by_matrix.insert(seed.matrix.clone(), seed);
+            }
+        }
+    }
+}
+
+fn seed_is_better(candidate: &LocalSeed, existing: &LocalSeed) -> bool {
+    candidate.local_lag < existing.local_lag
+        || (candidate.local_lag == existing.local_lag
+            && (candidate.anchor < existing.anchor
+                || (candidate.anchor == existing.anchor
+                    && candidate.path_families < existing.path_families)))
+}
+
 fn enumerate_same_dimension_local_seeds(
     source: &SqMatrix<2>,
     search_config: &SearchConfig,
     max_local_lag: usize,
+    anchor: SeedAnchor,
 ) -> Vec<LocalSeed> {
     if max_local_lag == 0 {
         return vec![LocalSeed {
             matrix: source.clone(),
+            anchor,
             local_lag: 0,
             path_families: Vec::new(),
         }];
@@ -382,6 +471,7 @@ fn enumerate_same_dimension_local_seeds(
 
     let mut frontier = vec![LocalSeed {
         matrix: source.clone(),
+        anchor,
         local_lag: 0,
         path_families: Vec::new(),
     }];
@@ -404,6 +494,7 @@ fn enumerate_same_dimension_local_seeds(
                 best_depth.insert(matrix.clone(), next_depth);
                 let successor = LocalSeed {
                     matrix: matrix.clone(),
+                    anchor,
                     local_lag: next_depth,
                     path_families,
                 };
@@ -421,6 +512,29 @@ fn enumerate_same_dimension_local_seeds(
     }
 
     best_by_matrix.into_values().collect()
+}
+
+fn enumerate_permutation_local_seeds(
+    matrix: &SqMatrix<2>,
+    anchor: SeedAnchor,
+    max_entry: u32,
+) -> Vec<LocalSeed> {
+    let conjugated = permutation_conjugate_2x2(matrix);
+    if conjugated == *matrix || conjugated.max_entry() > max_entry {
+        return Vec::new();
+    }
+
+    vec![LocalSeed {
+        matrix: conjugated,
+        anchor,
+        local_lag: 1,
+        path_families: vec!["permutation_conjugate_2x2".to_string()],
+    }]
+}
+
+fn permutation_conjugate_2x2(matrix: &SqMatrix<2>) -> SqMatrix<2> {
+    let [[a, b], [c, d]] = matrix.data;
+    SqMatrix::new([[d, c], [b, a]])
 }
 
 fn enumerate_direct_same_dimension_successors(
@@ -477,6 +591,7 @@ fn build_blind_shortlist(
 fn evaluate_seed(
     local_seed: &LocalSeed,
     seed: &PositiveConjugacySeedCandidate2x2,
+    source: &SqMatrix<2>,
     target: &SqMatrix<2>,
     search_config: &SearchConfig,
 ) -> SeedEvaluation {
@@ -484,10 +599,17 @@ fn evaluate_seed(
         max_lag: search_config.max_lag.saturating_sub(local_seed.local_lag),
         ..search_config.clone()
     };
-    let (result, telemetry) =
-        search_sse_2x2_with_telemetry(&local_seed.matrix, target, &candidate_config);
+    let (result, telemetry) = match local_seed.anchor {
+        SeedAnchor::Source => {
+            search_sse_2x2_with_telemetry(&local_seed.matrix, target, &candidate_config)
+        }
+        SeedAnchor::Target => {
+            search_sse_2x2_with_telemetry(source, &local_seed.matrix, &candidate_config)
+        }
+    };
     SeedEvaluation {
         seed: seed.clone(),
+        anchor: local_seed.anchor,
         local_lag: local_seed.local_lag,
         path_families: local_seed.path_families.clone(),
         result,
@@ -532,10 +654,11 @@ fn print_seed_evaluations(prefix: &str, evaluations: &[SeedEvaluation]) {
 
     for (index, evaluation) in evaluations.iter().enumerate() {
         println!(
-            "  {}{} {:?} local_lag={} path={} nearest=P{} proposal_l1={} target_l1={}",
+            "  {}{} {:?} anchor={} local_lag={} path={} nearest=P{} proposal_l1={} target_l1={}",
             prefix,
             index + 1,
             evaluation.seed.matrix,
+            evaluation.anchor.label(),
             evaluation.local_lag,
             evaluation.path_families.join(" -> "),
             evaluation.seed.nearest_proposal_rank,
@@ -543,7 +666,7 @@ fn print_seed_evaluations(prefix: &str, evaluations: &[SeedEvaluation]) {
             evaluation.seed.target_l1_distance
         );
         print_result_summary(
-            "suffix",
+            "residual",
             &evaluation.result,
             &evaluation.telemetry,
             Some(evaluation.local_lag),
@@ -634,4 +757,73 @@ fn format_lag_breakdown(lags: impl Iterator<Item = usize>) -> String {
         .map(|(lag, count)| format!("{lag}:{count}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn format_anchor_breakdown(anchors: impl Iterator<Item = SeedAnchor>) -> String {
+    let mut counts = BTreeMap::<SeedAnchor, usize>::new();
+    for anchor in anchors {
+        *counts.entry(anchor).or_default() += 1;
+    }
+    if counts.is_empty() {
+        return "none".to_string();
+    }
+    counts
+        .into_iter()
+        .map(|(anchor, count)| format!("{}:{count}", anchor.label()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mixed_search_config(max_entry: u32) -> SearchConfig {
+        SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        }
+    }
+
+    #[test]
+    fn permutation_local_seed_matches_swap_conjugate() {
+        let matrix = SqMatrix::new([[3, 2], [1, 3]]);
+        let seeds = enumerate_permutation_local_seeds(&matrix, SeedAnchor::Source, 4);
+        assert_eq!(seeds.len(), 1);
+        assert_eq!(seeds[0].matrix, SqMatrix::new([[3, 1], [2, 3]]));
+        assert_eq!(seeds[0].anchor, SeedAnchor::Source);
+        assert_eq!(seeds[0].local_lag, 1);
+    }
+
+    #[test]
+    fn exact_local_seed_family_adds_target_side_permutation_seed() {
+        let source = SqMatrix::new([[1, 3], [2, 1]]);
+        let target = SqMatrix::new([[1, 6], [1, 1]]);
+        let seeds = enumerate_exact_local_seed_family(&source, &target, &mixed_search_config(6), 2);
+        let by_matrix = seeds
+            .into_iter()
+            .map(|seed| (seed.matrix.clone(), seed))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            by_matrix
+                .get(&SqMatrix::new([[1, 2], [3, 1]]))
+                .expect("source-side permutation seed")
+                .anchor,
+            SeedAnchor::Source
+        );
+        assert_eq!(
+            by_matrix
+                .get(&SqMatrix::new([[1, 1], [6, 1]]))
+                .expect("target-side permutation seed")
+                .anchor,
+            SeedAnchor::Target
+        );
+    }
 }

@@ -925,3 +925,17 @@
   benchmark-meaningful under
   `research/ranking_signal_family_benchmark_v1.json`. Details are in
   `research/notes/2026-04-17-mixed-heldout-layer-contrast-refresh.md`.
+
+- `working tree` Broadened the positive-conjugacy local seed probe from a
+  source-only same-dimension family to a bounded exact endpoint-local family.
+  Kept as evidence. `src/bin/probe_positive_conjugacy_seeds.rs` now scores
+  against the deduplicated union of source-local and target-local same-dimension
+  `2x2` seeds plus endpoint permutation-conjugate seeds, and evaluates the
+  residual exact search on the appropriate side without touching default
+  `search_sse`. On `brix_k3`, this raised the exact seed pool from `1` to `6`
+  under the prior bound; on `riedel_baker_k3`, it recovered the known
+  source/target permutation controls. The result stayed neutral: proposal-guided
+  shortlists still did not beat the blind target-nearest shortlist on the
+  bounded cases checked (`brix_k3`, `brix_k4`, `riedel_baker_k3`). Details are
+  in
+  `research/notes/2026-04-17-positive-conjugacy-local-seed-family-followup.md`.
