@@ -26,11 +26,16 @@ impl DeterminantBand2x2 {
     }
 }
 
-/// Exact theorem-backed positive `2x2` territory currently implemented from the
+/// Exact theorem-backed `2x2` SSE classes currently implemented from the
 /// literature notes and local sources.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExactPositiveClass2x2 {
+    /// Baker (1983): strictly positive endpoints, nonnegative determinant,
+    /// and exact `GL(2,Z)` similarity.
     Baker1983,
+    /// Choe-Shin (1997): nonnegative endpoints, determinant in
+    /// `-2 tr(A) <= det(A) < -tr(A)`, composite `|det(A)|`, and exact
+    /// `GL(2,Z)` similarity.
     ChoeShin1997,
 }
 
@@ -558,6 +563,9 @@ fn exact_positive_class_2x2(
         DeterminantBand2x2::ChoeShin
             if in_choe_shin_determinant_territory(source.trace, source.determinant) =>
         {
+            // Choe-Shin's abstract widens the negative-determinant band to
+            // nonnegative 2x2 integral matrices; unlike Baker, it does not
+            // require both endpoints to be strictly positive.
             Some(ExactPositiveClass2x2::ChoeShin1997)
         }
         DeterminantBand2x2::Baker | DeterminantBand2x2::ChoeShin | DeterminantBand2x2::Neither => {
@@ -832,6 +840,22 @@ mod tests {
         let profile = gl2z_similarity_profile_2x2(&a, &b);
 
         assert!(profile.gl2z_similar);
+        assert_eq!(
+            profile.pair_determinant_band,
+            Some(DeterminantBand2x2::ChoeShin)
+        );
+        assert_eq!(
+            profile.exact_positive_class,
+            Some(ExactPositiveClass2x2::ChoeShin1997)
+        );
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_choe_shin_allows_nonnegative_zero_entry_case() {
+        let a = SqMatrix::new([[0, 6], [1, 4]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &a);
+
+        assert!(!profile.source.strictly_positive);
         assert_eq!(
             profile.pair_determinant_band,
             Some(DeterminantBand2x2::ChoeShin)

@@ -11,6 +11,7 @@ The implemented exact positive classes are intentionally small:
   both endpoints are strictly positive, the shared determinant is nonnegative,
   and the pair is exactly `GL(2,Z)`-similar.
 - `ChoeShin1997`:
+  the endpoints only need to be nonnegative,
   the shared determinant lies in `-2 tr(A) <= det(A) < -tr(A)`,
   `|det(A)|` is composite, and the pair is exactly `GL(2,Z)`-similar.
 

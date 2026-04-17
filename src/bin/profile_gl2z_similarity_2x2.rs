@@ -187,7 +187,7 @@ fn theorem_positive_summary(profile: &Gl2zSimilarityProfile2x2) -> &'static str 
             "yes (Baker 1983: strictly positive + det >= 0 + GL(2,Z) similarity)"
         }
         Some(ExactPositiveClass2x2::ChoeShin1997) => {
-            "yes (Choe-Shin 1997: composite negative determinant band + GL(2,Z) similarity)"
+            "yes (Choe-Shin 1997: nonnegative endpoints + composite negative determinant band + GL(2,Z) similarity)"
         }
         None if !profile.gl2z_similar => "no (pair is not GL(2,Z)-similar)",
         None if profile.pair_determinant_band.is_none() => {
