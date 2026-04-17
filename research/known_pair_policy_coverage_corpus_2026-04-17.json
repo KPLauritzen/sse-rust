@@ -1,0 +1,878 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "brix_ruiz_k3_lind_marcus_baker_reference__graph_only",
+      "description": "Known-pair policy coverage: literature-reference Brix-Ruiz k=3 pair under graph-only moves.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "brix-ruiz", "graph-only"],
+      "campaign": {
+        "id": "brix_ruiz_k3_lind_marcus_baker_reference",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_lind_marcus_baker_reference__graph_plus_structured",
+      "description": "Known-pair policy coverage: literature-reference Brix-Ruiz k=3 pair under graph-plus-structured moves.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "brix-ruiz", "graph-plus-structured"],
+      "campaign": {
+        "id": "brix_ruiz_k3_lind_marcus_baker_reference",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_lind_marcus_baker_reference__mixed",
+      "description": "Known-pair policy coverage: literature-reference Brix-Ruiz k=3 pair under mixed moves.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "brix-ruiz", "mixed"],
+      "campaign": {
+        "id": "brix_ruiz_k3_lind_marcus_baker_reference",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "brix_ruiz_k3_search_witness_pool__graph_only",
+      "description": "Known-pair policy coverage: validated-witness-pool Brix-Ruiz k=3 pair under graph-only moves.",
+      "required": false,
+      "a": [[1, 2], [3, 1]],
+      "b": [[1, 1], [6, 1]],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "brix-ruiz", "graph-only", "validated-witness"],
+      "campaign": {
+        "id": "brix_ruiz_k3_search_witness_pool",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_search_witness_pool__graph_plus_structured",
+      "description": "Known-pair policy coverage: validated-witness-pool Brix-Ruiz k=3 pair under graph-plus-structured moves.",
+      "required": false,
+      "a": [[1, 2], [3, 1]],
+      "b": [[1, 1], [6, 1]],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "brix-ruiz", "graph-plus-structured", "validated-witness"],
+      "campaign": {
+        "id": "brix_ruiz_k3_search_witness_pool",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k3_search_witness_pool__mixed",
+      "description": "Known-pair policy coverage: validated-witness-pool Brix-Ruiz k=3 pair under mixed moves.",
+      "required": false,
+      "a": [[1, 2], [3, 1]],
+      "b": [[1, 1], [6, 1]],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 5,
+        "max_entry": 6,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "brix-ruiz", "mixed", "validated-witness"],
+      "campaign": {
+        "id": "brix_ruiz_k3_search_witness_pool",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "generic_guided_permutation_3x3__graph_only",
+      "description": "Known-pair policy coverage: generic guided permutation 3x3 pair under graph-only moves.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "fixture", "graph-only"],
+      "campaign": {
+        "id": "generic_guided_permutation_3x3",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "generic_guided_permutation_3x3__graph_plus_structured",
+      "description": "Known-pair policy coverage: generic guided permutation 3x3 pair under graph-plus-structured moves.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "fixture", "graph-plus-structured"],
+      "campaign": {
+        "id": "generic_guided_permutation_3x3",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "generic_guided_permutation_3x3__mixed",
+      "description": "Known-pair policy coverage: generic guided permutation 3x3 pair under mixed moves.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/generic_guides.json#guided_permutation_3x3",
+      "config": {
+        "max_lag": 1,
+        "max_intermediate_dim": 3,
+        "max_entry": 2,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 500,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "fixture", "mixed"],
+      "campaign": {
+        "id": "generic_guided_permutation_3x3",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "riedel_baker_k4__graph_only",
+      "description": "Known-pair policy coverage: Riedel-Baker k=4 under graph-only moves.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-only"],
+      "campaign": {
+        "id": "riedel_baker_k4",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k4__graph_plus_structured",
+      "description": "Known-pair policy coverage: Riedel-Baker k=4 under graph-plus-structured moves.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-plus-structured"],
+      "campaign": {
+        "id": "riedel_baker_k4",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k4__mixed",
+      "description": "Known-pair policy coverage: Riedel-Baker k=4 under mixed moves.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "mixed"],
+      "campaign": {
+        "id": "riedel_baker_k4",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "riedel_baker_k6__graph_only",
+      "description": "Known-pair policy coverage: Riedel-Baker k=6 under graph-only moves.",
+      "required": false,
+      "a": [[6, 2], [1, 6]],
+      "b": [[5, 1], [1, 7]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-only"],
+      "campaign": {
+        "id": "riedel_baker_k6",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k6__graph_plus_structured",
+      "description": "Known-pair policy coverage: Riedel-Baker k=6 under graph-plus-structured moves.",
+      "required": false,
+      "a": [[6, 2], [1, 6]],
+      "b": [[5, 1], [1, 7]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-plus-structured"],
+      "campaign": {
+        "id": "riedel_baker_k6",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k6__mixed",
+      "description": "Known-pair policy coverage: Riedel-Baker k=6 under mixed moves.",
+      "required": false,
+      "a": [[6, 2], [1, 6]],
+      "b": [[5, 1], [1, 7]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "mixed"],
+      "campaign": {
+        "id": "riedel_baker_k6",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "riedel_baker_k8__graph_only",
+      "description": "Known-pair policy coverage: Riedel-Baker k=8 under graph-only moves.",
+      "required": false,
+      "a": [[8, 2], [1, 8]],
+      "b": [[7, 1], [1, 9]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-only"],
+      "campaign": {
+        "id": "riedel_baker_k8",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k8__graph_plus_structured",
+      "description": "Known-pair policy coverage: Riedel-Baker k=8 under graph-plus-structured moves.",
+      "required": false,
+      "a": [[8, 2], [1, 8]],
+      "b": [[7, 1], [1, 9]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-plus-structured"],
+      "campaign": {
+        "id": "riedel_baker_k8",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k8__mixed",
+      "description": "Known-pair policy coverage: Riedel-Baker k=8 under mixed moves.",
+      "required": false,
+      "a": [[8, 2], [1, 8]],
+      "b": [[7, 1], [1, 9]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "mixed"],
+      "campaign": {
+        "id": "riedel_baker_k8",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "riedel_baker_k10__graph_only",
+      "description": "Known-pair policy coverage: Riedel-Baker k=10 under graph-only moves.",
+      "required": false,
+      "a": [[10, 2], [1, 10]],
+      "b": [[9, 1], [1, 11]],
+      "config": {
+        "max_lag": 10,
+        "max_intermediate_dim": 3,
+        "max_entry": 10,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 5000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-only"],
+      "campaign": {
+        "id": "riedel_baker_k10",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k10__graph_plus_structured",
+      "description": "Known-pair policy coverage: Riedel-Baker k=10 under graph-plus-structured moves.",
+      "required": false,
+      "a": [[10, 2], [1, 10]],
+      "b": [[9, 1], [1, 11]],
+      "config": {
+        "max_lag": 10,
+        "max_intermediate_dim": 3,
+        "max_entry": 10,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 5000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-plus-structured"],
+      "campaign": {
+        "id": "riedel_baker_k10",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k10__mixed",
+      "description": "Known-pair policy coverage: Riedel-Baker k=10 under mixed moves.",
+      "required": false,
+      "a": [[10, 2], [1, 10]],
+      "b": [[9, 1], [1, 11]],
+      "config": {
+        "max_lag": 10,
+        "max_intermediate_dim": 3,
+        "max_entry": 10,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 5000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "mixed"],
+      "campaign": {
+        "id": "riedel_baker_k10",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "riedel_baker_k12__graph_only",
+      "description": "Known-pair policy coverage: Riedel-Baker k=12 under graph-only moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-only"],
+      "campaign": {
+        "id": "riedel_baker_k12",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k12__graph_plus_structured",
+      "description": "Known-pair policy coverage: Riedel-Baker k=12 under graph-plus-structured moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "graph-plus-structured"],
+      "campaign": {
+        "id": "riedel_baker_k12",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k12__mixed",
+      "description": "Known-pair policy coverage: Riedel-Baker k=12 under mixed moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "riedel-baker", "mixed"],
+      "campaign": {
+        "id": "riedel_baker_k12",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "lind_marcus_a_to_c__graph_only",
+      "description": "Known-pair policy coverage: Lind-Marcus A-to-C under graph-only moves.",
+      "required": false,
+      "a": [[1, 1, 0], [0, 0, 1], [1, 1, 1]],
+      "b": [[2]],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 2,
+        "max_entry": 2,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "lind-marcus", "graph-only"],
+      "campaign": {
+        "id": "lind_marcus_a_to_c",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "lind_marcus_a_to_c__graph_plus_structured",
+      "description": "Known-pair policy coverage: Lind-Marcus A-to-C under graph-plus-structured moves.",
+      "required": false,
+      "a": [[1, 1, 0], [0, 0, 1], [1, 1, 1]],
+      "b": [[2]],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 2,
+        "max_entry": 2,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "lind-marcus", "graph-plus-structured"],
+      "campaign": {
+        "id": "lind_marcus_a_to_c",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "lind_marcus_a_to_c__mixed",
+      "description": "Known-pair policy coverage: Lind-Marcus A-to-C under mixed moves.",
+      "required": false,
+      "a": [[1, 1, 0], [0, 0, 1], [1, 1, 1]],
+      "b": [[2]],
+      "config": {
+        "max_lag": 2,
+        "max_intermediate_dim": 2,
+        "max_entry": 2,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "lind-marcus", "mixed"],
+      "campaign": {
+        "id": "lind_marcus_a_to_c",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+
+    {
+      "id": "full_2_shift_higher_block_1x1_to_4x4__graph_only",
+      "description": "Known-pair policy coverage: full-2-shift higher-block 1x1-to-4x4 under graph-only moves.",
+      "required": false,
+      "a": [[2]],
+      "b": [[1, 1, 0, 0], [0, 0, 1, 1], [1, 1, 0, 0], [0, 0, 1, 1]],
+      "config": {
+        "max_lag": 4,
+        "max_intermediate_dim": 4,
+        "max_entry": 2,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "higher-block", "graph-only"],
+      "campaign": {
+        "id": "full_2_shift_higher_block_1x1_to_4x4",
+        "strategy": "graph_only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "full_2_shift_higher_block_1x1_to_4x4__graph_plus_structured",
+      "description": "Known-pair policy coverage: full-2-shift higher-block 1x1-to-4x4 under graph-plus-structured moves.",
+      "required": false,
+      "a": [[2]],
+      "b": [[1, 1, 0, 0], [0, 0, 1, 1], [1, 1, 0, 0], [0, 0, 1, 1]],
+      "config": {
+        "max_lag": 4,
+        "max_intermediate_dim": 4,
+        "max_entry": 2,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "higher-block", "graph-plus-structured"],
+      "campaign": {
+        "id": "full_2_shift_higher_block_1x1_to_4x4",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "full_2_shift_higher_block_1x1_to_4x4__mixed",
+      "description": "Known-pair policy coverage: full-2-shift higher-block 1x1-to-4x4 under mixed moves.",
+      "required": false,
+      "a": [[2]],
+      "b": [[1, 1, 0, 0], [0, 0, 1, 1], [1, 1, 0, 0], [0, 0, 1, 1]],
+      "config": {
+        "max_lag": 4,
+        "max_intermediate_dim": 4,
+        "max_entry": 2,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["known-pair-coverage", "policy-coverage", "higher-block", "mixed"],
+      "campaign": {
+        "id": "full_2_shift_higher_block_1x1_to_4x4",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    }
+  ]
+}
