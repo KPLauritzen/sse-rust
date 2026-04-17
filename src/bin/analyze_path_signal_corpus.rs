@@ -696,6 +696,9 @@ where
     if !cli.benchmark_roles.is_empty() && cli.family_benchmark_path.is_none() {
         return Err("--benchmark-role requires --family-benchmark".to_string());
     }
+    if !cli.benchmark_roles.is_empty() && cli.witness_manifest_path.is_none() {
+        return Err("--benchmark-role requires --witness-manifest".to_string());
+    }
     if cli.emit_layer_contrasts_path.is_some() {
         if cli.witness_manifest_path.is_none() {
             return Err("--emit-layer-contrasts requires --witness-manifest".to_string());
@@ -908,8 +911,12 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
         pair_catalog,
         requested_benchmark_case_ids.as_ref(),
     )?;
-    let mut loaded_case_ids = BTreeSet::new();
-    let mut expected_benchmark_case_ids = BTreeSet::new();
+    let mut remaining_required_benchmark_case_ids =
+        requested_benchmark_case_ids.clone().unwrap_or_default();
+    if !requested_case_ids.is_empty() {
+        remaining_required_benchmark_case_ids
+            .retain(|case_id| requested_case_ids.contains(case_id));
+    }
 
     for path in &cli.cases_paths {
         let raw = fs::read_to_string(path)
@@ -918,17 +925,14 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
             .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
 
         for case in corpus.cases {
-            if !matches_base_research_case_filters(
+            let base_match = matches_base_research_case_filters(
                 &case,
                 &requested_case_ids,
                 &requested_campaign_ids,
-            ) {
+            );
+            if !base_match {
+                remaining_required_benchmark_case_ids.remove(&case.id);
                 continue;
-            }
-            if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids.as_ref() {
-                if requested_benchmark_case_ids.contains(&case.id) {
-                    expected_benchmark_case_ids.insert(case.id.clone());
-                }
             }
             if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids.as_ref() {
                 if !requested_benchmark_case_ids.contains(&case.id) {
@@ -978,13 +982,13 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
                 pair_metadata: pair_catalog.resolve_research_case(&case.id),
                 contrast_source_kind: ContrastSourceKind::EndpointCase,
             });
-            loaded_case_ids.insert(case.id);
+            remaining_required_benchmark_case_ids.remove(&case.id);
         }
     }
 
     if requested_benchmark_case_ids.is_some() {
-        let missing = expected_benchmark_case_ids
-            .difference(&loaded_case_ids)
+        let missing = remaining_required_benchmark_case_ids
+            .iter()
             .cloned()
             .collect::<Vec<_>>();
         if !missing.is_empty() {
@@ -1696,6 +1700,31 @@ mod tests {
         let err = selected_benchmark_case_ids(&["missing".to_string()], &HashMap::new())
             .expect_err("unknown role should fail");
         assert!(err.contains("unknown --benchmark-role missing"));
+    }
+
+    #[test]
+    fn benchmark_role_requires_manifest_and_family_benchmark() {
+        let err = parse_cli(
+            [
+                "--benchmark-role".to_string(),
+                "heldout_benchmark".to_string(),
+            ]
+            .into_iter(),
+        )
+        .expect_err("benchmark-role should require both manifests");
+        assert!(err.contains("--family-benchmark"));
+
+        let err = parse_cli(
+            [
+                "--benchmark-role".to_string(),
+                "heldout_benchmark".to_string(),
+                "--family-benchmark".to_string(),
+                "benchmark.json".to_string(),
+            ]
+            .into_iter(),
+        )
+        .expect_err("benchmark-role should require witness manifest too");
+        assert!(err.contains("--witness-manifest"));
     }
 
     #[test]
