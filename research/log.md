@@ -748,6 +748,17 @@
 
 ## 2026-04-17
 
+- `sse-rust-2uy.23` Kept one profiler-led graph-plus-structured runtime cut on
+  the new hard-`k=3` baselines.
+  `src/factorisation.rs` now splits `adjugate_matrix_3x3` from the combined
+  determinant helper so the structured sparse `3x3` core loops can skip full
+  adjugate work on singular cores and avoid recomputing determinants the caller
+  already has. Local A/B reruns on the new graph-plus-structured baselines
+  improved the solve median from `2168 ms` to `2066 ms` and the beam median
+  from `45 ms` to `36 ms`, while keeping outcomes and search counters
+  identical. Details are in
+  `research/notes/2026-04-17-graph-plus-structured-3x3-core-det-gate.md`.
+
 - `sse-rust-2uy.22` Added the first durable graph-plus-structured harness
   baseline set.
   Kept as measurement-first infrastructure. Promoted the old generic

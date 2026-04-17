@@ -1117,10 +1117,7 @@ where
                     continue;
                 }
 
-                let (u_top_adjugate, det) = adjugate_matrix_and_det_3x3(&u_top);
-                if det == 0 {
-                    continue;
-                }
+                let u_top_adjugate = adjugate_matrix_3x3(&u_top);
 
                 let mut v_cols = [[0u32; 3]; 4];
                 let mut ok = true;
@@ -1263,10 +1260,11 @@ where
                                 ],
                             ];
 
-                            let (core_adjugate, det) = adjugate_matrix_and_det_3x3(&core);
+                            let det = det3x3(&core);
                             if det == 0 {
                                 continue;
                             }
+                            let core_adjugate = adjugate_matrix_3x3(&core);
 
                             let mut core_row_cols = [[0u32; 3]; 3];
                             let mut core_valid = true;
@@ -2379,8 +2377,8 @@ fn solve_nonneg_3x3(a: &[[i64; 3]; 3], b: &[i64; 3], max_entry: u32) -> Vec<[u32
     vec![]
 }
 
-fn adjugate_matrix_and_det_3x3(a: &[[i64; 3]; 3]) -> ([[i64; 3]; 3], i64) {
-    let adjugate = [
+fn adjugate_matrix_3x3(a: &[[i64; 3]; 3]) -> [[i64; 3]; 3] {
+    [
         [
             a[1][1] * a[2][2] - a[1][2] * a[2][1],
             a[0][2] * a[2][1] - a[0][1] * a[2][2],
@@ -2396,7 +2394,11 @@ fn adjugate_matrix_and_det_3x3(a: &[[i64; 3]; 3]) -> ([[i64; 3]; 3], i64) {
             a[0][1] * a[2][0] - a[0][0] * a[2][1],
             a[0][0] * a[1][1] - a[0][1] * a[1][0],
         ],
-    ];
+    ]
+}
+
+fn adjugate_matrix_and_det_3x3(a: &[[i64; 3]; 3]) -> ([[i64; 3]; 3], i64) {
+    let adjugate = adjugate_matrix_3x3(a);
     let det = a[0][0] * adjugate[0][0] + a[0][1] * adjugate[1][0] + a[0][2] * adjugate[2][0];
     (adjugate, det)
 }
