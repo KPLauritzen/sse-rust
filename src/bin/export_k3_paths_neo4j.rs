@@ -490,6 +490,7 @@ fn fallback_factorisation_families(current: &DynMatrix, target: &DynMatrix) -> V
         (3, 4) => vec!["binary_sparse_rectangular_factorisation_3x3_to_4".to_string()],
         (4, 3) => vec![
             "single_row_amalgamation_4x4_to_3x3".to_string(),
+            "single_column_amalgamation_4x4_to_3x3".to_string(),
             "binary_sparse_rectangular_factorisation_4x3_to_3".to_string(),
         ],
         (4, 4) => vec!["elementary_conjugation".to_string()],
@@ -722,6 +723,7 @@ mod tests {
             fallback_factorisation_families(&current, &target),
             vec![
                 "single_row_amalgamation_4x4_to_3x3".to_string(),
+                "single_column_amalgamation_4x4_to_3x3".to_string(),
                 "binary_sparse_rectangular_factorisation_4x3_to_3".to_string(),
             ]
         );
