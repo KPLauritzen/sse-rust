@@ -5868,6 +5868,33 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_suppresses_empty_single_row_split_family() {
+        let current = DynMatrix::new(3, 3, vec![1, 0, 0, 1, 0, 0, 1, 0, 0]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (_expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 4,
+                max_entry: 3,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(stats
+            .move_family_telemetry
+            .get("single_row_split_3x3_to_4x4")
+            .is_none());
+        assert!(stats
+            .move_family_telemetry
+            .get("single_column_split_3x3_to_4x4")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_graph_plus_structured_exposes_single_row_split_4x4_to_5x5() {
         let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 1, 1, 2, 0, 1, 1, 0, 1, 0, 2, 1]);
         let current_canon = current.canonical_perm();
@@ -6021,6 +6048,34 @@ mod tests {
         assert!(stats
             .move_family_telemetry
             .get("single_column_split_3x3_to_4x4")
+            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_suppresses_empty_single_column_split_family(
+    ) {
+        let current = DynMatrix::new(3, 3, vec![1, 1, 1, 0, 0, 0, 0, 0, 0]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (_expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 4,
+                max_entry: 3,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(stats
+            .move_family_telemetry
+            .get("single_column_split_3x3_to_4x4")
+            .is_none());
+        assert!(stats
+            .move_family_telemetry
+            .get("single_row_split_3x3_to_4x4")
             .is_some_and(|telemetry| telemetry.candidates_generated > 0));
     }
 

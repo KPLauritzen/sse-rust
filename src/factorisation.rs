@@ -702,6 +702,24 @@ fn build_contiguous_row_split_duplication_matrix(clone_counts: &[usize]) -> DynM
     DynMatrix::new(rows, cols, data)
 }
 
+fn single_row_split_3x3_to_4x4_family_is_nonempty(a: &DynMatrix) -> bool {
+    assert_eq!(a.rows, 3);
+    assert_eq!(a.cols, 3);
+
+    (0..3).any(|row| {
+        u64::from(a.get(row, 0)) + u64::from(a.get(row, 1)) + u64::from(a.get(row, 2)) >= 2
+    })
+}
+
+fn single_column_split_3x3_to_4x4_family_is_nonempty(a: &DynMatrix) -> bool {
+    assert_eq!(a.rows, 3);
+    assert_eq!(a.cols, 3);
+
+    (0..3).any(|col| {
+        u64::from(a.get(0, col)) + u64::from(a.get(1, col)) + u64::from(a.get(2, col)) >= 2
+    })
+}
+
 /// Enumerate a bounded explicit 3x3 -> 4x4 row-splitting family.
 ///
 /// One chosen source row is split into two contiguous clones, while the other
@@ -714,6 +732,10 @@ where
 {
     assert_eq!(a.rows, 3);
     assert_eq!(a.cols, 3);
+
+    if !single_row_split_3x3_to_4x4_family_is_nonempty(a) {
+        return;
+    }
 
     let rows = [
         [a.get(0, 0), a.get(0, 1), a.get(0, 2)],
@@ -933,6 +955,10 @@ fn visit_single_column_split_factorisations_3x3_to_4<F>(
 {
     assert_eq!(a.rows, 3);
     assert_eq!(a.cols, 3);
+
+    if !single_column_split_3x3_to_4x4_family_is_nonempty(a) {
+        return;
+    }
 
     visit_single_row_split_factorisations_3x3_to_4(
         &a.transpose(),
@@ -4857,6 +4883,32 @@ mod tests {
     }
 
     #[test]
+    fn test_single_row_split_3x3_to_4x4_gate_rejects_low_mass_source() {
+        let current = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
+        let mut callbacks = 0usize;
+
+        assert!(!single_row_split_3x3_to_4x4_family_is_nonempty(&current));
+        visit_single_row_split_factorisations_3x3_to_4(&current, 3, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
+    fn test_single_row_split_3x3_to_4x4_gate_accepts_known_positive_source() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
+        let mut callbacks = 0usize;
+
+        assert!(single_row_split_3x3_to_4x4_family_is_nonempty(&current));
+        visit_single_row_split_factorisations_3x3_to_4(&current, 3, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert!(callbacks > 0);
+    }
+
+    #[test]
     fn test_single_column_split_factorisations_reach_expected_3x3_to_4x4_target() {
         let current = DynMatrix::new(3, 3, vec![2, 1, 0, 1, 0, 1, 1, 2, 1]);
         let target = DynMatrix::new(4, 4, vec![1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1]);
@@ -4875,6 +4927,32 @@ mod tests {
             found,
             "expected bounded 3x3->4x4 single-column split factorisation"
         );
+    }
+
+    #[test]
+    fn test_single_column_split_3x3_to_4x4_gate_rejects_low_mass_source() {
+        let current = DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
+        let mut callbacks = 0usize;
+
+        assert!(!single_column_split_3x3_to_4x4_family_is_nonempty(&current));
+        visit_single_column_split_factorisations_3x3_to_4(&current, 3, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
+    fn test_single_column_split_3x3_to_4x4_gate_accepts_known_positive_source() {
+        let current = DynMatrix::new(3, 3, vec![2, 1, 0, 1, 0, 1, 1, 2, 1]);
+        let mut callbacks = 0usize;
+
+        assert!(single_column_split_3x3_to_4x4_family_is_nonempty(&current));
+        visit_single_column_split_factorisations_3x3_to_4(&current, 3, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert!(callbacks > 0);
     }
 
     #[test]
