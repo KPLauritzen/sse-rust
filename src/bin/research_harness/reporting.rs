@@ -1,12 +1,15 @@
 use sse_core::types::SearchStage;
 
-use super::{CaseSummary, ComparisonSummary, HarnessSummary, MeasurementSummary};
+use super::{
+    CaseSummary, ComparisonSummary, DeepeningScheduleSummary, HarnessSummary, MeasurementSummary,
+};
 
 pub(crate) fn format_pretty_summary(summary: &HarnessSummary) -> String {
     let mut out = String::new();
     push_overview(&mut out, summary);
     push_comparisons(&mut out, &summary.comparisons);
     push_campaigns(&mut out, summary);
+    push_deepening_schedules(&mut out, &summary.deepening_schedules);
     push_strategies(&mut out, summary);
 
     for case in &summary.cases {
@@ -57,6 +60,10 @@ fn push_overview(out: &mut String, summary: &HarnessSummary) {
     out.push_str(&format!(
         "campaign_groups: {}\n",
         summary.fitness.campaign_groups
+    ));
+    out.push_str(&format!(
+        "deepening_schedule_groups: {}\n",
+        summary.fitness.deepening_schedule_groups
     ));
     out.push_str(&format!(
         "strategy_groups: {}\n",
@@ -155,6 +162,63 @@ fn push_campaigns(out: &mut String, summary: &HarnessSummary) {
                 scheduled_case.points,
                 scheduled_case.elapsed_ms,
             ));
+            if let Some(deepening) = &scheduled_case.deepening {
+                out.push_str(&format!(
+                    " deepening={}/{} base={}",
+                    deepening.attempt_number, deepening.attempt_count, deepening.base_case_id
+                ));
+            }
+            if let Some(measurement) = &scheduled_case.measurement {
+                out.push_str(&format!(
+                    " measurement=[{}]",
+                    format_measurement_summary(measurement)
+                ));
+            }
+            out.push('\n');
+        }
+    }
+    out.push('\n');
+}
+
+fn push_deepening_schedules(out: &mut String, deepening_schedules: &[DeepeningScheduleSummary]) {
+    if deepening_schedules.is_empty() {
+        return;
+    }
+
+    out.push_str("Deepening Schedules\n");
+    for schedule in deepening_schedules {
+        out.push_str(&format!(
+            "- {}: attempts={} campaign={} solved_at={:?} target_hit_at={:?} best_witness_at={:?} elapsed={}ms\n",
+            schedule.base_case_id,
+            schedule.attempts,
+            schedule
+                .campaign
+                .as_ref()
+                .map(|campaign| campaign.id.as_str())
+                .unwrap_or("-"),
+            schedule.solved_at_attempt,
+            schedule.target_hit_at_attempt,
+            schedule.best_witness_attempt,
+            schedule.total_elapsed_ms,
+        ));
+        out.push_str(&format!("  description: {}\n", schedule.description));
+        for scheduled_case in &schedule.scheduled_cases {
+            out.push_str(&format!(
+                "  attempt={}/{} order={:?} {} max_lag={} max_dim={} max_entry={} outcome={} target_hit={} current_lag={:?} best_known_lag={:?} improved_best={} elapsed={}ms",
+                scheduled_case.attempt_number,
+                scheduled_case.attempt_count,
+                scheduled_case.schedule_order,
+                scheduled_case.case_id,
+                scheduled_case.config.max_lag,
+                scheduled_case.config.max_intermediate_dim,
+                scheduled_case.config.max_entry,
+                scheduled_case.actual_outcome,
+                scheduled_case.hit_target,
+                scheduled_case.current_witness_lag,
+                scheduled_case.best_known_witness.as_ref().map(|best| best.lag),
+                scheduled_case.improved_best_known_witness,
+                scheduled_case.elapsed_ms,
+            ));
             if let Some(measurement) = &scheduled_case.measurement {
                 out.push_str(&format!(
                     " measurement=[{}]",
@@ -250,6 +314,12 @@ fn push_case(out: &mut String, case: &CaseSummary) {
         out.push_str(&format!(
             "  campaign: id={} strategy={} order={}\n",
             campaign.id, campaign.strategy, campaign.schedule_order
+        ));
+    }
+    if let Some(deepening) = &case.deepening {
+        out.push_str(&format!(
+            "  deepening: base={} attempt={}/{}\n",
+            deepening.base_case_id, deepening.attempt_number, deepening.attempt_count
         ));
     }
     if let Some(endpoint_fixture) = &case.endpoint_fixture {

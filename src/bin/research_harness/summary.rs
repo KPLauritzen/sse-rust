@@ -7,8 +7,9 @@ use sse_core::types::{SearchLayerTelemetry, SearchStage, SearchTelemetry};
 use super::execution::{execute_case_for_harness, run_case_in_subprocess};
 use super::{
     endpoint_identity_key, merge_best_known_witness, resolve_case, BestKnownWitness,
-    CampaignCaseSummary, CampaignSummary, CaseCorpus, CaseSummary, ComparisonSummary,
-    ComparisonVariantSummary, DerivedTelemetrySummary, FitnessSummary, HarnessSummary,
+    CampaignCaseSummary, CampaignConfig, CampaignSummary, CaseCorpus, CaseSummary,
+    ComparisonSummary, ComparisonVariantSummary, DeepeningScheduleCaseSummary,
+    DeepeningScheduleSummary, DerivedTelemetrySummary, FitnessSummary, HarnessSummary,
     JsonSearchConfig, ResearchCase, ReusedResults, StrategySummary,
 };
 
@@ -124,6 +125,7 @@ pub(crate) fn build_campaign_summaries(cases: &[CaseSummary]) -> Vec<CampaignSum
                     strategy: campaign.strategy.clone(),
                     schedule_order: campaign.schedule_order,
                     measurement: case.measurement.clone(),
+                    deepening: case.deepening.clone(),
                     actual_outcome: case.actual_outcome.clone(),
                     current_witness_lag: case.result_model.witness_lag,
                     best_known_witness: case.best_known_witness.clone(),
@@ -151,6 +153,138 @@ pub(crate) fn build_campaign_summaries(cases: &[CaseSummary]) -> Vec<CampaignSum
             }
         })
         .collect()
+}
+
+pub(crate) fn build_deepening_schedule_summaries(
+    cases: &[CaseSummary],
+) -> Vec<DeepeningScheduleSummary> {
+    let mut groups = BTreeMap::<String, Vec<&CaseSummary>>::new();
+    for case in cases {
+        let Some(deepening) = case.deepening.as_ref() else {
+            continue;
+        };
+        groups
+            .entry(deepening.base_case_id.clone())
+            .or_default()
+            .push(case);
+    }
+
+    let mut summaries = groups
+        .into_iter()
+        .map(|(base_case_id, mut group_cases)| {
+            group_cases.sort_by_key(|case| {
+                let deepening = case
+                    .deepening
+                    .as_ref()
+                    .expect("deepening grouping only contains deepening cases");
+                let schedule_order = case
+                    .campaign
+                    .as_ref()
+                    .map(|campaign| campaign.schedule_order)
+                    .unwrap_or(usize::MAX);
+                (deepening.attempt_number, schedule_order, case.id.clone())
+            });
+
+            let first_case = group_cases
+                .first()
+                .expect("deepening grouping should contain at least one case");
+            let description = first_case.description.clone();
+            let campaign = first_case.campaign.clone().map(|campaign| CampaignConfig {
+                schedule_order: group_cases
+                    .iter()
+                    .filter_map(|case| {
+                        case.campaign
+                            .as_ref()
+                            .map(|campaign| campaign.schedule_order)
+                    })
+                    .min()
+                    .unwrap_or(campaign.schedule_order),
+                ..campaign
+            });
+            let attempts = first_case
+                .deepening
+                .as_ref()
+                .expect("deepening grouping only contains deepening cases")
+                .attempt_count;
+
+            let mut solved_at_attempt = None;
+            let mut target_hit_at_attempt = None;
+            let mut best_witness_attempt = None;
+            let mut best_witness_lag = None;
+            let mut total_elapsed_ms = 0u128;
+            let mut scheduled_cases = Vec::with_capacity(group_cases.len());
+
+            for case in group_cases {
+                let deepening = case
+                    .deepening
+                    .as_ref()
+                    .expect("deepening grouping only contains deepening cases");
+                total_elapsed_ms += case.elapsed_ms;
+                if solved_at_attempt.is_none() && case.actual_outcome == "equivalent" {
+                    solved_at_attempt = Some(deepening.attempt_number);
+                }
+                if target_hit_at_attempt.is_none() && case.hit_target {
+                    target_hit_at_attempt = Some(deepening.attempt_number);
+                }
+                if let Some(lag) = case.result_model.witness_lag {
+                    let should_replace = best_witness_lag
+                        .map(|best_lag| lag < best_lag)
+                        .unwrap_or(true);
+                    if should_replace {
+                        best_witness_lag = Some(lag);
+                        best_witness_attempt = Some(deepening.attempt_number);
+                    }
+                }
+
+                scheduled_cases.push(DeepeningScheduleCaseSummary {
+                    case_id: case.id.clone(),
+                    attempt_number: deepening.attempt_number,
+                    attempt_count: deepening.attempt_count,
+                    schedule_order: case
+                        .campaign
+                        .as_ref()
+                        .map(|campaign| campaign.schedule_order),
+                    measurement: case.measurement.clone(),
+                    config: case.config.clone(),
+                    actual_outcome: case.actual_outcome.clone(),
+                    hit_target: case.hit_target,
+                    current_witness_lag: case.result_model.witness_lag,
+                    best_known_witness: case.best_known_witness.clone(),
+                    improved_best_known_witness: case.improved_best_known_witness,
+                    elapsed_ms: case.elapsed_ms,
+                });
+            }
+
+            DeepeningScheduleSummary {
+                base_case_id,
+                description,
+                campaign,
+                attempts,
+                solved_at_attempt,
+                target_hit_at_attempt,
+                best_witness_attempt,
+                total_elapsed_ms,
+                scheduled_cases,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    summaries.sort_by_key(|summary| {
+        (
+            summary
+                .campaign
+                .as_ref()
+                .map(|campaign| campaign.schedule_order)
+                .unwrap_or(usize::MAX),
+            summary
+                .campaign
+                .as_ref()
+                .map(|campaign| campaign.id.clone())
+                .unwrap_or_default(),
+            summary.base_case_id.clone(),
+        )
+    });
+    summaries
 }
 
 pub(crate) fn build_strategy_summaries(cases: &[CaseSummary]) -> Vec<StrategySummary> {
@@ -474,6 +608,7 @@ fn summarize_case(
         description: case.description.clone(),
         campaign: case.campaign.clone(),
         measurement: executed.measurement.clone(),
+        deepening: case.deepening.clone(),
         endpoint_fixture: resolved.endpoint_fixture,
         seeded_guide_ids: resolved.seeded_guide_ids,
         guide_artifact_paths: resolved.guide_artifact_paths,
@@ -663,6 +798,7 @@ impl HarnessAccumulator {
     fn finish(self) -> HarnessSummary {
         let comparisons = build_comparison_summaries(&self.cases);
         let campaigns = build_campaign_summaries(&self.cases);
+        let deepening_schedules = build_deepening_schedule_summaries(&self.cases);
         let strategies = build_strategy_summaries(&self.cases);
 
         HarnessSummary {
@@ -692,6 +828,7 @@ impl HarnessAccumulator {
                 generalized_cases: self.generalized_cases,
                 comparison_groups: comparisons.len(),
                 campaign_groups: campaigns.len(),
+                deepening_schedule_groups: deepening_schedules.len(),
                 strategy_groups: strategies.len(),
                 telemetry_focus_cases: self.telemetry_focus_cases,
                 telemetry_focus_score: self.telemetry_focus_score,
@@ -700,6 +837,7 @@ impl HarnessAccumulator {
             },
             comparisons,
             campaigns,
+            deepening_schedules,
             strategies,
             cases: self.cases,
         }

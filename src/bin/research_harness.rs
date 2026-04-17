@@ -29,8 +29,9 @@ use self::summary::run_harness;
 use self::{
     execution::execute_case_for_harness,
     summary::{
-        build_campaign_summaries, build_comparison_summaries, build_strategy_summaries,
-        derive_telemetry_summary, lag_score, scheduled_cases, stage_combination_label,
+        build_campaign_summaries, build_comparison_summaries, build_deepening_schedule_summaries,
+        build_strategy_summaries, derive_telemetry_summary, lag_score, scheduled_cases,
+        stage_combination_label,
     },
 };
 
@@ -89,6 +90,8 @@ struct ResearchCase {
     campaign: Option<CampaignConfig>,
     #[serde(default)]
     measurement: Option<MeasurementConfig>,
+    #[serde(default)]
+    deepening: Option<DeepeningMetadata>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -125,6 +128,13 @@ struct RawResearchCase {
 #[derive(Clone, Debug, Deserialize)]
 struct DeepeningSchedule {
     attempts: Vec<DeepeningAttempt>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+struct DeepeningMetadata {
+    base_case_id: String,
+    attempt_number: usize,
+    attempt_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
@@ -270,6 +280,7 @@ struct HarnessSummary {
     fitness: FitnessSummary,
     comparisons: Vec<ComparisonSummary>,
     campaigns: Vec<CampaignSummary>,
+    deepening_schedules: Vec<DeepeningScheduleSummary>,
     strategies: Vec<StrategySummary>,
     cases: Vec<CaseSummary>,
 }
@@ -292,6 +303,7 @@ struct FitnessSummary {
     generalized_cases: usize,
     comparison_groups: usize,
     campaign_groups: usize,
+    deepening_schedule_groups: usize,
     strategy_groups: usize,
     telemetry_focus_cases: usize,
     telemetry_focus_score: u64,
@@ -305,6 +317,7 @@ struct CaseSummary {
     description: String,
     campaign: Option<CampaignConfig>,
     measurement: Option<MeasurementSummary>,
+    deepening: Option<DeepeningMetadata>,
     endpoint_fixture: Option<String>,
     seeded_guide_ids: Vec<String>,
     guide_artifact_paths: Vec<String>,
@@ -423,11 +436,41 @@ struct CampaignCaseSummary {
     strategy: String,
     schedule_order: usize,
     measurement: Option<MeasurementSummary>,
+    deepening: Option<DeepeningMetadata>,
     actual_outcome: String,
     current_witness_lag: Option<usize>,
     best_known_witness: Option<BestKnownWitness>,
     improved_best_known_witness: bool,
     points: i64,
+    elapsed_ms: u128,
+}
+
+#[derive(Debug, Serialize)]
+struct DeepeningScheduleSummary {
+    base_case_id: String,
+    description: String,
+    campaign: Option<CampaignConfig>,
+    attempts: usize,
+    solved_at_attempt: Option<usize>,
+    target_hit_at_attempt: Option<usize>,
+    best_witness_attempt: Option<usize>,
+    total_elapsed_ms: u128,
+    scheduled_cases: Vec<DeepeningScheduleCaseSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeepeningScheduleCaseSummary {
+    case_id: String,
+    attempt_number: usize,
+    attempt_count: usize,
+    schedule_order: Option<usize>,
+    measurement: Option<MeasurementSummary>,
+    config: JsonSearchConfig,
+    actual_outcome: String,
+    hit_target: bool,
+    current_witness_lag: Option<usize>,
+    best_known_witness: Option<BestKnownWitness>,
+    improved_best_known_witness: bool,
     elapsed_ms: u128,
 }
 
@@ -641,6 +684,7 @@ fn expand_case(case: RawResearchCase) -> Result<Vec<ResearchCase>, String> {
     }
 
     let attempt_digits = schedule.attempts.len().to_string().len();
+    let attempt_count = schedule.attempts.len();
     schedule
         .attempts
         .into_iter()
@@ -669,6 +713,11 @@ fn expand_case(case: RawResearchCase) -> Result<Vec<ResearchCase>, String> {
                 attempt_digits,
                 &derived_case.config,
             );
+            derived_case.deepening = Some(DeepeningMetadata {
+                base_case_id: base_case.id.clone(),
+                attempt_number: index + 1,
+                attempt_count,
+            });
             if let Some(campaign) = derived_case.campaign.as_mut() {
                 campaign.schedule_order = campaign
                     .schedule_order
@@ -724,6 +773,7 @@ impl RawResearchCase {
             tags: self.tags,
             campaign: self.campaign,
             measurement: self.measurement,
+            deepening: None,
         }
     }
 }
@@ -1229,6 +1279,7 @@ mod tests {
             description: case.description.clone(),
             campaign: case.campaign.clone(),
             measurement: None,
+            deepening: case.deepening.clone(),
             endpoint_fixture: case.endpoint_fixture.clone(),
             seeded_guide_ids: case.seeded_guide_ids.clone(),
             guide_artifact_paths: case.guide_artifact_paths.clone(),
@@ -1312,6 +1363,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -1364,6 +1416,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -1419,6 +1472,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -1466,6 +1520,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -1554,6 +1609,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let resolved = resolve_case(&case, &temp_dir.join("cases.json"))
@@ -1612,6 +1668,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -1673,6 +1730,7 @@ mod tests {
             tags: vec![],
             campaign: None,
             measurement: None,
+            deepening: None,
         };
 
         let result = run_case(&case, Path::new("research/cases.json"));
@@ -1985,6 +2043,7 @@ mod tests {
                 warmup_runs: 1,
                 repeat_runs: 5,
             }),
+            deepening: None,
         };
         let result = |elapsed_ms: u128, actual_outcome: &str| WorkerCaseResult {
             id: case.id.clone(),
@@ -2077,6 +2136,7 @@ mod tests {
                 generalized_cases: 0,
                 comparison_groups: 0,
                 campaign_groups: 0,
+                deepening_schedule_groups: 0,
                 strategy_groups: 0,
                 telemetry_focus_cases: 0,
                 telemetry_focus_score: 0,
@@ -2085,12 +2145,14 @@ mod tests {
             },
             comparisons: vec![],
             campaigns: vec![],
+            deepening_schedules: vec![],
             strategies: vec![],
             cases: vec![CaseSummary {
                 id: "measurement-probe".to_string(),
                 description: "repeat timing probe".to_string(),
                 campaign: None,
                 measurement: Some(measurement.clone()),
+                deepening: None,
                 endpoint_fixture: None,
                 seeded_guide_ids: vec![],
                 guide_artifact_paths: vec![],
@@ -2234,6 +2296,7 @@ mod tests {
                     1,
                 ),
                 tags: vec![],
+                deepening: None,
             },
             CaseSummary {
                 id: "case-b".to_string(),
@@ -2286,6 +2349,7 @@ mod tests {
                     1,
                 ),
                 tags: vec![],
+                deepening: None,
             },
         ];
 
@@ -2399,6 +2463,50 @@ mod tests {
                 (20, "fixed-followup"),
             ]
         );
+        assert_eq!(
+            campaigns[0]
+                .scheduled_cases
+                .iter()
+                .map(|case| {
+                    case.deepening.as_ref().map(|deepening| {
+                        (
+                            deepening.base_case_id.as_str(),
+                            deepening.attempt_number,
+                            deepening.attempt_count,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                Some(("deepening-probe", 1, 3)),
+                Some(("deepening-probe", 2, 3)),
+                Some(("deepening-probe", 3, 3)),
+                None,
+            ]
+        );
+
+        let deepening_schedules = build_deepening_schedule_summaries(&cases);
+        assert_eq!(deepening_schedules.len(), 1);
+        assert_eq!(deepening_schedules[0].base_case_id, "deepening-probe");
+        assert_eq!(deepening_schedules[0].attempts, 3);
+        assert_eq!(deepening_schedules[0].total_elapsed_ms, 6);
+        assert_eq!(deepening_schedules[0].scheduled_cases.len(), 3);
+        assert_eq!(
+            deepening_schedules[0]
+                .scheduled_cases
+                .iter()
+                .map(|case| (
+                    case.attempt_number,
+                    case.schedule_order,
+                    case.case_id.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, Some(10), "deepening-probe__deepening_1_lag1_dim2_entry3",),
+                (2, Some(11), "deepening-probe__deepening_2_lag2_dim2_entry3",),
+                (3, Some(12), "deepening-probe__deepening_3_lag3_dim2_entry4",),
+            ]
+        );
 
         let summary = HarnessSummary {
             schema_version: 5,
@@ -2421,6 +2529,7 @@ mod tests {
                 generalized_cases: 0,
                 comparison_groups: 0,
                 campaign_groups: campaigns.len(),
+                deepening_schedule_groups: 1,
                 strategy_groups: 0,
                 telemetry_focus_cases: 0,
                 telemetry_focus_score: 0,
@@ -2429,12 +2538,19 @@ mod tests {
             },
             comparisons: vec![],
             campaigns,
+            deepening_schedules,
             strategies: vec![],
             cases,
         };
 
         let pretty = format_pretty_summary(&summary);
         assert!(pretty.contains("Campaigns"));
+        assert!(pretty.contains("deepening_schedule_groups: 1"));
+        assert!(pretty.contains("deepening=1/3 base=deepening-probe"));
+        assert!(pretty.contains("Deepening Schedules"));
+        assert!(pretty.contains("- deepening-probe: attempts=3"));
+        assert!(pretty
+            .contains("attempt=1/3 order=Some(10) deepening-probe__deepening_1_lag1_dim2_entry3"));
         assert!(pretty.contains("order=10 deepening-probe__deepening_1_lag1_dim2_entry3"));
         assert!(pretty.contains("order=11 deepening-probe__deepening_2_lag2_dim2_entry3"));
         assert!(pretty.contains("order=12 deepening-probe__deepening_3_lag3_dim2_entry4"));
@@ -2560,6 +2676,7 @@ mod tests {
                 generalized_cases: 0,
                 comparison_groups: comparisons.len(),
                 campaign_groups: 0,
+                deepening_schedule_groups: 0,
                 strategy_groups: 0,
                 telemetry_focus_cases: 0,
                 telemetry_focus_score: 0,
@@ -2568,6 +2685,7 @@ mod tests {
             },
             comparisons,
             campaigns: vec![],
+            deepening_schedules: vec![],
             strategies: vec![],
             cases,
         };
@@ -2849,6 +2967,7 @@ mod tests {
                 schedule_order: 10,
             }),
             measurement: None,
+            deepening: None,
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
@@ -2929,6 +3048,7 @@ mod tests {
                 schedule_order,
             }),
             measurement: None,
+            deepening: None,
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
