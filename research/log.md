@@ -230,6 +230,19 @@
   `square_factorisation_3x3` emptiness disagrees. Durable note:
   `research/notes/2026-04-17-square-factorisation-3x3-quotient-support-obstruction-followup.md`.
 
+- `working tree` Narrowed bounded-envelope no-go research to one kept exact direction and one durable rejection.
+  Kept as evidence. A fresh bounded probe on the durable
+  `rectangular_positive_pair` showed an exact envelope split:
+  `lag4 + entry6 + dim2` exhausts immediately with `unknown`, while the same
+  pair at `dim3` returns a concrete `3`-step witness, so strict
+  intermediate-dimension caps can already act as exact bounded no-go
+  certificates on a real harness surface. The same round also confirmed that
+  tiny lag-cap certificates on `brix_ruiz_k3` are exact but mostly local, and
+  that the previously rejected `square_factorisation_3x3` quotient/support
+  summaries still do not become exact bounded source-only certificates. Durable
+  note:
+  `research/notes/2026-04-17-bounded-no-go-certificates-first-round.md`.
+
 ## 2026-04-15
 
 - `working tree` Added an explicit graph-proposal research seam in `src/graph_moves.rs`.
