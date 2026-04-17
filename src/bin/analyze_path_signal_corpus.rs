@@ -79,6 +79,10 @@ fn main() -> Result<(), String> {
         cli.max_entry,
         cli.search_mode
     );
+    println!(
+        "          explicit_search_mode_override={}",
+        cli.search_mode_explicit
+    );
     println!("  summary:");
     for (name, summary) in &summaries {
         println!(
@@ -139,6 +143,7 @@ struct Cli {
     max_intermediate_dim: usize,
     max_entry: u32,
     search_mode: MoveFamilyPolicy,
+    search_mode_explicit: bool,
     witness_manifest_path: Option<PathBuf>,
     family_benchmark_path: Option<PathBuf>,
     emit_layer_contrasts_path: Option<PathBuf>,
@@ -509,6 +514,7 @@ where
         max_intermediate_dim: 5,
         max_entry: 6,
         search_mode: MoveFamilyPolicy::Mixed,
+        search_mode_explicit: false,
         witness_manifest_path: None,
         family_benchmark_path: None,
         emit_layer_contrasts_path: None,
@@ -590,6 +596,7 @@ where
                     "graph-only" | "graph_only" => MoveFamilyPolicy::GraphOnly,
                     _ => return Err(format!("unknown search mode: {value}")),
                 };
+                cli.search_mode_explicit = true;
             }
             "--witness-manifest" => {
                 cli.witness_manifest_path = Some(PathBuf::from(
@@ -623,7 +630,9 @@ where
                        --max-intermediate-dim N\n\
                                               search config bound for derived cases (default: 5)\n\
                        --max-entry N           search config entry bound (default: 6)\n\
-                       --search-mode MODE      mixed | graph-plus-structured | graph-only (default: mixed)\n\
+                       --search-mode MODE      override move-family policy for both derived and endpoint cases:\n\
+                                             mixed | graph-plus-structured | graph-only\n\
+                                             default: derived cases use mixed; endpoint cases keep case config\n\
                        --witness-manifest PATH resolve full-path sources to durable pair ids\n\
                        --family-benchmark PATH resolve pair ids to evaluation families / roles\n\
                        --emit-layer-contrasts PATH\n\
@@ -841,7 +850,10 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
                     max_intermediate_dim: case.config.max_intermediate_dim,
                     max_entry: case.config.max_entry,
                     frontier_mode: case.config.frontier_mode,
-                    move_family_policy: case.config.move_family_policy,
+                    move_family_policy: effective_endpoint_move_family_policy(
+                        case.config.move_family_policy,
+                        cli,
+                    ),
                     beam_width: case.config.beam_width,
                     beam_bfs_handoff_depth: case.config.beam_bfs_handoff_depth,
                     beam_bfs_handoff_deferred_cap: case.config.beam_bfs_handoff_deferred_cap,
@@ -856,6 +868,17 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
     }
 
     Ok(loaded)
+}
+
+fn effective_endpoint_move_family_policy(
+    case_policy: MoveFamilyPolicy,
+    cli: &Cli,
+) -> MoveFamilyPolicy {
+    if cli.search_mode_explicit {
+        cli.search_mode
+    } else {
+        case_policy
+    }
 }
 
 fn matches_research_case_filters(
@@ -945,7 +968,10 @@ fn analyze_case(
     };
 
     let mut observer = LayerCollector::default();
-    println!("  running {}", case.label);
+    println!(
+        "  running {} move_family_policy={:?}",
+        case.label, case.config.move_family_policy
+    );
     let (result, _) = execute_search_request_and_observer(&request, Some(&mut observer))?;
     let SearchRunResult::Equivalent(path) = result else {
         return Ok(None);
@@ -1300,8 +1326,10 @@ fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        case_matrix, matches_research_case_filters, CampaignConfig, JsonSearchConfig, ResearchCase,
+        case_matrix, effective_endpoint_move_family_policy, matches_research_case_filters,
+        parse_cli, CampaignConfig, Cli, JsonSearchConfig, ResearchCase,
     };
+    use sse_core::types::MoveFamilyPolicy;
     use std::collections::BTreeSet;
 
     #[test]
@@ -1361,5 +1389,30 @@ mod tests {
             &requested_case_ids,
             &requested_campaign_ids,
         ));
+    }
+
+    #[test]
+    fn endpoint_cases_keep_case_policy_without_explicit_override() {
+        let cli = Cli {
+            search_mode: MoveFamilyPolicy::Mixed,
+            search_mode_explicit: false,
+            ..parse_cli(std::iter::empty()).expect("default cli should parse")
+        };
+
+        assert_eq!(
+            effective_endpoint_move_family_policy(MoveFamilyPolicy::GraphOnly, &cli),
+            MoveFamilyPolicy::GraphOnly
+        );
+    }
+
+    #[test]
+    fn endpoint_cases_honor_explicit_search_mode_override() {
+        let cli = parse_cli(["--search-mode".to_string(), "graph-only".to_string()].into_iter())
+            .expect("cli should accept graph-only");
+
+        assert_eq!(
+            effective_endpoint_move_family_policy(MoveFamilyPolicy::Mixed, &cli),
+            MoveFamilyPolicy::GraphOnly
+        );
     }
 }
