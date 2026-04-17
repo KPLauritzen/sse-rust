@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::factorisation::enumerate_factorisations_3x3_to_2;
 use crate::matrix::{DynMatrix, SqMatrix};
