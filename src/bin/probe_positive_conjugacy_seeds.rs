@@ -9,6 +9,7 @@ use sse_core::conjugacy::{
     PositiveConjugacySeedCandidate2x2, PositiveConjugacySeedConfig2x2,
 };
 use sse_core::factorisation::visit_factorisations_with_family_for_policy;
+use sse_core::invariants::{gl2z_similarity_profile_2x2, ExactPositiveClass2x2};
 use sse_core::matrix::{DynMatrix, SqMatrix};
 use sse_core::search::search_sse_2x2_with_telemetry;
 use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SearchTelemetry, SseResult};
@@ -63,6 +64,7 @@ struct SeedEvaluation {
     anchor: SeedAnchor,
     local_lag: usize,
     path_families: Vec<String>,
+    residual_arithmetic: ResidualArithmeticPriority,
     result: SseResult<2>,
     telemetry: SearchTelemetry,
 }
@@ -71,6 +73,15 @@ struct SeedEvaluation {
 struct RankedLocalSeed {
     local_seed: LocalSeed,
     score: PositiveConjugacySeedCandidate2x2,
+    residual_arithmetic: ResidualArithmeticPriority,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ResidualArithmeticPriority {
+    exact_positive_class: Option<ExactPositiveClass2x2>,
+    gl2z_similar: bool,
+    strictly_positive_pair: bool,
+    residual_endpoint_l1_distance: u32,
 }
 
 #[derive(Clone)]
@@ -78,6 +89,7 @@ struct ProposalVariantEvaluation {
     label: &'static str,
     proposals: Vec<PositiveConjugacyProposal2x2>,
     seeded_evaluations: Vec<SeedEvaluation>,
+    residual_arithmetic_evaluations: Vec<SeedEvaluation>,
     blind_evaluations: Vec<SeedEvaluation>,
 }
 
@@ -226,10 +238,17 @@ fn main() -> Result<(), String> {
         println!("Proposal-guided local seed shortlist:");
         print_seed_evaluations("S", &variant.seeded_evaluations);
         println!();
+        println!("Anchor-aware residual arithmetic shortlist:");
+        print_seed_evaluations("R", &variant.residual_arithmetic_evaluations);
+        println!();
         println!("Blind target-nearest control shortlist:");
         print_seed_evaluations("C", &variant.blind_evaluations);
         println!();
-        print_comparison_summary(&variant.seeded_evaluations, &variant.blind_evaluations);
+        print_comparison_summary(
+            &variant.seeded_evaluations,
+            &variant.residual_arithmetic_evaluations,
+            &variant.blind_evaluations,
+        );
         println!();
     }
 
@@ -265,11 +284,18 @@ fn evaluate_proposal_variant(
         .iter()
         .map(|seed| (seed.matrix.clone(), seed.clone()))
         .collect::<BTreeMap<_, _>>();
-    let ranked_seeds = attach_seed_scores(&seeds, &score_by_matrix);
+    let ranked_seeds = attach_seed_scores(seeds, &score_by_matrix, source, target);
 
     let seeded_shortlist = build_seeded_shortlist(&ranked_seeds, shortlist_limit);
+    let residual_arithmetic_shortlist =
+        build_residual_arithmetic_shortlist(&ranked_seeds, shortlist_limit);
     let blind_shortlist = build_blind_shortlist(&ranked_seeds, shortlist_limit);
     let seeded_evaluations = seeded_shortlist
+        .iter()
+        .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
+        .map(|ranked| evaluate_seed(ranked, source, target, search_config))
+        .collect::<Vec<_>>();
+    let residual_arithmetic_evaluations = residual_arithmetic_shortlist
         .iter()
         .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
         .map(|ranked| evaluate_seed(ranked, source, target, search_config))
@@ -284,6 +310,7 @@ fn evaluate_proposal_variant(
         label,
         proposals,
         seeded_evaluations,
+        residual_arithmetic_evaluations,
         blind_evaluations,
     }
 }
@@ -632,6 +659,8 @@ fn enumerate_direct_same_dimension_successors(
 fn attach_seed_scores(
     seeds: &[LocalSeed],
     score_by_matrix: &BTreeMap<SqMatrix<2>, PositiveConjugacySeedCandidate2x2>,
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
 ) -> Vec<RankedLocalSeed> {
     seeds
         .iter()
@@ -641,6 +670,7 @@ fn attach_seed_scores(
                 .map(|score| RankedLocalSeed {
                     local_seed: seed.clone(),
                     score: score.clone(),
+                    residual_arithmetic: derive_residual_arithmetic_priority(seed, source, target),
                 })
         })
         .collect()
@@ -652,6 +682,58 @@ fn build_seeded_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<Ranked
         left.score
             .proposal_l1_distance
             .cmp(&right.score.proposal_l1_distance)
+            .then(
+                left.score
+                    .nearest_proposal_rank
+                    .cmp(&right.score.nearest_proposal_rank),
+            )
+            .then(
+                left.score
+                    .target_l1_distance
+                    .cmp(&right.score.target_l1_distance),
+            )
+            .then(left.local_seed.local_lag.cmp(&right.local_seed.local_lag))
+            .then(left.local_seed.anchor.cmp(&right.local_seed.anchor))
+            .then(
+                left.score
+                    .matrix
+                    .max_entry()
+                    .cmp(&right.score.matrix.max_entry()),
+            )
+            .then(left.score.matrix.cmp(&right.score.matrix))
+    });
+    expand_anchor_variants_for_top_matrices(ranked, limit)
+}
+
+fn build_residual_arithmetic_shortlist(
+    seeds: &[RankedLocalSeed],
+    limit: usize,
+) -> Vec<RankedLocalSeed> {
+    let mut ranked = seeds.to_vec();
+    ranked.sort_by(|left, right| {
+        exact_positive_class_sort_key(left.residual_arithmetic.exact_positive_class)
+            .cmp(&exact_positive_class_sort_key(
+                right.residual_arithmetic.exact_positive_class,
+            ))
+            .then(
+                usize::from(!left.residual_arithmetic.strictly_positive_pair).cmp(&usize::from(
+                    !right.residual_arithmetic.strictly_positive_pair,
+                )),
+            )
+            .then(
+                usize::from(!left.residual_arithmetic.gl2z_similar)
+                    .cmp(&usize::from(!right.residual_arithmetic.gl2z_similar)),
+            )
+            .then(
+                left.residual_arithmetic
+                    .residual_endpoint_l1_distance
+                    .cmp(&right.residual_arithmetic.residual_endpoint_l1_distance),
+            )
+            .then(
+                left.score
+                    .proposal_l1_distance
+                    .cmp(&right.score.proposal_l1_distance),
+            )
             .then(
                 left.score
                     .nearest_proposal_rank
@@ -754,6 +836,7 @@ fn evaluate_seed(
         anchor: ranked_seed.local_seed.anchor,
         local_lag: ranked_seed.local_seed.local_lag,
         path_families: ranked_seed.local_seed.path_families.clone(),
+        residual_arithmetic: ranked_seed.residual_arithmetic,
         result,
         telemetry,
     }
@@ -807,6 +890,15 @@ fn print_seed_evaluations(prefix: &str, evaluations: &[SeedEvaluation]) {
             evaluation.seed.proposal_l1_distance,
             evaluation.seed.target_l1_distance
         );
+        println!(
+            "     residual_exact={} residual_gl2z={} residual_positive={} residual_l1={}",
+            residual_exact_positive_class_label(
+                evaluation.residual_arithmetic.exact_positive_class
+            ),
+            yes_no(evaluation.residual_arithmetic.gl2z_similar),
+            yes_no(evaluation.residual_arithmetic.strictly_positive_pair),
+            evaluation.residual_arithmetic.residual_endpoint_l1_distance
+        );
         print_result_summary(
             "residual",
             &evaluation.result,
@@ -825,41 +917,53 @@ fn proposal_kind_label(kind: PositiveConjugacyProposalKind2x2) -> &'static str {
     }
 }
 
-fn print_comparison_summary(seeded: &[SeedEvaluation], blind: &[SeedEvaluation]) {
+fn print_comparison_summary(
+    seeded: &[SeedEvaluation],
+    residual_arithmetic: &[SeedEvaluation],
+    blind: &[SeedEvaluation],
+) {
     println!("Summary:");
-    println!("  seeded: {}", summarize_attempts(seeded));
+    println!("  proposal-guided: {}", summarize_attempts(seeded));
+    println!(
+        "  residual-arithmetic: {}",
+        summarize_attempts(residual_arithmetic)
+    );
     println!("  blind: {}", summarize_attempts(blind));
+    print_head_to_head_summary("proposal-guided", seeded, blind);
+    print_head_to_head_summary("residual-arithmetic", residual_arithmetic, blind);
+}
 
-    let seeded_best = best_total_lag(seeded);
+fn print_head_to_head_summary(label: &str, ranked: &[SeedEvaluation], blind: &[SeedEvaluation]) {
+    let ranked_best = best_total_lag(ranked);
     let blind_best = best_total_lag(blind);
-    match (seeded_best, blind_best) {
+    match (ranked_best, blind_best) {
         (Some(seed_lag), Some(blind_lag)) if seed_lag < blind_lag => {
             println!(
-                "  bounded improvement: seeded shortlist found a strictly shorter realized total lag ({seed_lag} < {blind_lag})"
+                "  vs blind ({label}): bounded improvement, realized total lag {seed_lag} < {blind_lag}"
             );
         }
         (Some(seed_lag), Some(blind_lag)) if seed_lag > blind_lag => {
             println!(
-                "  bounded improvement: none; blind controls realized a shorter total lag ({blind_lag} < {seed_lag})"
+                "  vs blind ({label}): none, blind realized a shorter total lag {blind_lag} < {seed_lag}"
             );
         }
         (Some(seed_lag), Some(_)) => {
             println!(
-                "  bounded improvement: none; seeded and blind realized the same best total lag ({seed_lag})"
+                "  vs blind ({label}): none, both realized the same best total lag ({seed_lag})"
             );
         }
         (Some(seed_lag), None) => {
             println!(
-                "  bounded improvement: seeded shortlist realized a bounded suffix while blind controls did not (best total lag {seed_lag})"
+                "  vs blind ({label}): bounded improvement, ranked shortlist realized lag {seed_lag} while blind did not"
             );
         }
         (None, Some(blind_lag)) => {
             println!(
-                "  bounded improvement: none; blind controls realized a bounded suffix while seeded candidates did not (best total lag {blind_lag})"
+                "  vs blind ({label}): none, blind realized lag {blind_lag} while ranked shortlist did not"
             );
         }
         (None, None) => {
-            println!("  bounded improvement: none observed under the requested lag bound");
+            println!("  vs blind ({label}): none observed under the requested lag bound");
         }
     }
 }
@@ -868,10 +972,11 @@ fn print_variant_summary(variants: &[ProposalVariantEvaluation]) {
     println!("Variant summary:");
     for variant in variants {
         println!(
-            "  {}: proposals={}, seeded={}, blind={}",
+            "  {}: proposals={}, proposal-guided={}, residual-arithmetic={}, blind={}",
             variant.label,
             variant.proposals.len(),
             summarize_attempts(&variant.seeded_evaluations),
+            summarize_attempts(&variant.residual_arithmetic_evaluations),
             summarize_attempts(&variant.blind_evaluations)
         );
     }
@@ -906,6 +1011,66 @@ fn best_total_lag(attempts: &[SeedEvaluation]) -> Option<usize> {
             _ => None,
         })
         .min()
+}
+
+fn derive_residual_arithmetic_priority(
+    seed: &LocalSeed,
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+) -> ResidualArithmeticPriority {
+    let (residual_source, residual_target) = residual_endpoints(seed, source, target);
+    let profile = gl2z_similarity_profile_2x2(residual_source, residual_target);
+    ResidualArithmeticPriority {
+        exact_positive_class: profile.exact_positive_class,
+        gl2z_similar: profile.gl2z_similar,
+        strictly_positive_pair: profile.source.strictly_positive
+            && profile.target.strictly_positive,
+        residual_endpoint_l1_distance: matrix_l1_distance(residual_source, residual_target),
+    }
+}
+
+fn residual_endpoints<'a>(
+    seed: &'a LocalSeed,
+    source: &'a SqMatrix<2>,
+    target: &'a SqMatrix<2>,
+) -> (&'a SqMatrix<2>, &'a SqMatrix<2>) {
+    match seed.anchor {
+        SeedAnchor::Source => (&seed.matrix, target),
+        SeedAnchor::Target => (source, &seed.matrix),
+    }
+}
+
+fn exact_positive_class_sort_key(class: Option<ExactPositiveClass2x2>) -> (usize, usize) {
+    match class {
+        Some(ExactPositiveClass2x2::Baker1983) => (0, 0),
+        Some(ExactPositiveClass2x2::ChoeShin1997) => (0, 1),
+        None => (1, 0),
+    }
+}
+
+fn residual_exact_positive_class_label(class: Option<ExactPositiveClass2x2>) -> &'static str {
+    match class {
+        Some(class) => class.label(),
+        None => "none",
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn matrix_l1_distance(left: &SqMatrix<2>, right: &SqMatrix<2>) -> u32 {
+    let mut total = 0u32;
+    for row in 0..2 {
+        for col in 0..2 {
+            total += left.data[row][col].abs_diff(right.data[row][col]);
+        }
+    }
+    total
 }
 
 fn format_lag_breakdown(lags: impl Iterator<Item = usize>) -> String {
@@ -952,6 +1117,30 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+        }
+    }
+
+    fn sample_ranked_seed(
+        matrix: SqMatrix<2>,
+        anchor: SeedAnchor,
+        proposal_l1_distance: u32,
+        target_l1_distance: u32,
+        residual_arithmetic: ResidualArithmeticPriority,
+    ) -> RankedLocalSeed {
+        RankedLocalSeed {
+            local_seed: LocalSeed {
+                matrix: matrix.clone(),
+                anchor,
+                local_lag: 1,
+                path_families: vec!["test".to_string()],
+            },
+            score: PositiveConjugacySeedCandidate2x2 {
+                matrix,
+                nearest_proposal_rank: 1,
+                proposal_l1_distance,
+                target_l1_distance,
+            },
+            residual_arithmetic,
         }
     }
 
@@ -1042,6 +1231,12 @@ mod tests {
                         proposal_l1_distance: 1,
                         target_l1_distance: 3,
                     },
+                    residual_arithmetic: ResidualArithmeticPriority {
+                        exact_positive_class: None,
+                        gl2z_similar: true,
+                        strictly_positive_pair: true,
+                        residual_endpoint_l1_distance: 3,
+                    },
                 },
                 RankedLocalSeed {
                     local_seed: LocalSeed {
@@ -1055,6 +1250,12 @@ mod tests {
                         nearest_proposal_rank: 1,
                         proposal_l1_distance: 1,
                         target_l1_distance: 3,
+                    },
+                    residual_arithmetic: ResidualArithmeticPriority {
+                        exact_positive_class: None,
+                        gl2z_similar: true,
+                        strictly_positive_pair: true,
+                        residual_endpoint_l1_distance: 3,
                     },
                 },
                 RankedLocalSeed {
@@ -1070,6 +1271,12 @@ mod tests {
                         proposal_l1_distance: 2,
                         target_l1_distance: 4,
                     },
+                    residual_arithmetic: ResidualArithmeticPriority {
+                        exact_positive_class: None,
+                        gl2z_similar: true,
+                        strictly_positive_pair: true,
+                        residual_endpoint_l1_distance: 4,
+                    },
                 },
             ],
             1,
@@ -1082,5 +1289,66 @@ mod tests {
         assert!(shortlist
             .iter()
             .any(|entry| entry.local_seed.anchor == SeedAnchor::Target));
+    }
+
+    #[test]
+    fn residual_arithmetic_shortlist_prefers_strictly_positive_pairs_before_proposal_distance() {
+        let positive = sample_ranked_seed(
+            SqMatrix::new([[1, 2], [3, 1]]),
+            SeedAnchor::Source,
+            2,
+            3,
+            ResidualArithmeticPriority {
+                exact_positive_class: None,
+                gl2z_similar: true,
+                strictly_positive_pair: true,
+                residual_endpoint_l1_distance: 4,
+            },
+        );
+        let zero_entry = sample_ranked_seed(
+            SqMatrix::new([[0, 5], [1, 2]]),
+            SeedAnchor::Target,
+            0,
+            1,
+            ResidualArithmeticPriority {
+                exact_positive_class: None,
+                gl2z_similar: true,
+                strictly_positive_pair: false,
+                residual_endpoint_l1_distance: 2,
+            },
+        );
+
+        let shortlist = build_residual_arithmetic_shortlist(&[zero_entry, positive.clone()], 1);
+
+        assert_eq!(shortlist.len(), 1);
+        assert_eq!(shortlist[0].score.matrix, positive.score.matrix);
+    }
+
+    #[test]
+    fn attach_seed_scores_uses_anchor_aware_residual_distance() {
+        let source = SqMatrix::new([[1, 3], [2, 1]]);
+        let target = SqMatrix::new([[1, 6], [1, 1]]);
+        let score = PositiveConjugacySeedCandidate2x2 {
+            matrix: SqMatrix::new([[1, 1], [6, 1]]),
+            nearest_proposal_rank: 1,
+            proposal_l1_distance: 0,
+            target_l1_distance: 10,
+        };
+        let seeds = vec![LocalSeed {
+            matrix: score.matrix.clone(),
+            anchor: SeedAnchor::Target,
+            local_lag: 1,
+            path_families: vec!["permutation".to_string()],
+        }];
+        let score_by_matrix = [(score.matrix.clone(), score)].into_iter().collect();
+
+        let ranked = attach_seed_scores(&seeds, &score_by_matrix, &source, &target);
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(
+            ranked[0].residual_arithmetic.residual_endpoint_l1_distance,
+            6
+        );
+        assert_eq!(ranked[0].score.target_l1_distance, 10);
     }
 }
