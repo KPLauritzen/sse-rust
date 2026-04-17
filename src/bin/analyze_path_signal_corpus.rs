@@ -192,7 +192,13 @@ struct CaseAnalysis {
 
 #[derive(Clone, Debug, Default)]
 struct PairCatalog {
-    path_pairs_by_endpoints: HashMap<String, String>,
+    unique_path_pairs_by_endpoints: HashMap<String, String>,
+    ambiguous_path_endpoints: HashSet<String>,
+    validated_witness_source_ids_by_path: HashMap<PathBuf, String>,
+    validated_pair_refs_by_source_artifact: HashMap<(String, String), ValidatedPathPairRef>,
+    validated_pair_refs_by_artifact: HashMap<String, ValidatedPathPairRef>,
+    ambiguous_artifact_ids: HashSet<String>,
+    validated_pair_refs_by_sqlite_result: HashMap<(String, String, i64), ValidatedPathPairRef>,
     family_by_pair_id: HashMap<String, FamilyMetadata>,
     benchmark_pair_by_case_id: HashMap<String, String>,
     benchmark_case_ids_by_role: HashMap<String, BTreeSet<String>>,
@@ -222,6 +228,12 @@ struct ManifestEndpointCase {
     pair_id: String,
     source: DynMatrix,
     target: DynMatrix,
+}
+
+#[derive(Clone, Debug)]
+struct ValidatedPathPairRef {
+    pair_id: String,
+    endpoint_key: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -343,7 +355,15 @@ struct ArtifactMatchedCandidate {
 
 #[derive(Debug, Deserialize)]
 struct WitnessCorpusManifest {
+    #[serde(default)]
+    validated_witness_sources: Vec<ValidatedWitnessSource>,
     first_ingestion_slice: WitnessCorpusFirstSlice,
+}
+
+#[derive(Debug, Deserialize)]
+struct ValidatedWitnessSource {
+    id: String,
+    path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,6 +379,8 @@ struct WitnessCorpusPair {
     pair_id: String,
     source: ManifestMatrix,
     target: ManifestMatrix,
+    #[serde(default)]
+    evidence_refs: Vec<WitnessCorpusEvidenceRef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -374,6 +396,23 @@ struct ManifestMatrix {
     rows: usize,
     cols: usize,
     data: Vec<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WitnessCorpusEvidenceRef {
+    source_id: String,
+    #[serde(default)]
+    artifact_ids: Vec<String>,
+    #[serde(default)]
+    result_refs: LegacyResultRefs,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyResultRefs {
+    #[serde(default)]
+    graph_path_results: Vec<i64>,
+    #[serde(default)]
+    shortcut_path_results: Vec<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -461,14 +500,100 @@ impl PairCatalog {
         let Some(target) = target else {
             return PairMetadata::default();
         };
+        let endpoint_key = endpoint_pair_key(source, target);
+        if self.ambiguous_path_endpoints.contains(&endpoint_key) {
+            return PairMetadata::default();
+        }
         let Some(pair_id) = self
-            .path_pairs_by_endpoints
-            .get(&endpoint_pair_key(source, target))
+            .unique_path_pairs_by_endpoints
+            .get(&endpoint_key)
             .cloned()
         else {
             return PairMetadata::default();
         };
         self.build_pair_metadata(pair_id, None)
+    }
+
+    fn resolve_guide_artifact(
+        &self,
+        source_path: &Path,
+        artifact_id: Option<&str>,
+        source: Option<&DynMatrix>,
+        target: Option<&DynMatrix>,
+    ) -> Result<PairMetadata, String> {
+        let Some(source) = source else {
+            return Ok(PairMetadata::default());
+        };
+        let Some(target) = target else {
+            return Ok(PairMetadata::default());
+        };
+        let endpoint_key = endpoint_pair_key(source, target);
+        if let (Some(source_id), Some(artifact_id)) =
+            (self.validated_source_id(source_path), artifact_id)
+        {
+            if let Some(pair_ref) = self
+                .validated_pair_refs_by_source_artifact
+                .get(&(source_id.to_string(), artifact_id.to_string()))
+            {
+                return self.build_validated_path_metadata(
+                    pair_ref,
+                    &endpoint_key,
+                    &format!(
+                        "guide artifact {artifact_id} from {}",
+                        source_path.display()
+                    ),
+                );
+            }
+        }
+        if let Some(artifact_id) = artifact_id {
+            if !self.ambiguous_artifact_ids.contains(artifact_id) {
+                if let Some(pair_ref) = self.validated_pair_refs_by_artifact.get(artifact_id) {
+                    return self.build_validated_path_metadata(
+                        pair_ref,
+                        &endpoint_key,
+                        &format!(
+                            "guide artifact {artifact_id} from {}",
+                            source_path.display()
+                        ),
+                    );
+                }
+            }
+        }
+        Ok(self.resolve_path(Some(source), Some(target)))
+    }
+
+    fn resolve_sqlite_result(
+        &self,
+        source_path: &Path,
+        table_name: &str,
+        result_id: i64,
+        source: Option<&DynMatrix>,
+        target: Option<&DynMatrix>,
+    ) -> Result<PairMetadata, String> {
+        let Some(source) = source else {
+            return Ok(PairMetadata::default());
+        };
+        let Some(target) = target else {
+            return Ok(PairMetadata::default());
+        };
+        let endpoint_key = endpoint_pair_key(source, target);
+        if let Some(source_id) = self.validated_source_id(source_path) {
+            if let Some(pair_ref) = self.validated_pair_refs_by_sqlite_result.get(&(
+                source_id.to_string(),
+                table_name.to_string(),
+                result_id,
+            )) {
+                return self.build_validated_path_metadata(
+                    pair_ref,
+                    &endpoint_key,
+                    &format!(
+                        "sqlite result {result_id} from {} ({table_name})",
+                        source_path.display()
+                    ),
+                );
+            }
+        }
+        Ok(self.resolve_path(Some(source), Some(target)))
     }
 
     fn resolve_case(&self, pair_id: &str) -> PairMetadata {
@@ -494,6 +619,122 @@ impl PairCatalog {
             benchmark_role: family.map(|family| family.benchmark_role.clone()),
             benchmark_case_id,
         }
+    }
+
+    fn validated_source_id(&self, source_path: &Path) -> Option<&str> {
+        let normalized = canonicalize_if_exists(source_path);
+        self.validated_witness_source_ids_by_path
+            .get(&normalized)
+            .map(String::as_str)
+    }
+
+    fn build_validated_path_metadata(
+        &self,
+        pair_ref: &ValidatedPathPairRef,
+        actual_endpoint_key: &str,
+        evidence_label: &str,
+    ) -> Result<PairMetadata, String> {
+        if pair_ref.endpoint_key != actual_endpoint_key {
+            return Err(format!(
+                "{evidence_label} resolved to pair {}, but its canonical endpoints do not match the manifest-backed pair endpoints",
+                pair_ref.pair_id
+            ));
+        }
+        Ok(self.build_pair_metadata(pair_ref.pair_id.clone(), None))
+    }
+
+    fn register_validated_endpoint_pair(&mut self, endpoint_key: &str, pair_id: &str) {
+        if self.ambiguous_path_endpoints.contains(endpoint_key) {
+            return;
+        }
+        match self.unique_path_pairs_by_endpoints.get(endpoint_key) {
+            Some(existing_pair_id) if existing_pair_id == pair_id => {}
+            Some(_) => {
+                self.unique_path_pairs_by_endpoints.remove(endpoint_key);
+                self.ambiguous_path_endpoints
+                    .insert(endpoint_key.to_string());
+            }
+            None => {
+                self.unique_path_pairs_by_endpoints
+                    .insert(endpoint_key.to_string(), pair_id.to_string());
+            }
+        }
+    }
+
+    fn register_validated_source(
+        &mut self,
+        source_id: String,
+        source_path: PathBuf,
+    ) -> Result<(), String> {
+        if let Some(existing_source_id) = self
+            .validated_witness_source_ids_by_path
+            .insert(source_path.clone(), source_id.clone())
+        {
+            if existing_source_id != source_id {
+                return Err(format!(
+                    "validated witness source path {} is declared for both {existing_source_id} and {source_id}",
+                    source_path.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn register_guide_artifact_ref(
+        &mut self,
+        source_id: &str,
+        artifact_id: &str,
+        pair_ref: &ValidatedPathPairRef,
+    ) -> Result<(), String> {
+        let source_key = (source_id.to_string(), artifact_id.to_string());
+        if let Some(existing) = self
+            .validated_pair_refs_by_source_artifact
+            .insert(source_key.clone(), pair_ref.clone())
+        {
+            if existing.pair_id != pair_ref.pair_id {
+                return Err(format!(
+                    "validated evidence ref {source_id}:{artifact_id} is assigned to both {} and {}",
+                    existing.pair_id, pair_ref.pair_id
+                ));
+            }
+        }
+        if self.ambiguous_artifact_ids.contains(artifact_id) {
+            return Ok(());
+        }
+        match self.validated_pair_refs_by_artifact.get(artifact_id) {
+            Some(existing) if existing.pair_id == pair_ref.pair_id => {}
+            Some(_) => {
+                self.validated_pair_refs_by_artifact.remove(artifact_id);
+                self.ambiguous_artifact_ids.insert(artifact_id.to_string());
+            }
+            None => {
+                self.validated_pair_refs_by_artifact
+                    .insert(artifact_id.to_string(), pair_ref.clone());
+            }
+        }
+        Ok(())
+    }
+
+    fn register_sqlite_result_ref(
+        &mut self,
+        source_id: &str,
+        table_name: &str,
+        result_id: i64,
+        pair_ref: &ValidatedPathPairRef,
+    ) -> Result<(), String> {
+        let key = (source_id.to_string(), table_name.to_string(), result_id);
+        if let Some(existing) = self
+            .validated_pair_refs_by_sqlite_result
+            .insert(key.clone(), pair_ref.clone())
+        {
+            if existing.pair_id != pair_ref.pair_id {
+                return Err(format!(
+                    "validated sqlite evidence ref {source_id}:{table_name}:{result_id} is assigned to both {} and {}",
+                    existing.pair_id, pair_ref.pair_id
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -726,12 +967,46 @@ fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
             .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
         let manifest: WitnessCorpusManifest = serde_json::from_str(&raw)
             .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+        let manifest_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        for source in manifest.validated_witness_sources {
+            let source_path =
+                canonicalize_if_exists(&manifest_relative_path(manifest_dir, &source.path));
+            catalog.register_validated_source(source.id, source_path)?;
+        }
         for pair in manifest.first_ingestion_slice.validated_pairs {
             let source = manifest_matrix(&pair.source)?.canonical_perm();
             let target = manifest_matrix(&pair.target)?.canonical_perm();
-            catalog
-                .path_pairs_by_endpoints
-                .insert(endpoint_pair_key(&source, &target), pair.pair_id);
+            let endpoint_key = endpoint_pair_key(&source, &target);
+            catalog.register_validated_endpoint_pair(&endpoint_key, &pair.pair_id);
+            let pair_ref = ValidatedPathPairRef {
+                pair_id: pair.pair_id.clone(),
+                endpoint_key,
+            };
+            for evidence_ref in pair.evidence_refs {
+                for artifact_id in evidence_ref.artifact_ids {
+                    catalog.register_guide_artifact_ref(
+                        &evidence_ref.source_id,
+                        &artifact_id,
+                        &pair_ref,
+                    )?;
+                }
+                for result_id in evidence_ref.result_refs.graph_path_results {
+                    catalog.register_sqlite_result_ref(
+                        &evidence_ref.source_id,
+                        "graph_path_results",
+                        result_id,
+                        &pair_ref,
+                    )?;
+                }
+                for result_id in evidence_ref.result_refs.shortcut_path_results {
+                    catalog.register_sqlite_result_ref(
+                        &evidence_ref.source_id,
+                        "shortcut_path_results",
+                        result_id,
+                        &pair_ref,
+                    )?;
+                }
+            }
         }
         for pair in manifest.first_ingestion_slice.endpoint_case_only_pairs {
             let source = manifest_matrix(&pair.source)?.canonical_perm();
@@ -800,25 +1075,37 @@ fn load_source_paths(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Source
     }
 
     let mut seen = HashSet::new();
-    paths.retain(|path| seen.insert(path_signature(&path.matrices)));
+    paths.retain(|path| {
+        seen.insert(path_dedup_key(
+            &path.matrices,
+            path.pair_metadata.pair_id.as_deref(),
+        ))
+    });
     Ok(paths)
 }
 
 fn load_paths_from_guide_artifacts(
-    path: &Path,
+    guide_path: &Path,
     pair_catalog: &PairCatalog,
 ) -> Result<Vec<SourcePath>, String> {
     let mut paths = Vec::new();
-    for artifact in load_guide_artifacts_from_path(path)? {
+    for artifact in load_guide_artifacts_from_path(guide_path)? {
+        let artifact_id = artifact.artifact_id.clone();
         let GuideArtifactPayload::FullPath { path } = artifact.payload;
         let label = artifact
             .artifact_id
             .or(artifact.provenance.label)
             .unwrap_or_else(|| "guide_artifact_path".to_string());
         let matrices = canonicalize_path(&path.matrices);
+        let pair_metadata = pair_catalog.resolve_guide_artifact(
+            guide_path,
+            artifact_id.as_deref(),
+            matrices.first(),
+            matrices.last(),
+        )?;
         paths.push(SourcePath {
             label,
-            pair_metadata: pair_catalog.resolve_path(matrices.first(), matrices.last()),
+            pair_metadata,
             matrices,
         });
     }
@@ -867,9 +1154,16 @@ fn load_paths_from_sqlite(
         if current_id != Some(result_id) {
             if let Some(prev_id) = current_id {
                 let matrices = std::mem::take(&mut current_matrices);
+                let pair_metadata = pair_catalog.resolve_sqlite_result(
+                    path,
+                    "shortcut_path_results",
+                    prev_id,
+                    matrices.first(),
+                    matrices.last(),
+                )?;
                 paths.push(SourcePath {
                     label: format!("sqlite:{}:{}", prev_id, current_label),
-                    pair_metadata: pair_catalog.resolve_path(matrices.first(), matrices.last()),
+                    pair_metadata,
                     matrices,
                 });
             }
@@ -881,9 +1175,16 @@ fn load_paths_from_sqlite(
 
     if let Some(result_id) = current_id {
         let matrices = current_matrices;
+        let pair_metadata = pair_catalog.resolve_sqlite_result(
+            path,
+            "shortcut_path_results",
+            result_id,
+            matrices.first(),
+            matrices.last(),
+        )?;
         paths.push(SourcePath {
             label: format!("sqlite:{}:{}", result_id, current_label),
-            pair_metadata: pair_catalog.resolve_path(matrices.first(), matrices.last()),
+            pair_metadata,
             matrices,
         });
     }
@@ -1135,7 +1436,11 @@ fn derive_path_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
                 if source.rows > cli.max_endpoint_dim || target.rows > cli.max_endpoint_dim {
                     continue;
                 }
-                let key = format!("{}=>{}", matrix_key(&source), matrix_key(&target));
+                let key = case_endpoint_dedup_key(
+                    path.pair_metadata.pair_id.as_deref(),
+                    &source,
+                    &target,
+                );
                 if !seen.insert(key) {
                     continue;
                 }
@@ -1519,6 +1824,39 @@ fn path_signature(path: &[DynMatrix]) -> String {
     path.iter().map(matrix_key).collect::<Vec<_>>().join("|")
 }
 
+fn path_dedup_key(path: &[DynMatrix], pair_id: Option<&str>) -> String {
+    let signature = path_signature(path);
+    match pair_id {
+        Some(pair_id) => format!("{pair_id}|{signature}"),
+        None => signature,
+    }
+}
+
+fn case_endpoint_dedup_key(
+    pair_id: Option<&str>,
+    source: &DynMatrix,
+    target: &DynMatrix,
+) -> String {
+    let endpoint_key = endpoint_pair_key(source, target);
+    match pair_id {
+        Some(pair_id) => format!("{pair_id}|{endpoint_key}"),
+        None => endpoint_key,
+    }
+}
+
+fn manifest_relative_path(base_dir: &Path, raw_path: &str) -> PathBuf {
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        path
+    } else {
+        base_dir.join(path)
+    }
+}
+
+fn canonicalize_if_exists(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn matrix_key(matrix: &DynMatrix) -> String {
     format!(
         "{}x{}:{}",
@@ -1551,14 +1889,18 @@ fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        case_matrix, effective_endpoint_move_family_policy, matches_research_case_filters,
-        parse_cli, selected_benchmark_case_ids, validate_requested_manifest_catalog_consistency,
-        CampaignConfig, Cli, FamilyMetadata, JsonSearchConfig, ManifestEndpointCase, PairCatalog,
-        ResearchCase,
+        case_matrix, derive_path_cases, effective_endpoint_move_family_policy, load_pair_catalog,
+        matches_research_case_filters, parse_cli, selected_benchmark_case_ids,
+        validate_requested_manifest_catalog_consistency, CampaignConfig, Cli, ContrastSourceKind,
+        FamilyMetadata, JsonSearchConfig, ManifestEndpointCase, PairCatalog, PairMetadata,
+        ResearchCase, SourcePath,
     };
     use sse_core::matrix::DynMatrix;
     use sse_core::types::MoveFamilyPolicy;
     use std::collections::{BTreeSet, HashMap};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn case_matrix_rejects_non_square_input() {
@@ -1798,5 +2140,170 @@ mod tests {
             effective_endpoint_move_family_policy(MoveFamilyPolicy::Mixed, &cli),
             MoveFamilyPolicy::GraphOnly
         );
+    }
+
+    #[test]
+    fn ambiguous_validated_pairs_resolve_by_evidence_ref() {
+        let temp_dir = unique_temp_dir("pair-disambiguation");
+        let manifest_path = temp_dir.join("manifest.json");
+        let guide_path = temp_dir.join("guides.json");
+        let sqlite_path = temp_dir.join("paths.sqlite");
+        fs::write(&guide_path, "[]\n").expect("guide placeholder should write");
+        fs::write(&sqlite_path, "").expect("sqlite placeholder should write");
+        fs::write(
+            &manifest_path,
+            r#"{
+  "schema_version": 1,
+  "validated_witness_sources": [
+    { "id": "guide_pool", "path": "guides.json" },
+    { "id": "legacy_db", "path": "paths.sqlite" }
+  ],
+  "first_ingestion_slice": {
+    "validated_pairs": [
+      {
+        "pair_id": "literature_pair",
+        "source": { "rows": 2, "cols": 2, "data": [1, 3, 2, 1] },
+        "target": { "rows": 2, "cols": 2, "data": [1, 6, 1, 1] },
+        "evidence_refs": [
+          { "source_id": "guide_pool", "artifact_ids": ["lit-artifact"] }
+        ]
+      },
+      {
+        "pair_id": "search_pool_pair",
+        "source": { "rows": 2, "cols": 2, "data": [1, 2, 3, 1] },
+        "target": { "rows": 2, "cols": 2, "data": [1, 1, 6, 1] },
+        "evidence_refs": [
+          {
+            "source_id": "guide_pool",
+            "artifact_ids": ["search-artifact"]
+          },
+          {
+            "source_id": "legacy_db",
+            "result_refs": { "shortcut_path_results": [7] }
+          }
+        ]
+      }
+    ],
+    "endpoint_case_only_pairs": []
+  }
+}
+"#,
+        )
+        .expect("manifest should write");
+        let cli = Cli {
+            witness_manifest_path: Some(manifest_path.clone()),
+            ..parse_cli(std::iter::empty()).expect("default cli should parse")
+        };
+        let catalog = load_pair_catalog(&cli).expect("catalog should load");
+
+        let literature_source = DynMatrix::new(2, 2, vec![1, 3, 2, 1]).canonical_perm();
+        let literature_target = DynMatrix::new(2, 2, vec![1, 6, 1, 1]).canonical_perm();
+        let search_source = DynMatrix::new(2, 2, vec![1, 2, 3, 1]).canonical_perm();
+        let search_target = DynMatrix::new(2, 2, vec![1, 1, 6, 1]).canonical_perm();
+
+        let literature = catalog
+            .resolve_guide_artifact(
+                &guide_path,
+                Some("lit-artifact"),
+                Some(&literature_source),
+                Some(&literature_target),
+            )
+            .expect("literature artifact should resolve");
+        assert_eq!(literature.pair_id.as_deref(), Some("literature_pair"));
+
+        let search = catalog
+            .resolve_guide_artifact(
+                &guide_path,
+                Some("search-artifact"),
+                Some(&search_source),
+                Some(&search_target),
+            )
+            .expect("search artifact should resolve");
+        assert_eq!(search.pair_id.as_deref(), Some("search_pool_pair"));
+
+        let sqlite = catalog
+            .resolve_sqlite_result(
+                &sqlite_path,
+                "shortcut_path_results",
+                7,
+                Some(&search_source),
+                Some(&search_target),
+            )
+            .expect("sqlite ref should resolve");
+        assert_eq!(sqlite.pair_id.as_deref(), Some("search_pool_pair"));
+
+        let unattributed = catalog.resolve_path(Some(&search_source), Some(&search_target));
+        assert_eq!(unattributed.pair_id, None);
+    }
+
+    #[test]
+    fn derive_path_cases_keep_distinct_pair_ids_for_identical_endpoints() {
+        let matrices = vec![
+            DynMatrix::new(1, 1, vec![1]),
+            DynMatrix::new(1, 1, vec![2]),
+            DynMatrix::new(1, 1, vec![3]),
+        ];
+        let paths = vec![
+            SourcePath {
+                label: "pair-a".to_string(),
+                matrices: matrices.clone(),
+                pair_metadata: PairMetadata {
+                    pair_id: Some("pair_a".to_string()),
+                    evaluation_family_id: Some("family".to_string()),
+                    benchmark_role: Some("development_only".to_string()),
+                    benchmark_case_id: None,
+                },
+            },
+            SourcePath {
+                label: "pair-b".to_string(),
+                matrices,
+                pair_metadata: PairMetadata {
+                    pair_id: Some("pair_b".to_string()),
+                    evaluation_family_id: Some("family".to_string()),
+                    benchmark_role: Some("development_only".to_string()),
+                    benchmark_case_id: None,
+                },
+            },
+        ];
+        let cli = Cli {
+            min_gap: 1,
+            max_gap: 1,
+            max_cases: 8,
+            max_endpoint_dim: 3,
+            max_intermediate_dim: 3,
+            max_entry: 3,
+            search_mode: MoveFamilyPolicy::Mixed,
+            ..parse_cli(std::iter::empty()).expect("default cli should parse")
+        };
+
+        let cases = derive_path_cases(&paths, &cli);
+        assert_eq!(cases.len(), 4);
+        assert_eq!(
+            cases
+                .iter()
+                .filter(|case| case.contrast_source_kind == ContrastSourceKind::PathSegment)
+                .count(),
+            4
+        );
+        assert_eq!(
+            cases
+                .iter()
+                .filter_map(|case| case.pair_metadata.pair_id.as_deref())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["pair_a", "pair_b"])
+        );
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "sse-core-analyze-path-signal-corpus-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("temp dir should be created");
+        path
     }
 }
