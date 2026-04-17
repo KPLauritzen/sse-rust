@@ -407,11 +407,21 @@ fn enumerate_exact_local_seed_family(
     );
     extend_seed_family(
         &mut best_by_seed,
-        enumerate_permutation_local_seeds(source, SeedAnchor::Source, search_config.max_entry),
+        enumerate_permutation_local_seeds(
+            source,
+            SeedAnchor::Source,
+            max_local_lag,
+            search_config.max_entry,
+        ),
     );
     extend_seed_family(
         &mut best_by_seed,
-        enumerate_permutation_local_seeds(target, SeedAnchor::Target, search_config.max_entry),
+        enumerate_permutation_local_seeds(
+            target,
+            SeedAnchor::Target,
+            max_local_lag,
+            search_config.max_entry,
+        ),
     );
     best_by_seed.into_values().collect()
 }
@@ -506,8 +516,12 @@ fn enumerate_same_dimension_local_seeds(
 fn enumerate_permutation_local_seeds(
     matrix: &SqMatrix<2>,
     anchor: SeedAnchor,
+    max_local_lag: usize,
     max_entry: u32,
 ) -> Vec<LocalSeed> {
+    if max_local_lag == 0 {
+        return Vec::new();
+    }
     let conjugated = permutation_conjugate_2x2(matrix);
     if conjugated == *matrix || conjugated.max_entry() > max_entry {
         return Vec::new();
@@ -840,11 +854,18 @@ mod tests {
     #[test]
     fn permutation_local_seed_matches_swap_conjugate() {
         let matrix = SqMatrix::new([[3, 2], [1, 3]]);
-        let seeds = enumerate_permutation_local_seeds(&matrix, SeedAnchor::Source, 4);
+        let seeds = enumerate_permutation_local_seeds(&matrix, SeedAnchor::Source, 1, 4);
         assert_eq!(seeds.len(), 1);
         assert_eq!(seeds[0].matrix, SqMatrix::new([[3, 1], [2, 3]]));
         assert_eq!(seeds[0].anchor, SeedAnchor::Source);
         assert_eq!(seeds[0].local_lag, 1);
+    }
+
+    #[test]
+    fn permutation_local_seed_respects_zero_local_lag_bound() {
+        let matrix = SqMatrix::new([[3, 2], [1, 3]]);
+        let seeds = enumerate_permutation_local_seeds(&matrix, SeedAnchor::Source, 0, 4);
+        assert!(seeds.is_empty());
     }
 
     #[test]
