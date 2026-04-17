@@ -65,6 +65,12 @@ struct SeedEvaluation {
     telemetry: SearchTelemetry,
 }
 
+#[derive(Clone)]
+struct RankedLocalSeed {
+    local_seed: LocalSeed,
+    score: PositiveConjugacySeedCandidate2x2,
+}
+
 fn main() -> Result<(), String> {
     let cli = parse_args()?;
     let case = load_case(&cli.case);
@@ -180,8 +186,10 @@ fn main() -> Result<(), String> {
     let seed_matrices = seeds
         .iter()
         .map(|seed| seed.matrix.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
-    let all_seed_scores = rank_positive_conjugacy_seed_candidates_2x2(
+    let matrix_scores = rank_positive_conjugacy_seed_candidates_2x2(
         &case.target,
         &proposals,
         &seed_matrices,
@@ -189,44 +197,24 @@ fn main() -> Result<(), String> {
             max_candidates: seed_matrices.len(),
         },
     );
-    let score_by_matrix = all_seed_scores
+    let score_by_matrix = matrix_scores
         .iter()
         .map(|seed| (seed.matrix.clone(), seed.clone()))
         .collect::<BTreeMap<_, _>>();
-    let seed_by_matrix = seeds
-        .iter()
-        .map(|seed| (seed.matrix.clone(), seed.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let ranked_seeds = attach_seed_scores(&seeds, &score_by_matrix);
 
-    let seeded_shortlist = rank_positive_conjugacy_seed_candidates_2x2(
-        &case.target,
-        &proposals,
-        &seed_matrices,
-        &seed_config,
-    );
-    let blind_shortlist = build_blind_shortlist(&seeds, &score_by_matrix, cli.seed_top_k);
+    let seeded_shortlist = build_seeded_shortlist(&ranked_seeds, seed_config.max_candidates);
+    let blind_shortlist = build_blind_shortlist(&ranked_seeds, cli.seed_top_k);
 
     let seeded_evaluations = seeded_shortlist
         .iter()
-        .filter_map(|seed| {
-            seed_by_matrix
-                .get(&seed.matrix)
-                .filter(|local_seed| local_seed.local_lag <= search_config.max_lag)
-                .map(|local_seed| {
-                    evaluate_seed(local_seed, seed, &case.source, &case.target, &search_config)
-                })
-        })
+        .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
+        .map(|ranked| evaluate_seed(ranked, &case.source, &case.target, &search_config))
         .collect::<Vec<_>>();
     let blind_evaluations = blind_shortlist
         .iter()
-        .filter_map(|seed| {
-            seed_by_matrix
-                .get(&seed.matrix)
-                .filter(|local_seed| local_seed.local_lag <= search_config.max_lag)
-                .map(|local_seed| {
-                    evaluate_seed(local_seed, seed, &case.source, &case.target, &search_config)
-                })
-        })
+        .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
+        .map(|ranked| evaluate_seed(ranked, &case.source, &case.target, &search_config))
         .collect::<Vec<_>>();
 
     println!("Proposal-guided local seed shortlist:");
@@ -398,9 +386,9 @@ fn enumerate_exact_local_seed_family(
     search_config: &SearchConfig,
     max_local_lag: usize,
 ) -> Vec<LocalSeed> {
-    let mut best_by_matrix = BTreeMap::<SqMatrix<2>, LocalSeed>::new();
+    let mut best_by_seed = BTreeMap::<(SqMatrix<2>, SeedAnchor), LocalSeed>::new();
     extend_seed_family(
-        &mut best_by_matrix,
+        &mut best_by_seed,
         enumerate_same_dimension_local_seeds(
             source,
             search_config,
@@ -409,7 +397,7 @@ fn enumerate_exact_local_seed_family(
         ),
     );
     extend_seed_family(
-        &mut best_by_matrix,
+        &mut best_by_seed,
         enumerate_same_dimension_local_seeds(
             target,
             search_config,
@@ -418,25 +406,26 @@ fn enumerate_exact_local_seed_family(
         ),
     );
     extend_seed_family(
-        &mut best_by_matrix,
+        &mut best_by_seed,
         enumerate_permutation_local_seeds(source, SeedAnchor::Source, search_config.max_entry),
     );
     extend_seed_family(
-        &mut best_by_matrix,
+        &mut best_by_seed,
         enumerate_permutation_local_seeds(target, SeedAnchor::Target, search_config.max_entry),
     );
-    best_by_matrix.into_values().collect()
+    best_by_seed.into_values().collect()
 }
 
 fn extend_seed_family(
-    best_by_matrix: &mut BTreeMap<SqMatrix<2>, LocalSeed>,
+    best_by_seed: &mut BTreeMap<(SqMatrix<2>, SeedAnchor), LocalSeed>,
     seeds: Vec<LocalSeed>,
 ) {
     for seed in seeds {
-        match best_by_matrix.get(&seed.matrix) {
+        let key = (seed.matrix.clone(), seed.anchor);
+        match best_by_seed.get(&key) {
             Some(existing) if !seed_is_better(&seed, existing) => {}
             _ => {
-                best_by_matrix.insert(seed.matrix.clone(), seed);
+                best_by_seed.insert(key, seed);
             }
         }
     }
@@ -567,51 +556,108 @@ fn enumerate_direct_same_dimension_successors(
     by_matrix.into_iter().collect()
 }
 
-fn build_blind_shortlist(
+fn attach_seed_scores(
     seeds: &[LocalSeed],
     score_by_matrix: &BTreeMap<SqMatrix<2>, PositiveConjugacySeedCandidate2x2>,
-    limit: usize,
-) -> Vec<PositiveConjugacySeedCandidate2x2> {
-    let mut ranked = seeds
+) -> Vec<RankedLocalSeed> {
+    seeds
         .iter()
-        .filter_map(|seed| score_by_matrix.get(&seed.matrix).cloned())
-        .collect::<Vec<_>>();
+        .filter_map(|seed| {
+            score_by_matrix
+                .get(&seed.matrix)
+                .map(|score| RankedLocalSeed {
+                    local_seed: seed.clone(),
+                    score: score.clone(),
+                })
+        })
+        .collect()
+}
+
+fn build_seeded_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<RankedLocalSeed> {
+    let mut ranked = seeds.to_vec();
     ranked.sort_by(|left, right| {
-        left.target_l1_distance
-            .cmp(&right.target_l1_distance)
-            .then(left.proposal_l1_distance.cmp(&right.proposal_l1_distance))
-            .then(left.nearest_proposal_rank.cmp(&right.nearest_proposal_rank))
-            .then(left.matrix.max_entry().cmp(&right.matrix.max_entry()))
-            .then(left.matrix.cmp(&right.matrix))
+        left.score
+            .proposal_l1_distance
+            .cmp(&right.score.proposal_l1_distance)
+            .then(
+                left.score
+                    .nearest_proposal_rank
+                    .cmp(&right.score.nearest_proposal_rank),
+            )
+            .then(
+                left.score
+                    .target_l1_distance
+                    .cmp(&right.score.target_l1_distance),
+            )
+            .then(left.local_seed.local_lag.cmp(&right.local_seed.local_lag))
+            .then(left.local_seed.anchor.cmp(&right.local_seed.anchor))
+            .then(
+                left.score
+                    .matrix
+                    .max_entry()
+                    .cmp(&right.score.matrix.max_entry()),
+            )
+            .then(left.score.matrix.cmp(&right.score.matrix))
+    });
+    ranked.truncate(limit);
+    ranked
+}
+
+fn build_blind_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<RankedLocalSeed> {
+    let mut ranked = seeds.to_vec();
+    ranked.sort_by(|left, right| {
+        left.score
+            .target_l1_distance
+            .cmp(&right.score.target_l1_distance)
+            .then(
+                left.score
+                    .proposal_l1_distance
+                    .cmp(&right.score.proposal_l1_distance),
+            )
+            .then(
+                left.score
+                    .nearest_proposal_rank
+                    .cmp(&right.score.nearest_proposal_rank),
+            )
+            .then(left.local_seed.local_lag.cmp(&right.local_seed.local_lag))
+            .then(left.local_seed.anchor.cmp(&right.local_seed.anchor))
+            .then(
+                left.score
+                    .matrix
+                    .max_entry()
+                    .cmp(&right.score.matrix.max_entry()),
+            )
+            .then(left.score.matrix.cmp(&right.score.matrix))
     });
     ranked.truncate(limit);
     ranked
 }
 
 fn evaluate_seed(
-    local_seed: &LocalSeed,
-    seed: &PositiveConjugacySeedCandidate2x2,
+    ranked_seed: &RankedLocalSeed,
     source: &SqMatrix<2>,
     target: &SqMatrix<2>,
     search_config: &SearchConfig,
 ) -> SeedEvaluation {
     let candidate_config = SearchConfig {
-        max_lag: search_config.max_lag.saturating_sub(local_seed.local_lag),
+        max_lag: search_config
+            .max_lag
+            .saturating_sub(ranked_seed.local_seed.local_lag),
         ..search_config.clone()
     };
-    let (result, telemetry) = match local_seed.anchor {
+    let (result, telemetry) = match ranked_seed.local_seed.anchor {
         SeedAnchor::Source => {
-            search_sse_2x2_with_telemetry(&local_seed.matrix, target, &candidate_config)
+            search_sse_2x2_with_telemetry(&ranked_seed.local_seed.matrix, target, &candidate_config)
         }
         SeedAnchor::Target => {
-            search_sse_2x2_with_telemetry(source, &local_seed.matrix, &candidate_config)
+            search_sse_2x2_with_telemetry(source, &ranked_seed.local_seed.matrix, &candidate_config)
         }
     };
     SeedEvaluation {
-        seed: seed.clone(),
-        anchor: local_seed.anchor,
-        local_lag: local_seed.local_lag,
-        path_families: local_seed.path_families.clone(),
+        seed: ranked_seed.score.clone(),
+        anchor: ranked_seed.local_seed.anchor,
+        local_lag: ranked_seed.local_seed.local_lag,
+        path_families: ranked_seed.local_seed.path_families.clone(),
         result,
         telemetry,
     }
@@ -825,5 +871,30 @@ mod tests {
                 .anchor,
             SeedAnchor::Target
         );
+    }
+
+    #[test]
+    fn extend_seed_family_keeps_both_anchors_for_the_same_matrix() {
+        let matrix = SqMatrix::new([[1, 2], [3, 1]]);
+        let mut best_by_seed = BTreeMap::<(SqMatrix<2>, SeedAnchor), LocalSeed>::new();
+        extend_seed_family(
+            &mut best_by_seed,
+            vec![
+                LocalSeed {
+                    matrix: matrix.clone(),
+                    anchor: SeedAnchor::Source,
+                    local_lag: 1,
+                    path_families: vec!["source_path".to_string()],
+                },
+                LocalSeed {
+                    matrix,
+                    anchor: SeedAnchor::Target,
+                    local_lag: 1,
+                    path_families: vec!["target_path".to_string()],
+                },
+            ],
+        );
+
+        assert_eq!(best_by_seed.len(), 2);
     }
 }

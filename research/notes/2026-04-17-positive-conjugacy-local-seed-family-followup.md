@@ -30,6 +30,11 @@ It is now the deduplicated union of:
 - source-side `2x2` permutation-conjugate seeds;
 - target-side `2x2` permutation-conjugate seeds.
 
+Deduplication is orientation-aware:
+
+- keep both `(matrix, source)` and `(matrix, target)` when the same exact seed
+  appears on both sides, because they induce different residual searches.
+
 Each seed now carries an anchor:
 
 - `source`: residual exact search is `seed -> B`;
