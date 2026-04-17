@@ -26,7 +26,7 @@ This follow-up stays measurement-first:
 Reproduce:
 
 ```bash
-timeout -k 10s 90s target/dist/research_harness \
+timeout -k 20s 190s target/dist/research_harness \
   --cases research/brix_ruiz_k4_graph_plus_structured_broad_beam_corpus_2026-04-17.json \
   --format json \
   > tmp/brix_ruiz_k4_graph_plus_structured_broad_beam_run_2026-04-17.json
