@@ -468,13 +468,15 @@ impl DynMatrix {
         }
 
         // Enumerate within-group permutations on the base-conjugated matrix.
-        // A permutation p is valid iff group_of[p[i]] == group_of[i] for all i.
+        // The groups are contiguous after the invariant sort, so only permute
+        // within each run instead of scanning all 5! orders and filtering.
+        let group_ranges = contiguous_group_ranges(&group_of);
+        if group_ranges.iter().all(|&(start, end)| end - start == 1) {
+            return DynMatrix::new(5, 5, best.to_vec());
+        }
+
         let base_conj = best;
-        let mut perm = [0usize, 1, 2, 3, 4];
-        while next_permutation(&mut perm) {
-            if !perm_respects_groups(&perm, &group_of) {
-                continue;
-            }
+        for_each_group_preserving_permutation(&group_ranges, &mut |perm| {
             let mut c = [0u32; 25];
             for i in 0..5 {
                 let pi = perm[i] * 5;
@@ -486,7 +488,7 @@ impl DynMatrix {
             if c < best {
                 best = c;
             }
-        }
+        });
         DynMatrix::new(5, 5, best.to_vec())
     }
 
@@ -580,13 +582,65 @@ impl PartialOrd for DynMatrix {
     }
 }
 
-/// Check whether a permutation only swaps within invariant-equivalent groups.
-fn perm_respects_groups(perm: &[usize; 5], group_of: &[u8; 5]) -> bool {
-    group_of[perm[0]] == group_of[0]
-        && group_of[perm[1]] == group_of[1]
-        && group_of[perm[2]] == group_of[2]
-        && group_of[perm[3]] == group_of[3]
-        && group_of[perm[4]] == group_of[4]
+fn contiguous_group_ranges(group_of: &[u8]) -> Vec<(usize, usize)> {
+    if group_of.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+    for idx in 1..group_of.len() {
+        if group_of[idx] != group_of[idx - 1] {
+            ranges.push((start, idx));
+            start = idx;
+        }
+    }
+    ranges.push((start, group_of.len()));
+    ranges
+}
+
+fn for_each_group_preserving_permutation<F>(group_ranges: &[(usize, usize)], f: &mut F)
+where
+    F: FnMut(&[usize]),
+{
+    let total_len = group_ranges.last().map(|&(_, end)| end).unwrap_or(0);
+    let mut perm: Vec<usize> = (0..total_len).collect();
+    recurse_group_preserving_permutation(0, group_ranges, &mut perm, f);
+}
+
+fn recurse_group_preserving_permutation<F>(
+    group_idx: usize,
+    group_ranges: &[(usize, usize)],
+    perm: &mut [usize],
+    f: &mut F,
+) where
+    F: FnMut(&[usize]),
+{
+    if group_idx == group_ranges.len() {
+        f(perm);
+        return;
+    }
+
+    let (start, end) = group_ranges[group_idx];
+    recurse_slice_permutations(end, start, perm, &mut |perm| {
+        recurse_group_preserving_permutation(group_idx + 1, group_ranges, perm, f);
+    });
+}
+
+fn recurse_slice_permutations<F>(end: usize, idx: usize, perm: &mut [usize], f: &mut F)
+where
+    F: FnMut(&mut [usize]),
+{
+    if idx == end {
+        f(perm);
+        return;
+    }
+
+    for swap_idx in idx..end {
+        perm.swap(idx, swap_idx);
+        recurse_slice_permutations(end, idx + 1, perm, f);
+        perm.swap(idx, swap_idx);
+    }
 }
 
 /// Check whether a permutation only swaps within invariant-equivalent groups.
