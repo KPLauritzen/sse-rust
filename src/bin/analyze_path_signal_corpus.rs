@@ -733,14 +733,21 @@ fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
         for pair in manifest.first_ingestion_slice.endpoint_case_only_pairs {
             let source = manifest_matrix(&pair.source)?.canonical_perm();
             let target = manifest_matrix(&pair.target)?.canonical_perm();
-            catalog.manifest_endpoint_cases_by_case_id.insert(
-                pair.case_id,
+            let case_id = pair.case_id;
+            let pair_id = pair.pair_id;
+            if let Some(existing) = catalog.manifest_endpoint_cases_by_case_id.insert(
+                case_id.clone(),
                 ManifestEndpointCase {
-                    pair_id: pair.pair_id,
+                    pair_id: pair_id.clone(),
                     source,
                     target,
                 },
-            );
+            ) {
+                return Err(format!(
+                    "duplicate witness manifest endpoint_case_only_pairs case_id {case_id}: {} and {pair_id}",
+                    existing.pair_id
+                ));
+            }
         }
     }
     if let Some(path) = &cli.family_benchmark_path {
@@ -758,9 +765,15 @@ fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
                     .family_by_pair_id
                     .insert(pair.pair_id.clone(), metadata.clone());
                 if let Some(benchmark_case_id) = pair.benchmark_case_id {
-                    catalog
+                    if let Some(existing_pair_id) = catalog
                         .benchmark_pair_by_case_id
-                        .insert(benchmark_case_id.clone(), pair.pair_id);
+                        .insert(benchmark_case_id.clone(), pair.pair_id.clone())
+                    {
+                        return Err(format!(
+                            "duplicate family benchmark benchmark_case_id {benchmark_case_id}: {existing_pair_id} and {}",
+                            pair.pair_id
+                        ));
+                    }
                     catalog
                         .benchmark_case_ids_by_role
                         .entry(metadata.benchmark_role.clone())
@@ -770,8 +783,6 @@ fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
             }
         }
     }
-
-    validate_manifest_catalog_consistency(&catalog)?;
 
     Ok(catalog)
 }
@@ -892,6 +903,10 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
     let requested_benchmark_case_ids = selected_benchmark_case_ids(
         &cli.benchmark_roles,
         &pair_catalog.benchmark_case_ids_by_role,
+    )?;
+    validate_requested_manifest_catalog_consistency(
+        pair_catalog,
+        requested_benchmark_case_ids.as_ref(),
     )?;
     let mut loaded_case_ids = BTreeSet::new();
 
@@ -1026,8 +1041,19 @@ fn selected_benchmark_case_ids(
     Ok(Some(selected))
 }
 
-fn validate_manifest_catalog_consistency(catalog: &PairCatalog) -> Result<(), String> {
-    for (case_id, pair_id) in &catalog.benchmark_pair_by_case_id {
+fn validate_requested_manifest_catalog_consistency(
+    catalog: &PairCatalog,
+    requested_benchmark_case_ids: Option<&BTreeSet<String>>,
+) -> Result<(), String> {
+    let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids else {
+        return Ok(());
+    };
+    for case_id in requested_benchmark_case_ids {
+        let Some(pair_id) = catalog.benchmark_pair_by_case_id.get(case_id) else {
+            return Err(format!(
+                "requested benchmark case {case_id} is missing from the family benchmark catalog"
+            ));
+        };
         let Some(manifest_case) = catalog.manifest_endpoint_cases_by_case_id.get(case_id) else {
             return Err(format!(
                 "family benchmark case {case_id} for pair {pair_id} is missing from witness manifest endpoint_case_only_pairs"
@@ -1493,9 +1519,11 @@ fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
 mod tests {
     use super::{
         case_matrix, effective_endpoint_move_family_policy, matches_research_case_filters,
-        parse_cli, selected_benchmark_case_ids, CampaignConfig, Cli, JsonSearchConfig,
+        parse_cli, selected_benchmark_case_ids, validate_requested_manifest_catalog_consistency,
+        CampaignConfig, Cli, FamilyMetadata, JsonSearchConfig, ManifestEndpointCase, PairCatalog,
         ResearchCase,
     };
+    use sse_core::matrix::DynMatrix;
     use sse_core::types::MoveFamilyPolicy;
     use std::collections::{BTreeSet, HashMap};
 
@@ -1639,6 +1667,54 @@ mod tests {
         let err = selected_benchmark_case_ids(&["missing".to_string()], &HashMap::new())
             .expect_err("unknown role should fail");
         assert!(err.contains("unknown --benchmark-role missing"));
+    }
+
+    #[test]
+    fn requested_manifest_catalog_consistency_is_scoped_to_selected_cases() {
+        let mut catalog = PairCatalog {
+            benchmark_pair_by_case_id: HashMap::from([
+                ("keep_me".to_string(), "pair_keep".to_string()),
+                ("skip_me".to_string(), "pair_skip".to_string()),
+            ]),
+            family_by_pair_id: HashMap::from([
+                (
+                    "pair_keep".to_string(),
+                    FamilyMetadata {
+                        evaluation_family_id: "heldout".to_string(),
+                        benchmark_role: "heldout_benchmark".to_string(),
+                    },
+                ),
+                (
+                    "pair_skip".to_string(),
+                    FamilyMetadata {
+                        evaluation_family_id: "heldout".to_string(),
+                        benchmark_role: "heldout_benchmark".to_string(),
+                    },
+                ),
+            ]),
+            ..PairCatalog::default()
+        };
+        catalog.manifest_endpoint_cases_by_case_id.insert(
+            "keep_me".to_string(),
+            ManifestEndpointCase {
+                pair_id: "pair_keep".to_string(),
+                source: DynMatrix::new(1, 1, vec![1]),
+                target: DynMatrix::new(1, 1, vec![1]),
+            },
+        );
+
+        validate_requested_manifest_catalog_consistency(
+            &catalog,
+            Some(&BTreeSet::from(["keep_me".to_string()])),
+        )
+        .expect("selected case should validate");
+
+        let err = validate_requested_manifest_catalog_consistency(
+            &catalog,
+            Some(&BTreeSet::from(["skip_me".to_string()])),
+        )
+        .expect_err("missing selected case should fail");
+        assert!(err.contains("family benchmark case skip_me"));
     }
 
     #[test]
