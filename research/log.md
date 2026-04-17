@@ -897,3 +897,17 @@
   bounded measurement lane without changing the Goal 3 answer: graph-only still
   shows no useful `k=4` reach on this endpoint. Details are in
   `research/notes/2026-04-17-brix-ruiz-k4-graph-only-campaign.md`.
+
+- `working tree` Refreshed the durable mixed held-out endpoint layer-contrast
+  artifact across all three non-Brix families.
+  Kept. Rebuilt only `analyze_path_signal_corpus` and reran the mixed endpoint
+  artifact directly on `riedel_baker_k4/k6/k8/k10/k12`,
+  `lind_marcus_a_to_c`, and
+  `full_2_shift_higher_block_1x1_to_4x4`, writing
+  `research/layer_contrast_signal_corpus_non_brix_mixed_heldout_2026-04-17.json`.
+  The refreshed held-out artifact now has all `3 / 3` non-Brix families
+  present and rankable, `7` rankable held-out pairs, `45` ranked held-out
+  observations, and `0` unranked solved held-out pairs, so it is
+  benchmark-meaningful under
+  `research/ranking_signal_family_benchmark_v1.json`. Details are in
+  `research/notes/2026-04-17-mixed-heldout-layer-contrast-refresh.md`.
