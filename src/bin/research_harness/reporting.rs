@@ -227,8 +227,8 @@ fn push_deepening_schedules(out: &mut String, deepening_schedules: &[DeepeningSc
             }
             out.push('\n');
         }
+        out.push('\n');
     }
-    out.push('\n');
 }
 
 fn push_strategies(out: &mut String, summary: &HarnessSummary) {

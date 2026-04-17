@@ -2551,6 +2551,9 @@ mod tests {
         assert!(pretty.contains("- deepening-probe: attempts=3"));
         assert!(pretty
             .contains("attempt=1/3 order=Some(10) deepening-probe__deepening_1_lag1_dim2_entry3"));
+        assert!(pretty.contains(
+            "deepening-probe__deepening_1_lag1_dim2_entry3 max_lag=1 max_dim=2 max_entry=3 outcome=unknown target_hit=false current_lag=None best_known_lag=None improved_best=false elapsed=1ms\n  attempt=2/3"
+        ));
         assert!(pretty.contains("order=10 deepening-probe__deepening_1_lag1_dim2_entry3"));
         assert!(pretty.contains("order=11 deepening-probe__deepening_2_lag2_dim2_entry3"));
         assert!(pretty.contains("order=12 deepening-probe__deepening_3_lag3_dim2_entry4"));
