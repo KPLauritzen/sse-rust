@@ -1,0 +1,245 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam128_lag20_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam128 on Brix-Ruiz k=4 at lag20/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 20,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 128,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam128_dim4",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam128_lag30_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam128 on Brix-Ruiz k=4 at lag30/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 30,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 128,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 15000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam128_dim4",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam128_lag40_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam128 on Brix-Ruiz k=4 at lag40/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 40,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 128,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 18000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam128_dim4",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam256_lag20_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam256 on Brix-Ruiz k=4 at lag20/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 20,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 256,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 15000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam256_dim4",
+        "schedule_order": 40
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam256_lag30_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam256 on Brix-Ruiz k=4 at lag30/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 30,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 256,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 18000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam256_dim4",
+        "schedule_order": 50
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam256_lag40_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam256 on Brix-Ruiz k=4 at lag40/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 40,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 256,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 24000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam256_dim4",
+        "schedule_order": 60
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam512_lag20_dim4_entry12",
+      "description": "Broad-beam follow-up: graph_plus_structured beam512 on Brix-Ruiz k=4 at lag20/dim4/entry12.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 20,
+        "max_intermediate_dim": 4,
+        "max_entry": 12,
+        "frontier_mode": "beam",
+        "beam_width": 512,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 24000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim4", "cap-extreme"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_beam512_dim4_probe",
+        "schedule_order": 70
+      }
+    },
+    {
+      "id": "brix_ruiz_k4__graph_plus_structured__beam64_lag12_dim5_entry10_timeout30s",
+      "description": "Broad-beam follow-up control: graph_plus_structured beam64 on Brix-Ruiz k=4 at lag12/dim5/entry10 with a 30s timeout.",
+      "required": false,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k4",
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 5,
+        "max_entry": 10,
+        "frontier_mode": "beam",
+        "beam_width": 64,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 30000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["brix-ruiz", "k4", "graph-plus-structured", "broad-beam", "dim5", "long-timeout-control"],
+      "campaign": {
+        "id": "brix_ruiz_k4_graph_plus_structured_broad_beam",
+        "strategy": "graph_plus_structured_dim5_timeout_control",
+        "schedule_order": 80
+      }
+    }
+  ]
+}
