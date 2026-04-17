@@ -402,8 +402,10 @@ fn parse_matrix(s: &str) -> Result<DynMatrix, String> {
         .split_once(':')
         .ok_or_else(|| format!("expected NxN:... matrix, got '{s}'"))?;
     let (rows, cols) = parse_dims(dims)?;
-    if rows != cols {
-        return Err(format!("matrix must be square, got {rows}x{cols}"));
+    if (rows, cols) != (3, 3) {
+        return Err(format!(
+            "profile_sq3_breakdown only accepts 3x3 matrices, got {rows}x{cols}"
+        ));
     }
     let nums = parse_entries(entries)?;
     if nums.len() != rows * cols {
