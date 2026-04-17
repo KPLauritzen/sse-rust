@@ -2,6 +2,7 @@ use crate::matrix::{DynMatrix, SqMatrix};
 use crate::quadratic::{QuadraticOrderProfile, ReducedForm};
 
 const GENERIC_SQUARE_TRACE_INVARIANT_MAX_POWER: usize = 4;
+const GENERIC_SQUARE_BOWEN_FRANKS_MAX_DIM: usize = 4;
 
 /// Determinant-band classification for the narrow 2x2 positive literature
 /// territory around Baker (1983) and Choe-Shin (1997).
@@ -316,6 +317,35 @@ pub fn check_square_power_trace_invariants(a: &DynMatrix, b: &DynMatrix) -> Opti
     None
 }
 
+/// Check the Bowen-Franks group `coker(I - A)` for same-dimension square
+/// endpoints in the current bounded Goal 4 lane.
+///
+/// This intentionally stays narrow: for square endpoints up to `4x4`, the
+/// Smith normal form of `I - A` is cheap to recover from minor gcds, and it
+/// adds exact integer-module information not seen by the current power traces.
+pub fn check_same_dimension_square_bowen_franks_invariants(
+    a: &DynMatrix,
+    b: &DynMatrix,
+) -> Option<String> {
+    debug_assert!(a.is_square());
+    debug_assert!(b.is_square());
+
+    if a.rows != b.rows || a.rows == 0 || a.rows > GENERIC_SQUARE_BOWEN_FRANKS_MAX_DIM {
+        return None;
+    }
+
+    let bf_a = bowen_franks_invariants_dyn(a);
+    let bf_b = bowen_franks_invariants_dyn(b);
+    if bf_a != bf_b {
+        return Some(format!(
+            "Bowen-Franks group mismatch: {:?} vs {:?}",
+            bf_a, bf_b
+        ));
+    }
+
+    None
+}
+
 fn square_power_traces(m: &DynMatrix, max_power: usize) -> Vec<u64> {
     debug_assert!(m.is_square());
     let mut traces = Vec::with_capacity(max_power);
@@ -334,6 +364,117 @@ fn power_trace_mismatch_reason(power: usize) -> String {
         1 => "trace invariant mismatch".to_string(),
         2 => "trace(M^2) invariant mismatch".to_string(),
         _ => format!("trace(M^{power}) invariant mismatch"),
+    }
+}
+
+fn bowen_franks_invariants_dyn(matrix: &DynMatrix) -> Vec<i64> {
+    let identity_minus = (0..matrix.rows)
+        .map(|row| {
+            (0..matrix.cols)
+                .map(|col| {
+                    let diagonal = if row == col { 1i64 } else { 0i64 };
+                    diagonal - matrix.get(row, col) as i64
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    smith_normal_form_invariants_i64(&identity_minus)
+}
+
+fn smith_normal_form_invariants_i64(matrix: &[Vec<i64>]) -> Vec<i64> {
+    let n = matrix.len();
+    debug_assert!(matrix.iter().all(|row| row.len() == n));
+
+    let mut deltas = Vec::with_capacity(n + 1);
+    deltas.push(1u64);
+    let mut rank = 0usize;
+    for minor_size in 1..=n {
+        let delta = gcd_of_minors_i64(matrix, minor_size);
+        if delta != 0 {
+            rank = minor_size;
+        }
+        deltas.push(delta);
+    }
+
+    let mut invariants = Vec::with_capacity(n);
+    let mut previous_delta = 1u64;
+    for &delta in deltas.iter().take(rank + 1).skip(1) {
+        invariants.push((delta / previous_delta) as i64);
+        previous_delta = delta;
+    }
+    invariants.resize(n, 0);
+    invariants
+}
+
+fn gcd_of_minors_i64(matrix: &[Vec<i64>], minor_size: usize) -> u64 {
+    let combinations = index_combinations(matrix.len(), minor_size);
+    let mut gcd_acc = 0u64;
+
+    for row_indices in &combinations {
+        for col_indices in &combinations {
+            let minor = row_indices
+                .iter()
+                .map(|&row| col_indices.iter().map(|&col| matrix[row][col]).collect())
+                .collect::<Vec<Vec<i64>>>();
+            gcd_acc = gcd(gcd_acc, determinant_i64(&minor).unsigned_abs());
+        }
+    }
+
+    gcd_acc
+}
+
+fn index_combinations(n: usize, choose: usize) -> Vec<Vec<usize>> {
+    if choose == 0 {
+        return vec![Vec::new()];
+    }
+    if choose > n {
+        return Vec::new();
+    }
+
+    let mut current = (0..choose).collect::<Vec<_>>();
+    let mut combinations = Vec::new();
+
+    loop {
+        combinations.push(current.clone());
+
+        let Some(pivot) = (0..choose)
+            .rev()
+            .find(|&idx| current[idx] != idx + n - choose)
+        else {
+            break;
+        };
+        current[pivot] += 1;
+        for idx in (pivot + 1)..choose {
+            current[idx] = current[idx - 1] + 1;
+        }
+    }
+
+    combinations
+}
+
+fn determinant_i64(matrix: &[Vec<i64>]) -> i64 {
+    match matrix.len() {
+        0 => 1,
+        1 => matrix[0][0],
+        2 => matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0],
+        _ => matrix[0]
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| **entry != 0)
+            .map(|(col, &entry)| {
+                let minor = matrix[1..]
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .enumerate()
+                            .filter_map(|(idx, &value)| (idx != col).then_some(value))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let sign = if col % 2 == 0 { 1 } else { -1 };
+                sign * entry * determinant_i64(&minor)
+            })
+            .sum(),
     }
 }
 
@@ -598,6 +739,29 @@ mod tests {
         assert_eq!(
             check_square_power_trace_invariants(&a, &b),
             Some("trace(M^3) invariant mismatch".to_string())
+        );
+    }
+
+    #[test]
+    fn test_same_dimension_square_bowen_franks_adds_information_beyond_traces() {
+        let a = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 1, 0, 0, 0, 1]);
+        let b = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 1, 0, 0, 1, 1]);
+
+        assert_eq!(check_square_power_trace_invariants(&a, &b), None);
+        assert_eq!(
+            check_same_dimension_square_bowen_franks_invariants(&a, &b),
+            Some("Bowen-Franks group mismatch: [1, 0, 0] vs [1, 1, 0]".to_string())
+        );
+    }
+
+    #[test]
+    fn test_same_dimension_square_bowen_franks_skips_mixed_dimensions() {
+        let a = DynMatrix::new(2, 2, vec![2, 0, 0, 1]);
+        let b = DynMatrix::new(3, 3, vec![2, 0, 0, 0, 1, 0, 0, 0, 0]);
+
+        assert_eq!(
+            check_same_dimension_square_bowen_franks_invariants(&a, &b),
+            None
         );
     }
 
@@ -971,6 +1135,12 @@ mod tests {
         let (d1, d2) = smith_normal_form_2x2_i64(&m);
         assert_eq!(d1, 2);
         assert_eq!(d2, -4);
+    }
+
+    #[test]
+    fn test_smith_normal_form_invariants_i64_handles_rank_drop() {
+        let matrix = vec![vec![1, 1, 0], vec![0, 0, 0], vec![0, 0, 1]];
+        assert_eq!(smith_normal_form_invariants_i64(&matrix), vec![1, 1, 0]);
     }
 
     #[test]

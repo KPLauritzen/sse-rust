@@ -7,7 +7,10 @@ use crate::graph_moves::{
     enumerate_graph_move_successor_nodes, enumerate_graph_proposals,
     find_exact_graph_move_witness_between, GraphProposal, SameFuturePastSignatureGap,
 };
-use crate::invariants::{check_invariants_2x2, check_square_power_trace_invariants};
+use crate::invariants::{
+    check_invariants_2x2, check_same_dimension_square_bowen_franks_invariants,
+    check_square_power_trace_invariants,
+};
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
@@ -326,6 +329,16 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     }
 
     if let Some(reason) = check_square_power_trace_invariants(a, b) {
+        telemetry.invariant_filtered = true;
+        return finish_search_dyn(
+            observer,
+            &request,
+            DynSseResult::NotEquivalent(reason),
+            telemetry,
+        );
+    }
+
+    if let Some(reason) = check_same_dimension_square_bowen_franks_invariants(a, b) {
         telemetry.invariant_filtered = true;
         return finish_search_dyn(
             observer,
@@ -6743,6 +6756,26 @@ mod tests {
         match result {
             DynSseResult::NotEquivalent(reason) => {
                 assert_eq!(reason, "trace(M^3) invariant mismatch");
+            }
+            other => panic!("expected invariant rejection, got {other:?}"),
+        }
+        assert!(telemetry.invariant_filtered);
+        assert_eq!(telemetry.frontier_nodes_expanded, 0);
+        assert!(telemetry.layers.is_empty());
+    }
+
+    #[test]
+    fn test_search_sse_dyn_rejects_same_dimension_bowen_franks_mismatch() {
+        let a = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 1, 0, 0, 0, 1]);
+        let b = DynMatrix::new(3, 3, vec![0, 0, 0, 0, 1, 0, 0, 1, 1]);
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&a, &b, &default_config());
+
+        match result {
+            DynSseResult::NotEquivalent(reason) => {
+                assert_eq!(
+                    reason,
+                    "Bowen-Franks group mismatch: [1, 0, 0] vs [1, 1, 0]"
+                );
             }
             other => panic!("expected invariant rejection, got {other:?}"),
         }
