@@ -327,10 +327,12 @@ pub fn check_same_dimension_square_bowen_franks_invariants(
     a: &DynMatrix,
     b: &DynMatrix,
 ) -> Option<String> {
-    debug_assert!(a.is_square());
-    debug_assert!(b.is_square());
-
-    if a.rows != b.rows || a.rows == 0 || a.rows > GENERIC_SQUARE_BOWEN_FRANKS_MAX_DIM {
+    if !a.is_square()
+        || !b.is_square()
+        || a.rows != b.rows
+        || a.rows == 0
+        || a.rows > GENERIC_SQUARE_BOWEN_FRANKS_MAX_DIM
+    {
         return None;
     }
 
