@@ -1,0 +1,121 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "riedel_baker_k12__graph_only__initial_probe",
+      "description": "Bounded Riedel/Baker initial probe: k=12 under graph-only moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "policy-reach", "graph-only", "initial-probe"],
+      "campaign": {
+        "id": "riedel_baker_graph_only_vs_mixed_initial",
+        "strategy": "graph-only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k12__mixed__initial_probe",
+      "description": "Bounded Riedel/Baker initial probe: k=12 under mixed moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "policy-reach", "mixed", "initial-probe"],
+      "campaign": {
+        "id": "riedel_baker_graph_only_vs_mixed_initial",
+        "strategy": "mixed",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k14__graph_only__initial_probe",
+      "description": "Bounded Riedel/Baker initial probe: k=14 under graph-only moves.",
+      "required": false,
+      "a": [[14, 2], [1, 14]],
+      "b": [[13, 1], [1, 15]],
+      "config": {
+        "max_lag": 14,
+        "max_intermediate_dim": 3,
+        "max_entry": 14,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "policy-reach", "graph-only", "initial-probe"],
+      "campaign": {
+        "id": "riedel_baker_graph_only_vs_mixed_initial",
+        "strategy": "graph-only",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "riedel_baker_k14__mixed__initial_probe",
+      "description": "Bounded Riedel/Baker initial probe: k=14 under mixed moves.",
+      "required": false,
+      "a": [[14, 2], [1, 14]],
+      "b": [[13, 1], [1, 15]],
+      "config": {
+        "max_lag": 14,
+        "max_intermediate_dim": 3,
+        "max_entry": 14,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "policy-reach", "mixed", "initial-probe"],
+      "campaign": {
+        "id": "riedel_baker_graph_only_vs_mixed_initial",
+        "strategy": "mixed",
+        "schedule_order": 40
+      }
+    }
+  ]
+}
