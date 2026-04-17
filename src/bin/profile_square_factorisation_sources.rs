@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use sse_core::factorisation::visit_all_factorisations_with_family;
+use sse_core::factorisation::{
+    square_factorisation_3x3_permutation_orbit_key, visit_all_factorisations_with_family,
+};
 use sse_core::matrix::DynMatrix;
 use sse_core::search::execute_search_request_and_observer;
 use sse_core::search_observer::{SearchEvent, SearchObserver};
@@ -24,6 +26,7 @@ struct SourceStats {
 
 struct RawSquareSummary {
     callbacks: usize,
+    unique_permutation_orbits: usize,
     unique_exact_successors: usize,
     unique_canonical_successors: usize,
     elapsed_ms: u128,
@@ -36,6 +39,7 @@ struct RawBucketSummary {
     post_discovered_edges: usize,
     post_seen_collisions: usize,
     raw_callbacks: usize,
+    raw_permutation_orbits: usize,
     raw_exact_successors: usize,
     raw_canonical_successors: usize,
     raw_elapsed_ms: u128,
@@ -122,7 +126,7 @@ fn main() -> Result<(), String> {
             .unwrap_or_default();
         let raw_square = measure_raw_square_factorisations(&matrix, 4);
         println!(
-            "{}. total={} discovered={} seen={} meets={} approx={} raw_sq={} raw_exact={} raw_canon={} raw_ms={} features={} families={} matrix={}",
+            "{}. total={} discovered={} seen={} meets={} approx={} raw_sq={} raw_orbit={} raw_exact={} raw_canon={} raw_ms={} features={} families={} matrix={}",
             idx + 1,
             stats.total_edges,
             stats.discovered_edges,
@@ -130,6 +134,7 @@ fn main() -> Result<(), String> {
             stats.exact_meets,
             stats.approximate_hits,
             raw_square.callbacks,
+            raw_square.unique_permutation_orbits,
             raw_square.unique_exact_successors,
             raw_square.unique_canonical_successors,
             raw_square.elapsed_ms,
@@ -186,6 +191,7 @@ fn main() -> Result<(), String> {
         entry.post_discovered_edges += stats.discovered_edges;
         entry.post_seen_collisions += stats.seen_collisions;
         entry.raw_callbacks += raw_square.callbacks;
+        entry.raw_permutation_orbits += raw_square.unique_permutation_orbits;
         entry.raw_exact_successors += raw_square.unique_exact_successors;
         entry.raw_canonical_successors += raw_square.unique_canonical_successors;
         entry.raw_elapsed_ms += raw_square.elapsed_ms;
@@ -208,8 +214,9 @@ fn main() -> Result<(), String> {
     println!("Raw square-factorisation buckets");
     for (bucket, stats) in raw_bucket_rows.into_iter().take(15) {
         println!(
-            "raw_callbacks={} raw_exact={} raw_canon={} raw_ms={} post_total={} post_discovered={} post_seen={} sources={} bucket={}",
+            "raw_callbacks={} raw_orbit={} raw_exact={} raw_canon={} raw_ms={} post_total={} post_discovered={} post_seen={} sources={} bucket={}",
             stats.raw_callbacks,
+            stats.raw_permutation_orbits,
             stats.raw_exact_successors,
             stats.raw_canonical_successors,
             stats.raw_elapsed_ms,
@@ -319,6 +326,7 @@ fn format_family_summary(families: &BTreeMap<&'static str, SourceStats>) -> Stri
 fn measure_raw_square_factorisations(matrix: &DynMatrix, sq3_cap: u32) -> RawSquareSummary {
     let started = Instant::now();
     let mut callbacks = 0usize;
+    let mut permutation_orbits = BTreeSet::new();
     let mut exact_successors = BTreeSet::new();
     let mut canonical_successors = BTreeSet::new();
     visit_all_factorisations_with_family(matrix, 3, sq3_cap, |family, u, v| {
@@ -326,12 +334,16 @@ fn measure_raw_square_factorisations(matrix: &DynMatrix, sq3_cap: u32) -> RawSqu
             return;
         }
         callbacks += 1;
+        if let Some(key) = square_factorisation_3x3_permutation_orbit_key(&u, &v) {
+            permutation_orbits.insert(key);
+        }
         let next = v.mul(&u);
         exact_successors.insert(next.data.clone());
         canonical_successors.insert(next.canonical_perm().data);
     });
     RawSquareSummary {
         callbacks,
+        unique_permutation_orbits: permutation_orbits.len(),
         unique_exact_successors: exact_successors.len(),
         unique_canonical_successors: canonical_successors.len(),
         elapsed_ms: started.elapsed().as_millis(),

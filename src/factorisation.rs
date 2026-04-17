@@ -3749,6 +3749,64 @@ pub fn visit_all_factorisations_with_family<F>(
     );
 }
 
+/// Canonicalize a 3x3 square-factorisation witness pair up to simultaneous
+/// permutation of the intermediate basis.
+///
+/// If `(U', V') = (U P, P^{-1} V)` for a 3x3 permutation matrix `P`, then
+/// `U'V' = UV` and `V'U'` is permutation-similar to `VU`. This orbit key lets
+/// callers drop exact duplicate raw witnesses before materializing `VU`.
+pub fn square_factorisation_3x3_permutation_orbit_key(
+    u: &DynMatrix,
+    v: &DynMatrix,
+) -> Option<[u32; 18]> {
+    if u.rows != 3 || u.cols != 3 || v.rows != 3 || v.cols != 3 {
+        return None;
+    }
+
+    const PERMS: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+
+    let mut best = permuted_square_factorisation_3x3_pair_data(u, v, &PERMS[0]);
+    for perm in PERMS.iter().skip(1) {
+        let candidate = permuted_square_factorisation_3x3_pair_data(u, v, perm);
+        if candidate < best {
+            best = candidate;
+        }
+    }
+    Some(best)
+}
+
+fn permuted_square_factorisation_3x3_pair_data(
+    u: &DynMatrix,
+    v: &DynMatrix,
+    perm: &[usize; 3],
+) -> [u32; 18] {
+    let mut data = [0u32; 18];
+
+    for row in 0..3 {
+        let base = row * 3;
+        data[base] = u.get(row, perm[0]);
+        data[base + 1] = u.get(row, perm[1]);
+        data[base + 2] = u.get(row, perm[2]);
+    }
+
+    for row in 0..3 {
+        let source_row = perm[row];
+        let base = 9 + row * 3;
+        data[base] = v.get(source_row, 0);
+        data[base + 1] = v.get(source_row, 1);
+        data[base + 2] = v.get(source_row, 2);
+    }
+
+    data
+}
+
 /// Unified factorisation dispatcher for square matrices.
 ///
 /// Family selection is described by dimension-grouped descriptors so policy
@@ -4042,6 +4100,53 @@ mod tests {
         });
 
         assert!(found, "expected diagonal refactorization factorisation");
+    }
+
+    #[test]
+    fn test_square_factorisation_3x3_permutation_orbit_key_collapses_middle_basis_renaming() {
+        let u = DynMatrix::new(3, 3, vec![2, 1, 0, 0, 1, 1, 1, 0, 2]);
+        let v = DynMatrix::new(3, 3, vec![1, 0, 1, 2, 1, 0, 0, 1, 1]);
+        let perm = [1usize, 2, 0];
+        let permuted_u = DynMatrix::new(
+            3,
+            3,
+            vec![
+                u.get(0, perm[0]),
+                u.get(0, perm[1]),
+                u.get(0, perm[2]),
+                u.get(1, perm[0]),
+                u.get(1, perm[1]),
+                u.get(1, perm[2]),
+                u.get(2, perm[0]),
+                u.get(2, perm[1]),
+                u.get(2, perm[2]),
+            ],
+        );
+        let permuted_v = DynMatrix::new(
+            3,
+            3,
+            vec![
+                v.get(perm[0], 0),
+                v.get(perm[0], 1),
+                v.get(perm[0], 2),
+                v.get(perm[1], 0),
+                v.get(perm[1], 1),
+                v.get(perm[1], 2),
+                v.get(perm[2], 0),
+                v.get(perm[2], 1),
+                v.get(perm[2], 2),
+            ],
+        );
+
+        assert_eq!(u.mul(&v), permuted_u.mul(&permuted_v));
+        assert_eq!(
+            v.mul(&u).canonical_perm(),
+            permuted_v.mul(&permuted_u).canonical_perm()
+        );
+        assert_eq!(
+            square_factorisation_3x3_permutation_orbit_key(&u, &v),
+            square_factorisation_3x3_permutation_orbit_key(&permuted_u, &permuted_v)
+        );
     }
 
     #[test]

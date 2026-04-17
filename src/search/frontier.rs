@@ -2,7 +2,9 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
-use crate::factorisation::visit_factorisations_with_family_for_policy;
+use crate::factorisation::{
+    square_factorisation_3x3_permutation_orbit_key, visit_factorisations_with_family_for_policy,
+};
 use crate::graph_moves::{
     enumerate_graph_move_successors, same_future_past_signature, SameFuturePastSignature,
 };
@@ -319,6 +321,7 @@ fn expand_frontier_node(
         .expect("frontier node should have an original matrix");
     let mut expansions = Vec::new();
     let mut seen_successors = HashSet::new();
+    let mut seen_square_factorisation_orbits = HashSet::new();
     let mut stats = FrontierExpansionStats {
         frontier_nodes: 1,
         factorisation_calls: 1,
@@ -361,6 +364,12 @@ fn expand_frontier_node(
                     .candidates_generated += 1;
                 stats.factorisations_enumerated += 1;
                 stats.candidates_generated += 1;
+                if move_family == "square_factorisation_3x3"
+                    && square_factorisation_3x3_permutation_orbit_key(&u, &v)
+                        .is_some_and(|key| !seen_square_factorisation_orbits.insert(key))
+                {
+                    return;
+                }
                 let next = v.mul(&u);
 
                 if next.rows > settings.max_intermediate_dim {
