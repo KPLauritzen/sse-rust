@@ -219,6 +219,16 @@
   `research/notes/2026-04-16-dynamic-mixed-endpoint-layer-events.md` and
   `research/layer_contrast_signal_corpus_lind_marcus_2026-04-16.json`.
 
+## 2026-04-17 Graph-Proposal Shortlist Follow-up
+
+- `working tree` Broadened graph-proposal shortlist evaluation beyond the first
+  waypoint seam.
+  Kept as evidence. The original `brix_ruiz_k3` `guide:1 -> guide:15` round
+  still produces a real non-blind shortlist win, but the added Brix-Ruiz
+  waypoint and endpoint-derived controls plus generic-permutation family
+  controls collapse back to blind one-step behavior. Durable note:
+  `research/notes/2026-04-17-graph-proposal-shortlist-beyond-one-seam.md`.
+
 ## 2026-04-17 Exact Obstruction Follow-up
 
 - `working tree` Rejected quotient/support source-only hard gates for singular `square_factorisation_3x3`.
