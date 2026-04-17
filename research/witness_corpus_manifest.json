@@ -197,7 +197,17 @@
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [4, 2, 1, 4]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [3, 1, 1, 5]
+        }
       },
       {
         "pair_id": "riedel_baker_k6",
@@ -205,7 +215,17 @@
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [6, 2, 1, 6]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [5, 1, 1, 7]
+        }
       },
       {
         "pair_id": "riedel_baker_k8",
@@ -213,7 +233,17 @@
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [8, 2, 1, 8]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [7, 1, 1, 9]
+        }
       },
       {
         "pair_id": "riedel_baker_k10",
@@ -221,7 +251,17 @@
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [10, 2, 1, 10]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [9, 1, 1, 11]
+        }
       },
       {
         "pair_id": "riedel_baker_k12",
@@ -229,7 +269,17 @@
         "family_tags": ["riedel_baker", "literature_positive", "lag_sensitive"],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 2,
+          "cols": 2,
+          "data": [12, 2, 1, 12]
+        },
+        "target": {
+          "rows": 2,
+          "cols": 2,
+          "data": [11, 1, 1, 13]
+        }
       },
       {
         "pair_id": "lind_marcus_a_to_c",
@@ -242,7 +292,17 @@
         ],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 3,
+          "cols": 3,
+          "data": [1, 1, 0, 0, 0, 1, 1, 1, 1]
+        },
+        "target": {
+          "rows": 1,
+          "cols": 1,
+          "data": [2]
+        }
       },
       {
         "pair_id": "full_2_shift_higher_block_1x1_to_4x4",
@@ -254,7 +314,17 @@
         ],
         "evidence_status": "endpoint_case_only",
         "case_source": "research/cases.json",
-        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md"
+        "source_note": "research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md",
+        "source": {
+          "rows": 1,
+          "cols": 1,
+          "data": [2]
+        },
+        "target": {
+          "rows": 4,
+          "cols": 4,
+          "data": [1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1]
+        }
       }
     ]
   },

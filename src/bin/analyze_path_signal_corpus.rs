@@ -83,6 +83,12 @@ fn main() -> Result<(), String> {
         "          explicit_search_mode_override={}",
         cli.search_mode_explicit
     );
+    if !cli.benchmark_roles.is_empty() {
+        println!(
+            "          benchmark_roles={}",
+            cli.benchmark_roles.join(",")
+        );
+    }
     println!("  summary:");
     for (name, summary) in &summaries {
         println!(
@@ -136,6 +142,7 @@ struct Cli {
     cases_paths: Vec<PathBuf>,
     case_ids: Vec<String>,
     campaign_ids: Vec<String>,
+    benchmark_roles: Vec<String>,
     min_gap: usize,
     max_gap: usize,
     max_cases: usize,
@@ -187,6 +194,9 @@ struct CaseAnalysis {
 struct PairCatalog {
     path_pairs_by_endpoints: HashMap<String, String>,
     family_by_pair_id: HashMap<String, FamilyMetadata>,
+    benchmark_pair_by_case_id: HashMap<String, String>,
+    benchmark_case_ids_by_role: HashMap<String, BTreeSet<String>>,
+    manifest_endpoint_cases_by_case_id: HashMap<String, ManifestEndpointCase>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -205,6 +215,13 @@ struct PairMetadata {
 struct FamilyMetadata {
     evaluation_family_id: String,
     benchmark_role: String,
+}
+
+#[derive(Clone, Debug)]
+struct ManifestEndpointCase {
+    pair_id: String,
+    source: DynMatrix,
+    target: DynMatrix,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -265,6 +282,7 @@ struct ArtifactConfig {
     cases_paths: Vec<PathBuf>,
     case_ids: Vec<String>,
     campaign_ids: Vec<String>,
+    benchmark_roles: Vec<String>,
     min_gap: usize,
     max_gap: usize,
     max_cases: usize,
@@ -332,11 +350,21 @@ struct WitnessCorpusManifest {
 struct WitnessCorpusFirstSlice {
     #[serde(default)]
     validated_pairs: Vec<WitnessCorpusPair>,
+    #[serde(default)]
+    endpoint_case_only_pairs: Vec<WitnessCorpusEndpointCasePair>,
 }
 
 #[derive(Debug, Deserialize)]
 struct WitnessCorpusPair {
     pair_id: String,
+    source: ManifestMatrix,
+    target: ManifestMatrix,
+}
+
+#[derive(Debug, Deserialize)]
+struct WitnessCorpusEndpointCasePair {
+    pair_id: String,
+    case_id: String,
     source: ManifestMatrix,
     target: ManifestMatrix,
 }
@@ -363,6 +391,7 @@ struct RankingSignalFamily {
 #[derive(Debug, Deserialize)]
 struct RankingSignalPair {
     pair_id: String,
+    benchmark_case_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,6 +475,13 @@ impl PairCatalog {
         self.build_pair_metadata(pair_id.to_string(), Some(pair_id.to_string()))
     }
 
+    fn resolve_research_case(&self, case_id: &str) -> PairMetadata {
+        if let Some(pair_id) = self.benchmark_pair_by_case_id.get(case_id) {
+            return self.build_pair_metadata(pair_id.clone(), Some(case_id.to_string()));
+        }
+        self.resolve_case(case_id)
+    }
+
     fn build_pair_metadata(
         &self,
         pair_id: String,
@@ -507,6 +543,7 @@ where
         cases_paths: Vec::new(),
         case_ids: Vec::new(),
         campaign_ids: Vec::new(),
+        benchmark_roles: Vec::new(),
         min_gap: 2,
         max_gap: 4,
         max_cases: 48,
@@ -543,6 +580,10 @@ where
             "--campaign-id" => {
                 cli.campaign_ids
                     .push(args.next().ok_or("--campaign-id requires a value")?);
+            }
+            "--benchmark-role" => {
+                cli.benchmark_roles
+                    .push(args.next().ok_or("--benchmark-role requires a value")?);
             }
             "--min-gap" => {
                 cli.min_gap = args
@@ -623,6 +664,8 @@ where
                        --cases PATH             load inline endpoint cases from a research cases json (repeatable)\n\
                        --case-id ID            limit loaded research cases to this case id (repeatable)\n\
                        --campaign-id ID        limit loaded research cases to this campaign id (repeatable)\n\
+                       --benchmark-role ROLE   limit loaded research cases to family-benchmark entries\n\
+                                             with this benchmark_role and a benchmark_case_id\n\
                        --min-gap N             minimum segment gap to analyze (default: 2)\n\
                        --max-gap N             maximum segment gap to analyze (default: 4)\n\
                        --max-cases N           cap derived segment cases (default: 48)\n\
@@ -649,6 +692,9 @@ where
 
     if cli.max_gap < cli.min_gap {
         return Err("--max-gap must be >= --min-gap".to_string());
+    }
+    if !cli.benchmark_roles.is_empty() && cli.family_benchmark_path.is_none() {
+        return Err("--benchmark-role requires --family-benchmark".to_string());
     }
     if cli.emit_layer_contrasts_path.is_some() {
         if cli.witness_manifest_path.is_none() {
@@ -684,6 +730,18 @@ fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
                 .path_pairs_by_endpoints
                 .insert(endpoint_pair_key(&source, &target), pair.pair_id);
         }
+        for pair in manifest.first_ingestion_slice.endpoint_case_only_pairs {
+            let source = manifest_matrix(&pair.source)?.canonical_perm();
+            let target = manifest_matrix(&pair.target)?.canonical_perm();
+            catalog.manifest_endpoint_cases_by_case_id.insert(
+                pair.case_id,
+                ManifestEndpointCase {
+                    pair_id: pair.pair_id,
+                    source,
+                    target,
+                },
+            );
+        }
     }
     if let Some(path) = &cli.family_benchmark_path {
         let raw = fs::read_to_string(path)
@@ -698,10 +756,22 @@ fn load_pair_catalog(cli: &Cli) -> Result<PairCatalog, String> {
             for pair in family.pairs {
                 catalog
                     .family_by_pair_id
-                    .insert(pair.pair_id, metadata.clone());
+                    .insert(pair.pair_id.clone(), metadata.clone());
+                if let Some(benchmark_case_id) = pair.benchmark_case_id {
+                    catalog
+                        .benchmark_pair_by_case_id
+                        .insert(benchmark_case_id.clone(), pair.pair_id);
+                    catalog
+                        .benchmark_case_ids_by_role
+                        .entry(metadata.benchmark_role.clone())
+                        .or_default()
+                        .insert(benchmark_case_id);
+                }
             }
         }
     }
+
+    validate_manifest_catalog_consistency(&catalog)?;
 
     Ok(catalog)
 }
@@ -819,6 +889,11 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
     let mut loaded = Vec::new();
     let requested_case_ids = cli.case_ids.iter().cloned().collect::<BTreeSet<_>>();
     let requested_campaign_ids = cli.campaign_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let requested_benchmark_case_ids = selected_benchmark_case_ids(
+        &cli.benchmark_roles,
+        &pair_catalog.benchmark_case_ids_by_role,
+    )?;
+    let mut loaded_case_ids = BTreeSet::new();
 
     for path in &cli.cases_paths {
         let raw = fs::read_to_string(path)
@@ -827,7 +902,12 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
             .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
 
         for case in corpus.cases {
-            if !matches_research_case_filters(&case, &requested_case_ids, &requested_campaign_ids) {
+            if !matches_research_case_filters(
+                &case,
+                &requested_case_ids,
+                &requested_campaign_ids,
+                requested_benchmark_case_ids.as_ref(),
+            ) {
                 continue;
             }
             if case.a.is_empty() || case.b.is_empty() {
@@ -840,6 +920,7 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
 
             let source = case_matrix(&case.a)?.canonical_perm();
             let target = case_matrix(&case.b)?.canonical_perm();
+            validate_manifest_endpoint_case(pair_catalog, &case.id, &source, &target)?;
             loaded.push(SegmentCase {
                 label: case.id.clone(),
                 budget_lag: case.config.max_lag,
@@ -861,9 +942,23 @@ fn load_research_cases(cli: &Cli, pair_catalog: &PairCatalog) -> Result<Vec<Segm
                 stage: case.config.stage,
                 guided_refinement: case.config.guided_refinement,
                 shortcut_search: case.config.shortcut_search,
-                pair_metadata: pair_catalog.resolve_case(&case.id),
+                pair_metadata: pair_catalog.resolve_research_case(&case.id),
                 contrast_source_kind: ContrastSourceKind::EndpointCase,
             });
+            loaded_case_ids.insert(case.id);
+        }
+    }
+
+    if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids {
+        let missing = requested_benchmark_case_ids
+            .difference(&loaded_case_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(format!(
+                "requested benchmark cases were not found in the loaded research corpora: {}",
+                missing.join(", ")
+            ));
         }
     }
 
@@ -885,9 +980,15 @@ fn matches_research_case_filters(
     case: &ResearchCase,
     requested_case_ids: &BTreeSet<String>,
     requested_campaign_ids: &BTreeSet<String>,
+    requested_benchmark_case_ids: Option<&BTreeSet<String>>,
 ) -> bool {
     if !requested_case_ids.is_empty() && !requested_case_ids.contains(&case.id) {
         return false;
+    }
+    if let Some(requested_benchmark_case_ids) = requested_benchmark_case_ids {
+        if !requested_benchmark_case_ids.contains(&case.id) {
+            return false;
+        }
     }
     if requested_campaign_ids.is_empty() {
         return true;
@@ -896,6 +997,70 @@ fn matches_research_case_filters(
         .as_ref()
         .map(|campaign| requested_campaign_ids.contains(&campaign.id))
         .unwrap_or(false)
+}
+
+fn selected_benchmark_case_ids(
+    requested_roles: &[String],
+    benchmark_case_ids_by_role: &HashMap<String, BTreeSet<String>>,
+) -> Result<Option<BTreeSet<String>>, String> {
+    if requested_roles.is_empty() {
+        return Ok(None);
+    }
+
+    let mut selected = BTreeSet::new();
+    for role in requested_roles {
+        let Some(case_ids) = benchmark_case_ids_by_role.get(role) else {
+            let mut known_roles = benchmark_case_ids_by_role
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            known_roles.sort();
+            return Err(format!(
+                "unknown --benchmark-role {role}; known roles with benchmark_case_id entries: {}",
+                known_roles.join(", ")
+            ));
+        };
+        selected.extend(case_ids.iter().cloned());
+    }
+
+    Ok(Some(selected))
+}
+
+fn validate_manifest_catalog_consistency(catalog: &PairCatalog) -> Result<(), String> {
+    for (case_id, pair_id) in &catalog.benchmark_pair_by_case_id {
+        let Some(manifest_case) = catalog.manifest_endpoint_cases_by_case_id.get(case_id) else {
+            return Err(format!(
+                "family benchmark case {case_id} for pair {pair_id} is missing from witness manifest endpoint_case_only_pairs"
+            ));
+        };
+        if manifest_case.pair_id != *pair_id {
+            return Err(format!(
+                "family benchmark case {case_id} points to pair {pair_id}, but witness manifest maps it to {}",
+                manifest_case.pair_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_manifest_endpoint_case(
+    pair_catalog: &PairCatalog,
+    case_id: &str,
+    source: &DynMatrix,
+    target: &DynMatrix,
+) -> Result<(), String> {
+    let Some(manifest_case) = pair_catalog.manifest_endpoint_cases_by_case_id.get(case_id) else {
+        return Ok(());
+    };
+    if endpoint_pair_key(source, target)
+        != endpoint_pair_key(&manifest_case.source, &manifest_case.target)
+    {
+        return Err(format!(
+            "research case {case_id} endpoints do not match witness manifest pair {}",
+            manifest_case.pair_id
+        ));
+    }
+    Ok(())
 }
 
 fn derive_path_cases(paths: &[SourcePath], cli: &Cli) -> Vec<SegmentCase> {
@@ -1144,6 +1309,7 @@ fn write_layer_contrast_artifact(
             cases_paths: cli.cases_paths.clone(),
             case_ids: cli.case_ids.clone(),
             campaign_ids: cli.campaign_ids.clone(),
+            benchmark_roles: cli.benchmark_roles.clone(),
             min_gap: cli.min_gap,
             max_gap: cli.max_gap,
             max_cases: cli.max_cases,
@@ -1327,10 +1493,11 @@ fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
 mod tests {
     use super::{
         case_matrix, effective_endpoint_move_family_policy, matches_research_case_filters,
-        parse_cli, CampaignConfig, Cli, JsonSearchConfig, ResearchCase,
+        parse_cli, selected_benchmark_case_ids, CampaignConfig, Cli, JsonSearchConfig,
+        ResearchCase,
     };
     use sse_core::types::MoveFamilyPolicy;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeSet, HashMap};
 
     #[test]
     fn case_matrix_rejects_non_square_input() {
@@ -1378,17 +1545,100 @@ mod tests {
             &matching,
             &requested_case_ids,
             &requested_campaign_ids,
+            None,
         ));
         assert!(!matches_research_case_filters(
             &wrong_campaign,
             &requested_case_ids,
             &requested_campaign_ids,
+            None,
         ));
         assert!(!matches_research_case_filters(
             &wrong_id,
             &requested_case_ids,
             &requested_campaign_ids,
+            None,
         ));
+    }
+
+    #[test]
+    fn research_case_filters_apply_benchmark_case_ids() {
+        let requested_case_ids = BTreeSet::new();
+        let requested_campaign_ids = BTreeSet::new();
+        let requested_benchmark_case_ids = BTreeSet::from(["keep_me".to_string()]);
+        let matching = ResearchCase {
+            id: "keep_me".to_string(),
+            a: vec![vec![1]],
+            b: vec![vec![1]],
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 1,
+                max_entry: 1,
+                frontier_mode: Default::default(),
+                beam_width: None,
+                beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
+                move_family_policy: super::default_move_family_policy(),
+                stage: Default::default(),
+                guided_refinement: Default::default(),
+                shortcut_search: Default::default(),
+            },
+            campaign: None,
+        };
+        let wrong_id = ResearchCase {
+            id: "skip_me".to_string(),
+            ..matching.clone()
+        };
+
+        assert!(matches_research_case_filters(
+            &matching,
+            &requested_case_ids,
+            &requested_campaign_ids,
+            Some(&requested_benchmark_case_ids),
+        ));
+        assert!(!matches_research_case_filters(
+            &wrong_id,
+            &requested_case_ids,
+            &requested_campaign_ids,
+            Some(&requested_benchmark_case_ids),
+        ));
+    }
+
+    #[test]
+    fn selected_benchmark_case_ids_combines_roles() {
+        let by_role = HashMap::from([
+            (
+                "heldout_benchmark".to_string(),
+                BTreeSet::from(["riedel_baker_k4".to_string(), "riedel_baker_k6".to_string()]),
+            ),
+            (
+                "sanity_only".to_string(),
+                BTreeSet::from(["fixture_case".to_string()]),
+            ),
+        ]);
+
+        let selected = selected_benchmark_case_ids(
+            &["heldout_benchmark".to_string(), "sanity_only".to_string()],
+            &by_role,
+        )
+        .expect("known roles should resolve")
+        .expect("selected case ids should be returned");
+
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                "fixture_case".to_string(),
+                "riedel_baker_k4".to_string(),
+                "riedel_baker_k6".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn selected_benchmark_case_ids_rejects_unknown_role() {
+        let err = selected_benchmark_case_ids(&["missing".to_string()], &HashMap::new())
+            .expect_err("unknown role should fail");
+        assert!(err.contains("unknown --benchmark-role missing"));
     }
 
     #[test]
