@@ -5816,6 +5816,31 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_frontier_layer_graph_plus_structured_skips_empty_diagonal_refactorization() {
+        let current = DynMatrix::new(3, 3, vec![1, 2, 1, 1, 1, 2, 2, 1, 1]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current);
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                move_family_policy: MoveFamilyPolicy::GraphPlusStructured,
+            },
+        );
+
+        assert!(!expansions
+            .iter()
+            .any(|expansion| expansion.move_family == "diagonal_refactorization_3x3"));
+        assert!(!stats
+            .move_family_telemetry
+            .contains_key("diagonal_refactorization_3x3"));
+    }
+
+    #[test]
     fn test_expand_frontier_layer_graph_plus_structured_exposes_single_row_split() {
         let current = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
         let current_canon = current.canonical_perm();

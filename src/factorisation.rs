@@ -2066,6 +2066,177 @@ where
 const DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY: u32 = 3;
 const DIAGONAL_REFACTORIZATION_4X4_MAX_DIAG_ENTRY: u32 = 2;
 
+fn row_admits_diagonal_divisor<const N: usize>(
+    row: &[u32; N],
+    divisor: u32,
+    max_entry: u32,
+) -> bool {
+    row.iter()
+        .all(|&value| value % divisor == 0 && value / divisor <= max_entry)
+}
+
+fn diagonal_refactorization_3x3_family_is_nonempty(c: &DynMatrix, max_entry: u32) -> bool {
+    assert_eq!(c.rows, 3);
+    assert_eq!(c.cols, 3);
+
+    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY);
+    if diag_cap <= 1 {
+        return false;
+    }
+
+    let cm = [
+        [c.get(0, 0), c.get(0, 1), c.get(0, 2)],
+        [c.get(1, 0), c.get(1, 1), c.get(1, 2)],
+        [c.get(2, 0), c.get(2, 1), c.get(2, 2)],
+    ];
+
+    let row_divisors = [
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[0], divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[1], divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[2], divisor, max_entry))
+            .collect::<Vec<_>>(),
+    ];
+    for &d0 in &row_divisors[0] {
+        for &d1 in &row_divisors[1] {
+            for &d2 in &row_divisors[2] {
+                let diag = [d0, d1, d2];
+                if d0 == d1 && d1 == d2 {
+                    continue;
+                }
+                if divide_rows_by_diag_3x3(&cm, &diag, max_entry)
+                    .is_some_and(|x| scale_cols_by_diag_3x3(&x, &diag) != cm)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    let col0 = [cm[0][0], cm[1][0], cm[2][0]];
+    let col1 = [cm[0][1], cm[1][1], cm[2][1]];
+    let col2 = [cm[0][2], cm[1][2], cm[2][2]];
+    let col_divisors = [
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col0, divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col1, divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col2, divisor, max_entry))
+            .collect::<Vec<_>>(),
+    ];
+    for &d0 in &col_divisors[0] {
+        for &d1 in &col_divisors[1] {
+            for &d2 in &col_divisors[2] {
+                let diag = [d0, d1, d2];
+                if d0 == d1 && d1 == d2 {
+                    continue;
+                }
+                if divide_cols_by_diag_3x3(&cm, &diag, max_entry)
+                    .is_some_and(|x| scale_rows_by_diag_3x3(&x, &diag) != cm)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn diagonal_refactorization_4x4_family_is_nonempty(c: &DynMatrix, max_entry: u32) -> bool {
+    assert_eq!(c.rows, 4);
+    assert_eq!(c.cols, 4);
+
+    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_4X4_MAX_DIAG_ENTRY);
+    if diag_cap <= 1 {
+        return false;
+    }
+
+    let cm = [
+        [c.get(0, 0), c.get(0, 1), c.get(0, 2), c.get(0, 3)],
+        [c.get(1, 0), c.get(1, 1), c.get(1, 2), c.get(1, 3)],
+        [c.get(2, 0), c.get(2, 1), c.get(2, 2), c.get(2, 3)],
+        [c.get(3, 0), c.get(3, 1), c.get(3, 2), c.get(3, 3)],
+    ];
+
+    let row_divisors = [
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[0], divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[1], divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[2], divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&cm[3], divisor, max_entry))
+            .collect::<Vec<_>>(),
+    ];
+    for &d0 in &row_divisors[0] {
+        for &d1 in &row_divisors[1] {
+            for &d2 in &row_divisors[2] {
+                for &d3 in &row_divisors[3] {
+                    let diag = [d0, d1, d2, d3];
+                    if d0 == d1 && d1 == d2 && d2 == d3 {
+                        continue;
+                    }
+                    if divide_rows_by_diag_4x4(&cm, &diag, max_entry)
+                        .is_some_and(|x| scale_cols_by_diag_4x4(&x, &diag) != cm)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    let col0 = [cm[0][0], cm[1][0], cm[2][0], cm[3][0]];
+    let col1 = [cm[0][1], cm[1][1], cm[2][1], cm[3][1]];
+    let col2 = [cm[0][2], cm[1][2], cm[2][2], cm[3][2]];
+    let col3 = [cm[0][3], cm[1][3], cm[2][3], cm[3][3]];
+    let col_divisors = [
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col0, divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col1, divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col2, divisor, max_entry))
+            .collect::<Vec<_>>(),
+        (1..=diag_cap)
+            .filter(|&divisor| row_admits_diagonal_divisor(&col3, divisor, max_entry))
+            .collect::<Vec<_>>(),
+    ];
+    for &d0 in &col_divisors[0] {
+        for &d1 in &col_divisors[1] {
+            for &d2 in &col_divisors[2] {
+                for &d3 in &col_divisors[3] {
+                    let diag = [d0, d1, d2, d3];
+                    if d0 == d1 && d1 == d2 && d2 == d3 {
+                        continue;
+                    }
+                    if divide_cols_by_diag_4x4(&cm, &diag, max_entry)
+                        .is_some_and(|x| scale_rows_by_diag_4x4(&x, &diag) != cm)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
 /// Generate a narrow 3x3 -> 3x3 diagonal-refactorization family:
 /// A = D*X -> B = X*D or A = X*D -> B = D*X, where D is positive diagonal.
 ///
@@ -2079,10 +2250,10 @@ where
     assert_eq!(c.rows, 3);
     assert_eq!(c.cols, 3);
 
-    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY);
-    if diag_cap <= 1 {
+    if !diagonal_refactorization_3x3_family_is_nonempty(c, max_entry) {
         return;
     }
+    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_3X3_MAX_DIAG_ENTRY);
 
     let mut cm = [[0u32; 3]; 3];
     for i in 0..3 {
@@ -2129,10 +2300,10 @@ where
     assert_eq!(c.rows, 4);
     assert_eq!(c.cols, 4);
 
-    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_4X4_MAX_DIAG_ENTRY);
-    if diag_cap <= 1 {
+    if !diagonal_refactorization_4x4_family_is_nonempty(c, max_entry) {
         return;
     }
+    let diag_cap = max_entry.min(DIAGONAL_REFACTORIZATION_4X4_MAX_DIAG_ENTRY);
 
     let mut cm = [[0u32; 4]; 4];
     for i in 0..4 {
@@ -4251,6 +4422,7 @@ mod tests {
         let c = u.mul(&v);
         let mut found = false;
 
+        assert!(diagonal_refactorization_3x3_family_is_nonempty(&c, 6));
         visit_all_factorisations(&c, 3, 6, |cand_u, cand_v| {
             if cand_u == u && cand_v == v {
                 found = true;
@@ -4389,6 +4561,7 @@ mod tests {
         let c = u.mul(&v);
         let mut families = BTreeSet::new();
 
+        assert!(diagonal_refactorization_3x3_family_is_nonempty(&c, 6));
         visit_factorisations_with_family_for_policy(
             &c,
             3,
@@ -4710,6 +4883,7 @@ mod tests {
         let target = DynMatrix::new(4, 4, vec![2, 1, 0, 1, 4, 0, 2, 1, 2, 1, 2, 0, 0, 1, 2, 1]);
         let mut found = false;
 
+        assert!(diagonal_refactorization_4x4_family_is_nonempty(&current, 4));
         visit_diagonal_refactorizations_4x4(&current, 4, &mut |u, v| {
             if u == DynMatrix::new(4, 4, vec![2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1])
                 && v == DynMatrix::new(4, 4, vec![1, 1, 0, 1, 2, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1])
@@ -4723,6 +4897,51 @@ mod tests {
             found,
             "expected bounded 4x4 same-size diagonal refactorization factorisation"
         );
+    }
+
+    #[test]
+    fn test_diagonal_refactorization_3x3_gate_rejects_impossible_source() {
+        let current = DynMatrix::new(3, 3, vec![1, 2, 1, 1, 1, 2, 2, 1, 1]);
+        let mut callbacks = 0usize;
+
+        assert!(!diagonal_refactorization_3x3_family_is_nonempty(
+            &current, 6
+        ));
+        visit_diagonal_refactorizations_3x3(&current, 6, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
+    fn test_diagonal_refactorization_3x3_gate_rejects_trivial_commuting_source() {
+        let current = DynMatrix::new(3, 3, vec![2, 0, 0, 0, 1, 0, 0, 0, 1]);
+        let mut callbacks = 0usize;
+
+        assert!(!diagonal_refactorization_3x3_family_is_nonempty(
+            &current, 6
+        ));
+        visit_diagonal_refactorizations_3x3(&current, 6, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
+    fn test_diagonal_refactorization_4x4_gate_rejects_impossible_source() {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0]);
+        let mut callbacks = 0usize;
+
+        assert!(!diagonal_refactorization_4x4_family_is_nonempty(
+            &current, 4
+        ));
+        visit_diagonal_refactorizations_4x4(&current, 4, &mut |_u, _v| {
+            callbacks += 1;
+        });
+
+        assert_eq!(callbacks, 0);
     }
 
     #[test]
