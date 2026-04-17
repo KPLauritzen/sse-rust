@@ -54,6 +54,7 @@ pub struct ArithmeticProfile2x2 {
     pub trace: i64,
     pub determinant: i64,
     pub discriminant: i64,
+    pub nonnegative: bool,
     pub strictly_positive: bool,
     pub determinant_band: DeterminantBand2x2,
     pub quadratic_arithmetic: Option<QuadraticArithmeticProfile2x2>,
@@ -113,6 +114,9 @@ pub fn arithmetic_profile_2x2(matrix: &SqMatrix<2>) -> ArithmeticProfile2x2 {
         trace,
         determinant,
         discriminant,
+        // `SqMatrix<2>` stores `u32` entries, so the endpoint hypothesis
+        // "nonnegative integral matrix" is structurally satisfied here.
+        nonnegative: true,
         strictly_positive: matrix.data.iter().flatten().all(|&entry| entry > 0),
         determinant_band: determinant_band_2x2(trace, determinant),
         quadratic_arithmetic,
@@ -561,7 +565,9 @@ fn exact_positive_class_2x2(
             Some(ExactPositiveClass2x2::Baker1983)
         }
         DeterminantBand2x2::ChoeShin
-            if in_choe_shin_determinant_territory(source.trace, source.determinant) =>
+            if source.nonnegative
+                && target.nonnegative
+                && in_choe_shin_determinant_territory(source.trace, source.determinant) =>
         {
             // Choe-Shin's abstract widens the negative-determinant band to
             // nonnegative 2x2 integral matrices; unlike Baker, it does not
