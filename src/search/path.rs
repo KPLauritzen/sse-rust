@@ -1,5 +1,6 @@
 use ahash::AHashMap as HashMap;
 
+use crate::graph_moves::find_exact_graph_move_witness_between;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
     DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
@@ -238,6 +239,51 @@ fn walk_parent_chain(
     (matrices, steps)
 }
 
+fn walk_graph_only_parent_chain(
+    node: &DynMatrix,
+    parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    orig: &HashMap<DynMatrix, DynMatrix>,
+) -> Vec<DynMatrix> {
+    let mut matrices = Vec::new();
+    let mut current = node.clone();
+
+    matrices.push(orig[&current].clone());
+
+    while let Some(Some(prev)) = parent.get(&current) {
+        matrices.push(orig[prev].clone());
+        current = prev.clone();
+    }
+
+    matrices.reverse();
+    matrices
+}
+
+fn reconstruct_deferred_step(from: &DynMatrix, to: &DynMatrix) -> EsseStep {
+    if let Some(step) = permutation_step_between(from, to) {
+        return step;
+    }
+
+    if let Some(successor) = find_exact_graph_move_witness_between(from, to) {
+        return successor.step;
+    }
+
+    if let Some(successor) = find_exact_graph_move_witness_between(to, from) {
+        return EsseStep {
+            u: successor.step.v,
+            v: successor.step.u,
+        };
+    }
+
+    panic!("graph-only matrix path should admit an exact one-step witness: from={from:?} to={to:?}")
+}
+
+fn reconstruct_deferred_steps(matrices: &[DynMatrix]) -> Vec<EsseStep> {
+    matrices
+        .windows(2)
+        .map(|pair| reconstruct_deferred_step(&pair[0], &pair[1]))
+        .collect()
+}
+
 /// Reconstruct a path from the forward and backward BFS trees that meet
 /// at `meeting_canon`.
 ///
@@ -376,4 +422,99 @@ pub(super) fn reconstruct_bidirectional_dyn_path(
         matrices: all_dyn_matrices,
         steps: all_steps,
     }
+}
+
+pub(super) fn reconstruct_graph_only_bidirectional_path(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    meeting_canon: &DynMatrix,
+    fwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+) -> SsePath<2> {
+    let a_dyn = DynMatrix::from_sq(a);
+    let b_dyn = DynMatrix::from_sq(b);
+    let mut all_dyn_matrices = reconstruct_graph_only_bidirectional_dyn_matrices(
+        &a_dyn,
+        &b_dyn,
+        meeting_canon,
+        fwd_parent,
+        fwd_orig,
+        bwd_parent,
+        bwd_orig,
+    );
+    let all_steps = reconstruct_deferred_steps(&all_dyn_matrices);
+    let sq_matrices: Vec<SqMatrix<2>> = all_dyn_matrices
+        .drain(..)
+        .filter_map(|dm| dm.to_sq::<2>())
+        .collect();
+
+    SsePath {
+        matrices: sq_matrices,
+        steps: all_steps,
+    }
+}
+
+pub(super) fn reconstruct_graph_only_bidirectional_dyn_path(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    meeting_canon: &DynMatrix,
+    fwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+) -> DynSsePath {
+    let matrices = reconstruct_graph_only_bidirectional_dyn_matrices(
+        a,
+        b,
+        meeting_canon,
+        fwd_parent,
+        fwd_orig,
+        bwd_parent,
+        bwd_orig,
+    );
+    let steps = reconstruct_deferred_steps(&matrices);
+
+    DynSsePath { matrices, steps }
+}
+
+fn reconstruct_graph_only_bidirectional_dyn_matrices(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    meeting_canon: &DynMatrix,
+    fwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    fwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
+    bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+) -> Vec<DynMatrix> {
+    let fwd_matrices = walk_graph_only_parent_chain(meeting_canon, fwd_parent, fwd_orig);
+    let bwd_matrices = walk_graph_only_parent_chain(meeting_canon, bwd_parent, bwd_orig);
+
+    let fwd_meeting = fwd_matrices
+        .last()
+        .expect("forward chain should end at the meeting node")
+        .clone();
+    let bwd_meeting = bwd_matrices
+        .last()
+        .expect("backward chain should end at the meeting node")
+        .clone();
+
+    let mut all_dyn_matrices: Vec<DynMatrix> = fwd_matrices;
+    if fwd_meeting != bwd_meeting {
+        all_dyn_matrices.push(bwd_meeting);
+    }
+    for matrix in bwd_matrices.into_iter().rev().skip(1) {
+        all_dyn_matrices.push(matrix);
+    }
+
+    if *all_dyn_matrices.first().unwrap() != *a {
+        all_dyn_matrices.insert(0, a.clone());
+    }
+
+    if *all_dyn_matrices.last().unwrap() != *b {
+        all_dyn_matrices.push(b.clone());
+    }
+
+    all_dyn_matrices
 }

@@ -33,6 +33,20 @@ pub struct GraphMoveSuccessors {
     pub nodes: Vec<GraphMoveSuccessor>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphMoveNode {
+    pub family: &'static str,
+    pub matrix: DynMatrix,
+    pub orig_matrix: DynMatrix,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphMoveNodes {
+    pub candidates: usize,
+    pub family_candidates: BTreeMap<&'static str, usize>,
+    pub nodes: Vec<GraphMoveNode>,
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SameFuturePastClassSignature {
     pub multiplicity: usize,
@@ -548,6 +562,70 @@ pub fn enumerate_graph_move_successors(current: &DynMatrix, max_dim: usize) -> G
     }
 }
 
+/// Enumerate canonical graph-move successors without materializing witnesses.
+///
+/// This is the cheaper surface used by graph-only search. Exact one-step
+/// witnesses can be recovered later for a chosen matrix pair.
+pub fn enumerate_graph_move_successor_nodes(current: &DynMatrix, max_dim: usize) -> GraphMoveNodes {
+    assert!(current.is_square());
+
+    let mut candidates = 0usize;
+    let mut family_candidates = BTreeMap::new();
+    let mut seen = HashSet::new();
+    let mut nodes = Vec::new();
+
+    if current.rows < max_dim {
+        append_representative_outsplit_successor_nodes(
+            current,
+            "outsplit",
+            false,
+            &mut candidates,
+            &mut family_candidates,
+            &mut seen,
+            &mut nodes,
+        );
+
+        append_representative_outsplit_successor_nodes(
+            &current.transpose(),
+            "insplit",
+            true,
+            &mut candidates,
+            &mut family_candidates,
+            &mut seen,
+            &mut nodes,
+        );
+    }
+
+    if current.rows > 2 {
+        for witness in enumerate_out_amalgamations(current) {
+            candidates += 1;
+            *family_candidates.entry("out_amalgamation").or_default() += 1;
+            push_canonical_graph_successor_node(
+                "out_amalgamation",
+                witness.outsplit,
+                &mut seen,
+                &mut nodes,
+            );
+        }
+        for witness in enumerate_in_amalgamations(current) {
+            candidates += 1;
+            *family_candidates.entry("in_amalgamation").or_default() += 1;
+            push_canonical_graph_successor_node(
+                "in_amalgamation",
+                witness.outsplit,
+                &mut seen,
+                &mut nodes,
+            );
+        }
+    }
+
+    GraphMoveNodes {
+        candidates,
+        family_candidates,
+        nodes,
+    }
+}
+
 /// Return all one-step graph moves from `current` whose target is permutation-similar
 /// to `target`.
 pub fn find_graph_move_witnesses_between(
@@ -565,6 +643,17 @@ pub fn find_graph_move_witnesses_between(
         .into_iter()
         .filter(|successor| successor.matrix == target_canon)
         .collect()
+}
+
+/// Return one exact one-step graph witness from `current` to `target`, when the
+/// chosen representative matrix was kept by canonical successor deduplication.
+pub fn find_exact_graph_move_witness_between(
+    current: &DynMatrix,
+    target: &DynMatrix,
+) -> Option<GraphMoveSuccessor> {
+    find_graph_move_witnesses_between(current, target)
+        .into_iter()
+        .find(|successor| successor.orig_matrix == *target)
 }
 
 fn append_representative_outsplit_successors(
@@ -647,6 +736,67 @@ fn append_representative_outsplit_successors(
     }
 }
 
+fn append_representative_outsplit_successor_nodes(
+    a: &DynMatrix,
+    family: &'static str,
+    transpose_result: bool,
+    candidates: &mut usize,
+    family_candidates: &mut BTreeMap<&'static str, usize>,
+    seen: &mut HashSet<DynMatrix>,
+    nodes: &mut Vec<GraphMoveNode>,
+) {
+    debug_assert!(a.is_square());
+
+    let parent_count = a.rows;
+    let child_count = parent_count + 1;
+    let parent_rows: Vec<Vec<u32>> = (0..parent_count)
+        .map(|row| (0..parent_count).map(|col| a.get(row, col)).collect())
+        .collect();
+
+    for split_parent in 0..parent_count {
+        let assignment: Vec<usize> = (0..child_count)
+            .map(|child| {
+                if child < parent_count {
+                    child
+                } else {
+                    split_parent
+                }
+            })
+            .collect();
+
+        for split in split_row_into_children(&parent_rows[split_parent], 2) {
+            // The two split children are interchangeable up to permutation.
+            if split[1] < split[0] {
+                continue;
+            }
+
+            *candidates += 1;
+            *family_candidates.entry(family).or_default() += 1;
+
+            let mut child_rows = parent_rows.clone();
+            child_rows[split_parent] = split[0].clone();
+            child_rows.push(split[1].clone());
+
+            let edge = DynMatrix::new(
+                child_count,
+                parent_count,
+                child_rows
+                    .iter()
+                    .flat_map(|row| row.iter())
+                    .copied()
+                    .collect(),
+            );
+            let outsplit = edge.mul(&division_matrix_from_assignment(&assignment, parent_count));
+
+            if transpose_result {
+                push_canonical_graph_successor_node(family, outsplit.transpose(), seen, nodes);
+            } else {
+                push_canonical_graph_successor_node(family, outsplit, seen, nodes);
+            }
+        }
+    }
+}
+
 fn push_canonical_graph_successor(
     family: &'static str,
     matrix: DynMatrix,
@@ -661,6 +811,22 @@ fn push_canonical_graph_successor(
             matrix: canon,
             orig_matrix: matrix,
             step,
+        });
+    }
+}
+
+fn push_canonical_graph_successor_node(
+    family: &'static str,
+    matrix: DynMatrix,
+    seen: &mut HashSet<DynMatrix>,
+    nodes: &mut Vec<GraphMoveNode>,
+) {
+    let canon = matrix.canonical_perm();
+    if seen.insert(canon.clone()) {
+        nodes.push(GraphMoveNode {
+            family,
+            matrix: canon,
+            orig_matrix: matrix,
         });
     }
 }
