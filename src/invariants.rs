@@ -5,6 +5,10 @@ const GENERIC_SQUARE_TRACE_INVARIANT_MAX_POWER: usize = 4;
 
 /// Determinant-band classification for the narrow 2x2 positive literature
 /// territory around Baker (1983) and Choe-Shin (1997).
+///
+/// This is only the determinant-side interval classification. The full Baker
+/// theorem also requires both endpoints to be strictly positive, and the full
+/// pairwise theorem shortcut also requires exact `GL(2,Z)` similarity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeterminantBand2x2 {
     Baker,
@@ -22,12 +26,30 @@ impl DeterminantBand2x2 {
     }
 }
 
+/// Exact theorem-backed positive `2x2` territory currently implemented from the
+/// literature notes and local sources.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExactPositiveClass2x2 {
+    Baker1983,
+    ChoeShin1997,
+}
+
+impl ExactPositiveClass2x2 {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Baker1983 => "baker_1983",
+            Self::ChoeShin1997 => "choe_shin_1997",
+        }
+    }
+}
+
 /// Cheap arithmetic dossier for one 2x2 endpoint matrix.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ArithmeticProfile2x2 {
     pub trace: i64,
     pub determinant: i64,
     pub discriminant: i64,
+    pub strictly_positive: bool,
     pub determinant_band: DeterminantBand2x2,
     pub quadratic_arithmetic: Option<QuadraticArithmeticProfile2x2>,
 }
@@ -65,6 +87,7 @@ pub struct Gl2zSimilarityProfile2x2 {
     pub source: ArithmeticProfile2x2,
     pub target: ArithmeticProfile2x2,
     pub pair_determinant_band: Option<DeterminantBand2x2>,
+    pub exact_positive_class: Option<ExactPositiveClass2x2>,
     pub gl2z_similar: bool,
     pub analysis: Gl2zSimilarityAnalysis2x2,
 }
@@ -85,6 +108,7 @@ pub fn arithmetic_profile_2x2(matrix: &SqMatrix<2>) -> ArithmeticProfile2x2 {
         trace,
         determinant,
         discriminant,
+        strictly_positive: matrix.data.iter().flatten().all(|&entry| entry > 0),
         determinant_band: determinant_band_2x2(trace, determinant),
         quadratic_arithmetic,
     }
@@ -107,7 +131,7 @@ fn quadratic_arithmetic_profile_2x2(
 
 /// Classify the Baker/Choe-Shin determinant territory for one 2x2 endpoint.
 pub fn determinant_band_2x2(trace: i64, determinant: i64) -> DeterminantBand2x2 {
-    if determinant >= -trace {
+    if determinant >= 0 {
         DeterminantBand2x2::Baker
     } else if determinant >= -2 * trace
         && determinant < -trace
@@ -138,6 +162,7 @@ pub fn gl2z_similarity_profile_2x2(
             source: source_profile,
             target: target_profile,
             pair_determinant_band: None,
+            exact_positive_class: None,
             gl2z_similar: false,
             analysis: Gl2zSimilarityAnalysis2x2::CharacteristicPolynomialMismatch,
         };
@@ -173,6 +198,12 @@ pub fn gl2z_similarity_profile_2x2(
             source: source_profile,
             target: target_profile,
             pair_determinant_band,
+            exact_positive_class: exact_positive_class_2x2(
+                &source_profile,
+                &target_profile,
+                pair_determinant_band,
+                gl2z_similar,
+            ),
             gl2z_similar,
             analysis,
         };
@@ -188,6 +219,12 @@ pub fn gl2z_similarity_profile_2x2(
         source: source_profile,
         target: target_profile,
         pair_determinant_band,
+        exact_positive_class: exact_positive_class_2x2(
+            &source_profile,
+            &target_profile,
+            pair_determinant_band,
+            gl2z_similar,
+        ),
         gl2z_similar,
         analysis: Gl2zSimilarityAnalysis2x2::Irreducible {
             source_order_ideal_class: source_class,
@@ -500,6 +537,30 @@ fn check_eilers_kiming_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>) -> Option<String> {
     }
 }
 
+fn exact_positive_class_2x2(
+    source: &ArithmeticProfile2x2,
+    target: &ArithmeticProfile2x2,
+    pair_determinant_band: Option<DeterminantBand2x2>,
+    gl2z_similar: bool,
+) -> Option<ExactPositiveClass2x2> {
+    if !gl2z_similar {
+        return None;
+    }
+    let Some(band) = pair_determinant_band else {
+        return None;
+    };
+
+    match band {
+        DeterminantBand2x2::Baker
+            if source.strictly_positive && target.strictly_positive =>
+        {
+            Some(ExactPositiveClass2x2::Baker1983)
+        }
+        DeterminantBand2x2::ChoeShin => Some(ExactPositiveClass2x2::ChoeShin1997),
+        DeterminantBand2x2::Baker | DeterminantBand2x2::Neither => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,7 +592,8 @@ mod tests {
     fn test_determinant_band_classification() {
         assert_eq!(determinant_band_2x2(6, 7), DeterminantBand2x2::Baker);
         assert_eq!(determinant_band_2x2(4, -6), DeterminantBand2x2::ChoeShin);
-        assert_eq!(determinant_band_2x2(4, -5), DeterminantBand2x2::Neither);
+        assert_eq!(determinant_band_2x2(4, -3), DeterminantBand2x2::Neither);
+        assert_eq!(determinant_band_2x2(4, -7), DeterminantBand2x2::Neither);
     }
 
     #[test]
@@ -631,6 +693,7 @@ mod tests {
 
         assert!(!profile.gl2z_similar);
         assert_eq!(profile.pair_determinant_band, None);
+        assert_eq!(profile.exact_positive_class, None);
         assert_eq!(
             profile.analysis,
             Gl2zSimilarityAnalysis2x2::CharacteristicPolynomialMismatch
@@ -647,6 +710,10 @@ mod tests {
         assert_eq!(
             profile.pair_determinant_band,
             Some(DeterminantBand2x2::Baker)
+        );
+        assert_eq!(
+            profile.exact_positive_class,
+            Some(ExactPositiveClass2x2::Baker1983)
         );
         match profile.analysis {
             Gl2zSimilarityAnalysis2x2::Irreducible {
@@ -666,8 +733,9 @@ mod tests {
         assert!(!profile.gl2z_similar);
         assert_eq!(
             profile.pair_determinant_band,
-            Some(DeterminantBand2x2::Baker)
+            Some(DeterminantBand2x2::Neither)
         );
+        assert_eq!(profile.exact_positive_class, None);
         match profile.analysis {
             Gl2zSimilarityAnalysis2x2::Irreducible {
                 source_order_ideal_class,
@@ -683,6 +751,11 @@ mod tests {
         let similar_b = SqMatrix::new([[2, 1], [1, 2]]);
         let similar_profile = gl2z_similarity_profile_2x2(&similar_a, &similar_b);
         assert!(similar_profile.gl2z_similar);
+        assert_eq!(
+            similar_profile.pair_determinant_band,
+            Some(DeterminantBand2x2::Baker)
+        );
+        assert_eq!(similar_profile.exact_positive_class, None);
         match similar_profile.analysis {
             Gl2zSimilarityAnalysis2x2::Split {
                 low_eigenvalue,
@@ -701,6 +774,7 @@ mod tests {
         let not_similar_b = SqMatrix::new([[1, 2], [0, 3]]);
         let not_similar_profile = gl2z_similarity_profile_2x2(&not_similar_a, &not_similar_b);
         assert!(!not_similar_profile.gl2z_similar);
+        assert_eq!(not_similar_profile.exact_positive_class, None);
         match not_similar_profile.analysis {
             Gl2zSimilarityAnalysis2x2::Split {
                 source_content,
@@ -720,6 +794,7 @@ mod tests {
         let same_scalar = SqMatrix::new([[2, 0], [0, 2]]);
         let scalar_profile = gl2z_similarity_profile_2x2(&scalar, &same_scalar);
         assert!(scalar_profile.gl2z_similar);
+        assert_eq!(scalar_profile.exact_positive_class, None);
         assert_eq!(
             scalar_profile.analysis,
             Gl2zSimilarityAnalysis2x2::Scalar { eigenvalue: 2 }
@@ -729,6 +804,7 @@ mod tests {
         let larger_jordan = SqMatrix::new([[2, 2], [0, 2]]);
         let repeated_profile = gl2z_similarity_profile_2x2(&jordan, &larger_jordan);
         assert!(!repeated_profile.gl2z_similar);
+        assert_eq!(repeated_profile.exact_positive_class, None);
         match repeated_profile.analysis {
             Gl2zSimilarityAnalysis2x2::Split {
                 low_eigenvalue,
@@ -742,6 +818,48 @@ mod tests {
             }
             other => panic!("expected repeated-eigenvalue split analysis, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_choe_shin_case_marks_exact_positive_class() {
+        let a = SqMatrix::new([[1, 3], [3, 3]]);
+        let b = SqMatrix::new([[3, 3], [3, 1]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &b);
+
+        assert!(profile.gl2z_similar);
+        assert_eq!(
+            profile.pair_determinant_band,
+            Some(DeterminantBand2x2::ChoeShin)
+        );
+        assert_eq!(
+            profile.exact_positive_class,
+            Some(ExactPositiveClass2x2::ChoeShin1997)
+        );
+    }
+
+    #[test]
+    fn test_gl2z_similarity_profile_prime_negative_determinant_stays_out_of_band() {
+        let a = SqMatrix::new([[1, 5], [2, 3]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &a);
+
+        assert!(profile.gl2z_similar);
+        assert_eq!(
+            profile.pair_determinant_band,
+            Some(DeterminantBand2x2::Neither)
+        );
+        assert_eq!(profile.exact_positive_class, None);
+    }
+
+    #[test]
+    fn test_eilers_kiming_obstruction_pair_stays_outside_exact_positive_class() {
+        let a = SqMatrix::new([[14, 2], [1, 0]]);
+        let b = SqMatrix::new([[13, 5], [3, 1]]);
+        let profile = gl2z_similarity_profile_2x2(&a, &b);
+
+        assert_eq!(profile.exact_positive_class, None);
+        let reason = check_invariants_2x2(&a, &b)
+            .expect("Eilers-Kiming obstruction pair should still fail the exact arithmetic path");
+        assert!(reason.contains("Eilers-Kiming"));
     }
 
     #[test]

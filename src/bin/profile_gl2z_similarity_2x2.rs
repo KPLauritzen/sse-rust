@@ -1,5 +1,6 @@
 use sse_core::invariants::{
-    gl2z_similarity_profile_2x2, DeterminantBand2x2, Gl2zSimilarityAnalysis2x2,
+    gl2z_similarity_profile_2x2, DeterminantBand2x2, ExactPositiveClass2x2,
+    Gl2zSimilarityAnalysis2x2, Gl2zSimilarityProfile2x2,
 };
 use sse_core::matrix::SqMatrix;
 
@@ -77,8 +78,8 @@ fn run() -> Result<(), String> {
     println!();
 
     match profile.pair_determinant_band {
-        Some(band) => println!("Pair determinant band: {}", band.label()),
-        None => println!("Pair determinant band: n/a (trace/determinant mismatch)"),
+        Some(band) => println!("Pair determinant territory: {}", band.label()),
+        None => println!("Pair determinant territory: n/a (trace/determinant mismatch)"),
     }
     println!(
         "GL(2,Z) similar: {}",
@@ -87,7 +88,7 @@ fn run() -> Result<(), String> {
     print_similarity_analysis(&profile.analysis);
     println!(
         "Theorem-backed positive territory: {}",
-        theorem_positive_summary(profile.gl2z_similar, profile.pair_determinant_band)
+        theorem_positive_summary(&profile)
     );
 
     Ok(())
@@ -111,10 +112,15 @@ fn print_help() {
 
 fn print_matrix_profile(label: &str, profile: &sse_core::invariants::ArithmeticProfile2x2) {
     println!(
-        "{label}: trace={} det={} discriminant={} band={}",
+        "{label}: trace={} det={} discriminant={} positive={} determinant_territory={}",
         profile.trace,
         profile.determinant,
         profile.discriminant,
+        if profile.strictly_positive {
+            "yes"
+        } else {
+            "no"
+        },
         profile.determinant_band.label()
     );
     match profile.quadratic_arithmetic {
@@ -175,17 +181,25 @@ fn print_similarity_analysis(analysis: &Gl2zSimilarityAnalysis2x2) {
     }
 }
 
-fn theorem_positive_summary(
-    gl2z_similar: bool,
-    pair_determinant_band: Option<DeterminantBand2x2>,
-) -> &'static str {
-    match (gl2z_similar, pair_determinant_band) {
-        (true, Some(DeterminantBand2x2::Baker)) => "yes (Baker band + integer similarity)",
-        (true, Some(DeterminantBand2x2::ChoeShin)) => "yes (Choe-Shin band + integer similarity)",
-        (true, Some(DeterminantBand2x2::Neither)) => "no (outside Baker/Choe-Shin bands)",
-        (true, None) => "no (pair does not share trace/determinant)",
-        (false, Some(_)) => "no (band matches, but the pair is not GL(2,Z)-similar)",
-        (false, None) => "no (pair does not share trace/determinant)",
+fn theorem_positive_summary(profile: &Gl2zSimilarityProfile2x2) -> &'static str {
+    match profile.exact_positive_class {
+        Some(ExactPositiveClass2x2::Baker1983) => {
+            "yes (Baker 1983: strictly positive + det >= 0 + GL(2,Z) similarity)"
+        }
+        Some(ExactPositiveClass2x2::ChoeShin1997) => {
+            "yes (Choe-Shin 1997: composite negative determinant band + GL(2,Z) similarity)"
+        }
+        None if !profile.gl2z_similar => "no (pair is not GL(2,Z)-similar)",
+        None if profile.pair_determinant_band.is_none() => {
+            "no (pair does not share trace/determinant)"
+        }
+        None
+            if profile.pair_determinant_band == Some(DeterminantBand2x2::Baker)
+                && (!profile.source.strictly_positive || !profile.target.strictly_positive) =>
+        {
+            "no (Baker determinant territory, but Baker 1983 requires both endpoints to be strictly positive)"
+        }
+        None => "no (outside the implemented exact Baker/Choe-Shin pair hypotheses)",
     }
 }
 
