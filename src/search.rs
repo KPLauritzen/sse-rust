@@ -1004,7 +1004,9 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     if config.move_family_policy == MoveFamilyPolicy::GraphOnly {
         return search_graph_only_2x2_with_telemetry_and_observer(a, b, config, observer, &request);
     }
-    if config.move_family_policy == MoveFamilyPolicy::GraphPlusStructured {
+    if config.frontier_mode == FrontierMode::Bfs
+        && config.move_family_policy == MoveFamilyPolicy::GraphPlusStructured
+    {
         return search_graph_plus_structured_2x2_with_telemetry_and_observer(
             a, b, config, observer, &request,
         );
