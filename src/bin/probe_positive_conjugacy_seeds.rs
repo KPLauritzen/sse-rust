@@ -613,8 +613,7 @@ fn build_seeded_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<Ranked
             )
             .then(left.score.matrix.cmp(&right.score.matrix))
     });
-    ranked.truncate(limit);
-    ranked
+    expand_anchor_variants_for_top_matrices(ranked, limit)
 }
 
 fn build_blind_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<RankedLocalSeed> {
@@ -643,8 +642,32 @@ fn build_blind_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<RankedL
             )
             .then(left.score.matrix.cmp(&right.score.matrix))
     });
-    ranked.truncate(limit);
+    expand_anchor_variants_for_top_matrices(ranked, limit)
+}
+
+fn expand_anchor_variants_for_top_matrices(
+    ranked: Vec<RankedLocalSeed>,
+    matrix_limit: usize,
+) -> Vec<RankedLocalSeed> {
+    if matrix_limit == 0 {
+        return Vec::new();
+    }
+
+    let mut selected_matrices = Vec::<SqMatrix<2>>::new();
+    for candidate in &ranked {
+        if selected_matrices.contains(&candidate.score.matrix) {
+            continue;
+        }
+        selected_matrices.push(candidate.score.matrix.clone());
+        if selected_matrices.len() == matrix_limit {
+            break;
+        }
+    }
+
     ranked
+        .into_iter()
+        .filter(|candidate| selected_matrices.contains(&candidate.score.matrix))
+        .collect()
 }
 
 fn evaluate_seed(
@@ -917,5 +940,66 @@ mod tests {
         );
 
         assert_eq!(best_by_seed.len(), 2);
+    }
+
+    #[test]
+    fn seeded_shortlist_keeps_both_anchors_for_selected_matrix() {
+        let matrix = SqMatrix::new([[1, 2], [3, 1]]);
+        let other = SqMatrix::new([[1, 1], [6, 1]]);
+        let shortlist = build_seeded_shortlist(
+            &[
+                RankedLocalSeed {
+                    local_seed: LocalSeed {
+                        matrix: matrix.clone(),
+                        anchor: SeedAnchor::Source,
+                        local_lag: 1,
+                        path_families: vec!["source".to_string()],
+                    },
+                    score: PositiveConjugacySeedCandidate2x2 {
+                        matrix: matrix.clone(),
+                        nearest_proposal_rank: 1,
+                        proposal_l1_distance: 1,
+                        target_l1_distance: 3,
+                    },
+                },
+                RankedLocalSeed {
+                    local_seed: LocalSeed {
+                        matrix: matrix.clone(),
+                        anchor: SeedAnchor::Target,
+                        local_lag: 1,
+                        path_families: vec!["target".to_string()],
+                    },
+                    score: PositiveConjugacySeedCandidate2x2 {
+                        matrix: matrix.clone(),
+                        nearest_proposal_rank: 1,
+                        proposal_l1_distance: 1,
+                        target_l1_distance: 3,
+                    },
+                },
+                RankedLocalSeed {
+                    local_seed: LocalSeed {
+                        matrix: other.clone(),
+                        anchor: SeedAnchor::Target,
+                        local_lag: 1,
+                        path_families: vec!["other".to_string()],
+                    },
+                    score: PositiveConjugacySeedCandidate2x2 {
+                        matrix: other,
+                        nearest_proposal_rank: 2,
+                        proposal_l1_distance: 2,
+                        target_l1_distance: 4,
+                    },
+                },
+            ],
+            1,
+        );
+
+        assert_eq!(shortlist.len(), 2);
+        assert!(shortlist
+            .iter()
+            .any(|entry| entry.local_seed.anchor == SeedAnchor::Source));
+        assert!(shortlist
+            .iter()
+            .any(|entry| entry.local_seed.anchor == SeedAnchor::Target));
     }
 }
