@@ -732,7 +732,6 @@
   `GraphPlusStructured` factorisation/frontier telemetry participation, and the
   `(5,4)` exporter fallback list. Details are in
   `research/notes/2026-04-16-bounded-row-amalgamation-5x5-to-4x4-family.md`.
-
 - `sse-rust-enj` Added one bounded explicit `5x5 -> 4x4` column-amalgamation
   family as the transpose-dual sibling of the landed row-amalgamation slice.
   Kept. `src/factorisation.rs` now exposes
@@ -746,3 +745,16 @@
   `GraphPlusStructured` factorisation/frontier telemetry participation, and
   the `(5,4)` exporter fallback list. Details are in
   `research/notes/2026-04-16-bounded-column-amalgamation-5x5-to-4x4-family.md`.
+
+## 2026-04-17
+
+- `working tree` Summarized repo activity from `2026-04-16 04:15 UTC` through
+  `2026-04-17 04:15 UTC`.
+  Kept as durable context. Added
+  `research/notes/2026-04-17-last-24h-repo-summary.md`, covering the stricter
+  keep/revert and measurement discipline, the ranking and observer-seam
+  improvements, the runtime keep-vs-revert results, the arithmetic and balanced
+  diagnostic slices, and the broad explicit structured-family expansion from
+  `3x3 -> 4x4` through `5x5 -> 4x4`. The main current direction remains:
+  prefer bounded explicit structure plus better proposal-quality evidence over
+  broader generic widening.
