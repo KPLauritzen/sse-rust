@@ -196,8 +196,6 @@ struct PairCatalog {
     ambiguous_path_endpoints: HashSet<String>,
     validated_witness_source_ids_by_path: HashMap<PathBuf, String>,
     validated_pair_refs_by_source_artifact: HashMap<(String, String), ValidatedPathPairRef>,
-    validated_pair_refs_by_artifact: HashMap<String, ValidatedPathPairRef>,
-    ambiguous_artifact_ids: HashSet<String>,
     validated_pair_refs_by_sqlite_result: HashMap<(String, String, i64), ValidatedPathPairRef>,
     family_by_pair_id: HashMap<String, FamilyMetadata>,
     benchmark_pair_by_case_id: HashMap<String, String>,
@@ -541,17 +539,6 @@ impl PairCatalog {
                 }
             }
         }
-        if let Some(artifact_id) = artifact_id {
-            if !self.ambiguous_artifact_ids.contains(artifact_id) {
-                if let Some(pair_ref) = self.validated_pair_refs_by_artifact.get(artifact_id) {
-                    if let Some(metadata) =
-                        self.build_validated_path_metadata(pair_ref, &endpoint_key)
-                    {
-                        return Ok(metadata);
-                    }
-                }
-            }
-        }
         Ok(self.resolve_path(Some(source), Some(target)))
     }
 
@@ -681,20 +668,6 @@ impl PairCatalog {
                     "validated evidence ref {source_id}:{artifact_id} is assigned to both {} and {}",
                     existing.pair_id, pair_ref.pair_id
                 ));
-            }
-        }
-        if self.ambiguous_artifact_ids.contains(artifact_id) {
-            return Ok(());
-        }
-        match self.validated_pair_refs_by_artifact.get(artifact_id) {
-            Some(existing) if existing.pair_id == pair_ref.pair_id => {}
-            Some(_) => {
-                self.validated_pair_refs_by_artifact.remove(artifact_id);
-                self.ambiguous_artifact_ids.insert(artifact_id.to_string());
-            }
-            None => {
-                self.validated_pair_refs_by_artifact
-                    .insert(artifact_id.to_string(), pair_ref.clone());
             }
         }
         Ok(())
