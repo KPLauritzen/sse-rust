@@ -76,7 +76,7 @@ B_k = [[k-1, 1],
 
 Retained bounds:
 
-| Rung | Bound |
+| Rung | Frontier cap |
 | --- | --- |
 | `k = 4` | `lag5 / dim3 / entry4` |
 | `k = 6` | `lag6 / dim3 / entry6` |
@@ -84,6 +84,14 @@ Retained bounds:
 | `k = 10` | `lag11 / dim3 / entry10` |
 | `k = 12` | `lag12 / dim3 / entry12` |
 | `k = 14` | `lag14 / dim3 / entry14` |
+
+Lag convention used in this note:
+
+- `config.max_lag` is the frontier-layer cap passed to the solver;
+- harness `result_model.witness_lag` is the reported witness lag from the
+  resulting path record; and
+- on cap-saturating two-by-two frontier witnesses, that reported lag appears as
+  `max_lag + 1`, so `max_lag = 14` can legitimately report witness lag `15`.
 
 Why this is the retained lane:
 
