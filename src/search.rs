@@ -3,6 +3,11 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
+use crate::conjugacy::{
+    derive_invariant_compatible_positive_conjugacy_seed_hints_2x2,
+    PositiveConjugacyProposalConfig2x2, PositiveConjugacySearchConfig2x2,
+    PositiveConjugacySeedConfig2x2,
+};
 #[cfg(test)]
 use crate::factorisation::binary_sparse_factorisation_4x4_to_3_permutation_orbit_key;
 use crate::factorisation::visit_factorisations_with_family_for_policy;
@@ -49,13 +54,12 @@ use self::dispatch::{
     finish_search_dyn,
 };
 use self::frontier::{
-    choose_next_layer, expand_frontier_layer, expand_frontier_layer_dyn, FrontierExpansionSettings,
-    FrontierExpansionTiming, FrontierLayerChoiceInputs, FrontierOverlapSignal,
+    choose_next_layer, expand_frontier_layer, expand_frontier_layer_dyn, FrontierExpansion,
+    FrontierExpansionSettings, FrontierExpansionTiming, FrontierLayerChoiceInputs,
+    FrontierOverlapSignal,
 };
 #[cfg(test)]
-use self::frontier::{
-    deduplicate_expansions, should_expand_forward, FrontierExpansion, LayerExpansionOrderKey,
-};
+use self::frontier::{deduplicate_expansions, should_expand_forward, LayerExpansionOrderKey};
 #[cfg(test)]
 use self::path::reverse_dyn_sse_path;
 pub use self::path::{
@@ -90,6 +94,10 @@ struct ApproxSignature {
 }
 
 const TIMED_SEARCH_FRONTIER_CHUNK_SIZE: usize = 256;
+const POSITIVE_CONJUGACY_ROOT_SEED_HINT_MAX_CONJUGATOR_ENTRY: u32 = 4;
+const POSITIVE_CONJUGACY_ROOT_SEED_HINT_SAMPLE_POINTS: usize = 64;
+const POSITIVE_CONJUGACY_ROOT_SEED_HINT_MAX_PROPOSALS: usize = 4;
+const POSITIVE_CONJUGACY_ROOT_SEED_HINT_MAX_CANDIDATES: usize = 4;
 
 pub(super) type MoveFamilyTelemetryAccumulator = HashMap<&'static str, SearchMoveFamilyTelemetry>;
 
@@ -163,6 +171,71 @@ fn frontier_expansion_settings(config: &SearchConfig) -> FrontierExpansionSettin
         max_entry: config.max_entry,
         move_family_policy: config.move_family_policy,
     }
+}
+
+fn reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
+    expansions: &mut Vec<FrontierExpansion>,
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    max_entry: u32,
+) {
+    if expansions.len() <= 1 {
+        return;
+    }
+
+    let candidates = expansions
+        .iter()
+        .filter_map(|expansion| expansion.next_orig.to_sq::<2>())
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return;
+    }
+
+    let ranked_hints = derive_invariant_compatible_positive_conjugacy_seed_hints_2x2(
+        source,
+        target,
+        &candidates,
+        &PositiveConjugacySearchConfig2x2 {
+            max_conjugator_entry: max_entry
+                .min(POSITIVE_CONJUGACY_ROOT_SEED_HINT_MAX_CONJUGATOR_ENTRY),
+            sample_points: POSITIVE_CONJUGACY_ROOT_SEED_HINT_SAMPLE_POINTS,
+        },
+        &PositiveConjugacyProposalConfig2x2 {
+            max_proposals: POSITIVE_CONJUGACY_ROOT_SEED_HINT_MAX_PROPOSALS,
+            include_endpoints: false,
+        },
+        &PositiveConjugacySeedConfig2x2 {
+            max_candidates: POSITIVE_CONJUGACY_ROOT_SEED_HINT_MAX_CANDIDATES,
+        },
+    );
+    if ranked_hints.is_empty() {
+        return;
+    }
+
+    let rank_by_matrix = ranked_hints
+        .into_iter()
+        .enumerate()
+        .map(|(rank, seed)| (seed.matrix, rank))
+        .collect::<BTreeMap<_, _>>();
+
+    // Keep the search exact: only promote a tiny bounded set of exact same-dimension
+    // candidates, and otherwise preserve the existing stable expansion order.
+    expansions.sort_by(|left, right| {
+        let left_rank = left
+            .next_orig
+            .to_sq::<2>()
+            .and_then(|matrix| rank_by_matrix.get(&matrix).copied());
+        let right_rank = right
+            .next_orig
+            .to_sq::<2>()
+            .and_then(|matrix| rank_by_matrix.get(&matrix).copied());
+
+        left_rank.is_none().cmp(&right_rank.is_none()).then(
+            left_rank
+                .cmp(&right_rank)
+                .then(left.order_key.cmp(&right.order_key)),
+        )
+    });
 }
 
 struct GraphOnlyPolicySuccessor {
@@ -1189,8 +1262,25 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
         let layer_started = Instant::now();
-        let (expansions, expansion_stats, expansion_timing) =
+        let (mut expansions, expansion_stats, expansion_timing) =
             expand_frontier_layer(&current_frontier, orig, frontier_expansion_settings(config));
+        if layer_depth == 0 && current_frontier.len() == 1 {
+            if expand_forward {
+                reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
+                    &mut expansions,
+                    a,
+                    b,
+                    config.max_entry,
+                );
+            } else {
+                reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
+                    &mut expansions,
+                    b,
+                    a,
+                    config.max_entry,
+                );
+            }
+        }
         telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
         telemetry.factorisation_calls += expansion_stats.factorisation_calls;
         telemetry.factorisations_enumerated += expansion_stats.factorisations_enumerated;
@@ -4417,6 +4507,22 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FirstLayerMatrixProbe {
+        first_layer_matrices: Vec<DynMatrix>,
+    }
+
+    impl SearchObserver for FirstLayerMatrixProbe {
+        fn on_event(&mut self, event: &SearchEvent) {
+            if let SearchEvent::Layer(edges) = event {
+                if self.first_layer_matrices.is_empty() {
+                    self.first_layer_matrices =
+                        edges.iter().map(|edge| edge.to_orig.clone()).collect();
+                }
+            }
+        }
+    }
+
     fn full_path_artifact(id: &str, path: DynSsePath) -> GuideArtifact {
         let source = path
             .matrices
@@ -6534,6 +6640,97 @@ mod tests {
         assert!(!telemetry.layers.is_empty());
         assert_eq!(observer.layer_sizes.len(), telemetry.layers.len());
         assert!(observer.layer_sizes.iter().all(|size| *size > 0));
+    }
+
+    #[test]
+    fn test_search_2x2_root_layer_applies_positive_conjugacy_seed_hint_ordering() {
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 4,
+            max_entry: 8,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        };
+        let calibration_pairs = vec![
+            (
+                SqMatrix::new([[1, 3], [2, 1]]),
+                SqMatrix::new([[1, 6], [1, 1]]),
+            ),
+            (
+                SqMatrix::new([[1, 6], [1, 1]]),
+                SqMatrix::new([[1, 3], [2, 1]]),
+            ),
+            (
+                SqMatrix::new([[1, 4], [3, 1]]),
+                SqMatrix::new([[1, 12], [1, 1]]),
+            ),
+            (
+                SqMatrix::new([[1, 12], [1, 1]]),
+                SqMatrix::new([[1, 4], [3, 1]]),
+            ),
+            (
+                SqMatrix::new([[3, 2], [1, 3]]),
+                SqMatrix::new([[2, 1], [1, 4]]),
+            ),
+            (
+                SqMatrix::new([[2, 1], [1, 4]]),
+                SqMatrix::new([[3, 2], [1, 3]]),
+            ),
+        ];
+
+        let Some((source, target, expected_same_dim)) =
+            calibration_pairs.into_iter().find_map(|(source, target)| {
+                let source_dyn = DynMatrix::from_sq(&source);
+                let source_canon = source_dyn.canonical_perm();
+                let mut orig = HashMap::new();
+                orig.insert(source_canon.clone(), source_dyn);
+
+                let (raw_expansions, _, _) = expand_frontier_layer(
+                    &[source_canon],
+                    &orig,
+                    frontier_expansion_settings(&config),
+                );
+                let raw_same_dim = raw_expansions
+                    .iter()
+                    .filter_map(|expansion| expansion.next_orig.to_sq::<2>())
+                    .collect::<Vec<_>>();
+
+                let mut expected_expansions = raw_expansions.clone();
+                reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
+                    &mut expected_expansions,
+                    &source,
+                    &target,
+                    config.max_entry,
+                );
+                let expected_same_dim = expected_expansions
+                    .iter()
+                    .filter_map(|expansion| expansion.next_orig.to_sq::<2>())
+                    .collect::<Vec<_>>();
+
+                (raw_same_dim != expected_same_dim).then_some((source, target, expected_same_dim))
+            })
+        else {
+            panic!("expected at least one calibration pair with a changed root-layer ordering");
+        };
+
+        let mut observer = FirstLayerMatrixProbe::default();
+        let (_result, telemetry) = search_sse_2x2_with_telemetry_and_observer(
+            &source,
+            &target,
+            &config,
+            Some(&mut observer),
+        );
+
+        assert_eq!(telemetry.layers.len(), 1);
+        let observed_same_dim = observer
+            .first_layer_matrices
+            .iter()
+            .filter_map(|matrix| matrix.to_sq::<2>())
+            .collect::<Vec<_>>();
+        assert_eq!(observed_same_dim, expected_same_dim);
     }
 
     #[test]

@@ -438,6 +438,46 @@ pub fn derive_invariant_compatible_positive_conjugacy_proposals_2x2(
     proposals
 }
 
+/// Produce a tiny ranked exact seed-hint list for the current `2x2` endpoints.
+///
+/// This is intentionally a search-ordering seam, not a proof surface: it runs a
+/// bounded sampled positive-conjugacy search, reprojects the sampled path onto
+/// invariant-compatible exact proposals, and then ranks exact candidate
+/// matrices against those proposals.
+pub fn derive_invariant_compatible_positive_conjugacy_seed_hints_2x2(
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    candidates: &[SqMatrix<2>],
+    witness_config: &PositiveConjugacySearchConfig2x2,
+    proposal_config: &PositiveConjugacyProposalConfig2x2,
+    seed_config: &PositiveConjugacySeedConfig2x2,
+) -> Vec<PositiveConjugacySeedCandidate2x2> {
+    if candidates.is_empty()
+        || proposal_config.max_proposals == 0
+        || seed_config.max_candidates == 0
+    {
+        return Vec::new();
+    }
+
+    let PositiveConjugacySearchResult2x2::Equivalent(witness) =
+        find_positive_conjugacy_2x2(source, target, witness_config)
+    else {
+        return Vec::new();
+    };
+
+    let proposals = derive_invariant_compatible_positive_conjugacy_proposals_2x2(
+        source,
+        target,
+        &witness,
+        proposal_config,
+    );
+    if proposals.is_empty() {
+        return Vec::new();
+    }
+
+    rank_positive_conjugacy_seed_candidates_2x2(target, &proposals, candidates, seed_config)
+}
+
 /// Rank actual local 2x2 move candidates by proximity to sampled
 /// positive-conjugacy proposals.
 ///
@@ -1008,6 +1048,53 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn test_derive_invariant_compatible_positive_conjugacy_seed_hints_matches_manual_pipeline() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let b = SqMatrix::new([[1, 6], [1, 1]]);
+        let candidates = vec![
+            SqMatrix::new([[1, 5], [1, 1]]),
+            SqMatrix::new([[1, 4], [2, 1]]),
+            SqMatrix::new([[0, 5], [1, 2]]),
+            SqMatrix::new([[1, 2], [3, 1]]),
+        ];
+        let witness_config = PositiveConjugacySearchConfig2x2 {
+            max_conjugator_entry: 4,
+            sample_points: 64,
+        };
+        let proposal_config = PositiveConjugacyProposalConfig2x2 {
+            max_proposals: 4,
+            include_endpoints: false,
+        };
+        let seed_config = PositiveConjugacySeedConfig2x2 { max_candidates: 4 };
+
+        let PositiveConjugacySearchResult2x2::Equivalent(witness) =
+            find_positive_conjugacy_2x2(&a, &b, &witness_config)
+        else {
+            panic!("expected a witness for the k=3 pair");
+        };
+        let proposals = derive_invariant_compatible_positive_conjugacy_proposals_2x2(
+            &a,
+            &b,
+            &witness,
+            &proposal_config,
+        );
+        let manual =
+            rank_positive_conjugacy_seed_candidates_2x2(&b, &proposals, &candidates, &seed_config);
+
+        let via_helper = derive_invariant_compatible_positive_conjugacy_seed_hints_2x2(
+            &a,
+            &b,
+            &candidates,
+            &witness_config,
+            &proposal_config,
+            &seed_config,
+        );
+
+        assert_eq!(via_helper, manual);
+        assert!(!via_helper.is_empty());
     }
 
     #[test]
