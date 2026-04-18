@@ -5,6 +5,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: scripts/nudge-workmux-agent.sh <handle> [iterations] [sleep_seconds] [message...]
+       scripts/nudge-workmux-agent.sh <handle> [iterations] [sleep_seconds] -f|--file <message_file>
 
 Defaults:
   iterations:    12
@@ -15,6 +16,7 @@ Example:
   scripts/nudge-workmux-agent.sh optimize-program-md-longrun
   scripts/nudge-workmux-agent.sh optimize-program-md-longrun 6 300 "continue working"
   scripts/nudge-workmux-agent.sh main 12 600 'Line one.\nLine two.'
+  scripts/nudge-workmux-agent.sh main 12 600 --file tmp/followup.md
 EOF
 }
 
@@ -30,7 +32,19 @@ handle="${1:-}"
 iterations="${2:-12}"
 sleep_seconds="${3:-600}"
 shift $(( $# >= 3 ? 3 : $# ))
-if (( $# > 0 )); then
+
+if (( $# >= 2 )) && [[ "${1:-}" == "-f" || "${1:-}" == "--file" ]]; then
+  message_file="${2:-}"
+  if [[ -z "$message_file" ]]; then
+    echo "--file requires a path" >&2
+    exit 1
+  fi
+  if [[ ! -f "$message_file" ]]; then
+    echo "message file not found: $message_file" >&2
+    exit 1
+  fi
+  raw_message="$(<"$message_file")"
+elif (( $# > 0 )); then
   raw_message="$*"
 else
   raw_message=$'Continue working.\nIf you think you are done, pick the next highest-leverage optimization step from research/program.md and keep going without waiting for user input.\nPrefer profiling and measurement first so you cut in the right place.'
