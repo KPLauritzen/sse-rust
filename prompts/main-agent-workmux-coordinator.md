@@ -46,11 +46,13 @@ Per-turn workflow:
    - if a regression signal appears, rerun the specific benchmark in isolation
    - only open a follow-up bead if the regression reproduces cleanly
 
-6. Open follow-up work only when justified.
+6. Read the worker's durable note and open follow-up work only when justified.
+   - always read the note left behind by the finished worker before deciding next steps
    - create/update beads for:
-     - real regressions
-     - newly discovered follow-up work
-     - durable negative results that imply a better next bounded slice
+     - confirmed regressions
+     - promising next steps that could move the project forward
+     - follow-up work needed to refine or narrow the just-finished slice into a better bounded next experiment
+   - do not open beads mechanically; only add work when the result suggests a meaningful next move
 
 7. Push `main`.
    - run `git push`
