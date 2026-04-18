@@ -4,13 +4,13 @@ use std::time::Instant;
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::factorisation::visit_factorisations_with_family_for_policy;
-use crate::graph_moves::{
-    enumerate_graph_move_successors, enumerate_graph_proposals, GraphMoveSuccessor,
-    GraphMoveSuccessors, GraphProposal, SameFuturePastSignatureGap,
-};
 #[cfg(test)]
 use crate::graph_moves::{
     enumerate_graph_move_successor_nodes, find_exact_graph_move_witness_between,
+};
+use crate::graph_moves::{
+    enumerate_graph_move_successors, enumerate_graph_proposals, GraphMoveSuccessor,
+    GraphMoveSuccessors, GraphProposal, SameFuturePastSignatureGap,
 };
 use crate::invariants::{
     check_invariants_2x2, check_same_dimension_square_bowen_franks_invariants,
@@ -5742,6 +5742,66 @@ mod tests {
         assert!(telemetry
             .move_family_telemetry
             .contains_key("elementary_conjugation_3x3"));
+    }
+
+    #[test]
+    fn test_graph_only_dyn_promotes_retained_rectangular_factorisation_2x3_step() {
+        let source = DynMatrix::from_sq(&SqMatrix::new([[4, 2], [1, 4]]));
+        let target = DynMatrix::new(3, 3, vec![1, 3, 1, 1, 3, 0, 2, 6, 4]);
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 3,
+            max_entry: 12,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        };
+
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
+        let path = match result {
+            DynSseResult::Equivalent(path) => path,
+            other => panic!(
+                "expected promoted graph-only search to find the retained 2x3 endpoint lift, got {other:?}"
+            ),
+        };
+
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(path.steps.len(), 1);
+        assert!(telemetry
+            .move_family_telemetry
+            .contains_key("rectangular_factorisation_2x3"));
+    }
+
+    #[test]
+    fn test_graph_only_dyn_promotes_retained_rectangular_factorisation_3x3_to_2_step() {
+        let source = DynMatrix::new(3, 3, vec![4, 4, 4, 1, 1, 1, 0, 1, 3]);
+        let target = DynMatrix::from_sq(&SqMatrix::new([[3, 1], [1, 5]]));
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 3,
+            max_entry: 12,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        };
+
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
+        let path = match result {
+            DynSseResult::Equivalent(path) => path,
+            other => panic!(
+                "expected promoted graph-only search to find the retained 3x3-to-2 endpoint lift, got {other:?}"
+            ),
+        };
+
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(path.steps.len(), 1);
+        assert!(telemetry
+            .move_family_telemetry
+            .contains_key("rectangular_factorisation_3x3_to_2"));
     }
 
     #[test]

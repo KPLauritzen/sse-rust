@@ -3516,15 +3516,24 @@ fn enabled_rectangular_factorisation_2x3(
     max_intermediate_dim: usize,
     move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 2 && max_intermediate_dim >= 3 && move_family_policy.permits_factorisations()
+    input_dim == 2
+        && max_intermediate_dim >= 3
+        && match move_family_policy {
+            MoveFamilyPolicy::GraphOnly => max_intermediate_dim == 3,
+            MoveFamilyPolicy::Mixed | MoveFamilyPolicy::GraphPlusStructured => true,
+        }
 }
 
 fn enabled_rectangular_factorisation_3x3_to_2(
     input_dim: usize,
-    _max_intermediate_dim: usize,
+    max_intermediate_dim: usize,
     move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && move_family_policy.permits_factorisations()
+    input_dim == 3
+        && match move_family_policy {
+            MoveFamilyPolicy::GraphOnly => max_intermediate_dim == 3,
+            MoveFamilyPolicy::Mixed | MoveFamilyPolicy::GraphPlusStructured => true,
+        }
 }
 
 fn enabled_binary_sparse_factorisation_3x3_to_4(
@@ -4942,10 +4951,30 @@ mod tests {
     }
 
     #[test]
-    fn test_selected_family_labels_for_graph_only_3x3_keep_retained_conjugation_only() {
+    fn test_selected_family_labels_for_graph_only_2x2_keep_retained_endpoint_lift_only() {
+        assert_eq!(
+            selected_factorisation_family_labels(2, 3, MoveFamilyPolicy::GraphOnly),
+            vec!["rectangular_factorisation_2x3"]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_graph_only_2x2_skip_endpoint_lift_above_retained_dim_cap() {
+        assert_eq!(
+            selected_factorisation_family_labels(2, 4, MoveFamilyPolicy::GraphOnly),
+            Vec::<&'static str>::new()
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_graph_only_3x3_keep_retained_endpoint_return_and_conjugation(
+    ) {
         assert_eq!(
             selected_factorisation_family_labels(3, 3, MoveFamilyPolicy::GraphOnly),
-            vec!["elementary_conjugation_3x3"]
+            vec![
+                "rectangular_factorisation_3x3_to_2",
+                "elementary_conjugation_3x3"
+            ]
         );
     }
 
