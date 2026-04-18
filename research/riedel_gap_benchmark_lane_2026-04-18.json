@@ -1,0 +1,527 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "riedel_baker_k4__graph_only__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=4 under graph-only moves.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph-only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k4__graph_plus_structured__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=4 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k4__mixed__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=4 under mixed moves.",
+      "required": false,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    },
+    {
+      "id": "riedel_baker_k6__graph_only__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=6 under graph-only moves.",
+      "required": false,
+      "a": [[6, 2], [1, 6]],
+      "b": [[5, 1], [1, 7]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph-only",
+        "schedule_order": 40
+      }
+    },
+    {
+      "id": "riedel_baker_k6__graph_plus_structured__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=6 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[6, 2], [1, 6]],
+      "b": [[5, 1], [1, 7]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 50
+      }
+    },
+    {
+      "id": "riedel_baker_k6__mixed__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=6 under mixed moves.",
+      "required": false,
+      "a": [[6, 2], [1, 6]],
+      "b": [[5, 1], [1, 7]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 6,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 3000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "mixed",
+        "schedule_order": 60
+      }
+    },
+    {
+      "id": "riedel_baker_k8__graph_only__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=8 under graph-only moves.",
+      "required": false,
+      "a": [[8, 2], [1, 8]],
+      "b": [[7, 1], [1, 9]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph-only",
+        "schedule_order": 70
+      }
+    },
+    {
+      "id": "riedel_baker_k8__graph_plus_structured__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=8 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[8, 2], [1, 8]],
+      "b": [[7, 1], [1, 9]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 80
+      }
+    },
+    {
+      "id": "riedel_baker_k8__mixed__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=8 under mixed moves.",
+      "required": false,
+      "a": [[8, 2], [1, 8]],
+      "b": [[7, 1], [1, 9]],
+      "config": {
+        "max_lag": 8,
+        "max_intermediate_dim": 3,
+        "max_entry": 8,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 4000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "mixed",
+        "schedule_order": 90
+      }
+    },
+    {
+      "id": "riedel_baker_k10__graph_only__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=10 under graph-only moves.",
+      "required": false,
+      "a": [[10, 2], [1, 10]],
+      "b": [[9, 1], [1, 11]],
+      "config": {
+        "max_lag": 11,
+        "max_intermediate_dim": 3,
+        "max_entry": 10,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 5000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph-only",
+        "schedule_order": 100
+      }
+    },
+    {
+      "id": "riedel_baker_k10__graph_plus_structured__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=10 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[10, 2], [1, 10]],
+      "b": [[9, 1], [1, 11]],
+      "config": {
+        "max_lag": 11,
+        "max_intermediate_dim": 3,
+        "max_entry": 10,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 5000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 110
+      }
+    },
+    {
+      "id": "riedel_baker_k10__mixed__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=10 under mixed moves.",
+      "required": false,
+      "a": [[10, 2], [1, 10]],
+      "b": [[9, 1], [1, 11]],
+      "config": {
+        "max_lag": 11,
+        "max_intermediate_dim": 3,
+        "max_entry": 10,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 5000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "mixed",
+        "schedule_order": 120
+      }
+    },
+    {
+      "id": "riedel_baker_k12__graph_only__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=12 under graph-only moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph-only",
+        "schedule_order": 130
+      }
+    },
+    {
+      "id": "riedel_baker_k12__graph_plus_structured__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=12 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 140
+      }
+    },
+    {
+      "id": "riedel_baker_k12__mixed__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=12 under mixed moves.",
+      "required": false,
+      "a": [[12, 2], [1, 12]],
+      "b": [[11, 1], [1, 13]],
+      "config": {
+        "max_lag": 12,
+        "max_intermediate_dim": 3,
+        "max_entry": 12,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 8000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "mixed",
+        "schedule_order": 150
+      }
+    },
+    {
+      "id": "riedel_baker_k14__graph_only__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=14 under graph-only moves.",
+      "required": false,
+      "a": [[14, 2], [1, 14]],
+      "b": [[13, 1], [1, 15]],
+      "config": {
+        "max_lag": 14,
+        "max_intermediate_dim": 3,
+        "max_entry": 14,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph-only",
+        "schedule_order": 160
+      }
+    },
+    {
+      "id": "riedel_baker_k14__graph_plus_structured__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=14 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[14, 2], [1, 14]],
+      "b": [[13, 1], [1, 15]],
+      "config": {
+        "max_lag": 14,
+        "max_intermediate_dim": 3,
+        "max_entry": 14,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 170
+      }
+    },
+    {
+      "id": "riedel_baker_k14__mixed__benchmark_lane",
+      "description": "Retained Riedel/Baker benchmark lane: k=14 under mixed moves.",
+      "required": false,
+      "a": [[14, 2], [1, 14]],
+      "b": [[13, 1], [1, 15]],
+      "config": {
+        "max_lag": 14,
+        "max_intermediate_dim": 3,
+        "max_entry": 14,
+        "move_family_policy": "mixed"
+      },
+      "timeout_ms": 12000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "retained", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_lane",
+        "strategy": "mixed",
+        "schedule_order": 180
+      }
+    }
+  ]
+}

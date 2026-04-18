@@ -1,0 +1,104 @@
+{
+  "schema_version": 5,
+  "cases": [
+    {
+      "id": "riedel_baker_k16__graph_only__benchmark_frontier",
+      "description": "Riedel/Baker frontier repeat probe: k=16 under graph-only moves.",
+      "required": false,
+      "a": [[16, 2], [1, 16]],
+      "b": [[15, 1], [1, 17]],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 3,
+        "max_entry": 16,
+        "move_family_policy": "graph-only"
+      },
+      "measurement": {
+        "warmup_runs": 0,
+        "repeat_runs": 3
+      },
+      "timeout_ms": 16000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "frontier", "repeat", "graph-only"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_k16_frontier",
+        "strategy": "graph-only",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_baker_k16__graph_plus_structured__benchmark_frontier",
+      "description": "Riedel/Baker frontier repeat probe: k=16 under graph_plus_structured moves.",
+      "required": false,
+      "a": [[16, 2], [1, 16]],
+      "b": [[15, 1], [1, 17]],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 3,
+        "max_entry": 16,
+        "move_family_policy": "graph_plus_structured"
+      },
+      "measurement": {
+        "warmup_runs": 0,
+        "repeat_runs": 3
+      },
+      "timeout_ms": 16000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "frontier", "repeat", "graph_plus_structured"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_k16_frontier",
+        "strategy": "graph_plus_structured",
+        "schedule_order": 20
+      }
+    },
+    {
+      "id": "riedel_baker_k16__mixed__benchmark_frontier",
+      "description": "Riedel/Baker frontier repeat probe: k=16 under mixed moves.",
+      "required": false,
+      "a": [[16, 2], [1, 16]],
+      "b": [[15, 1], [1, 17]],
+      "config": {
+        "max_lag": 16,
+        "max_intermediate_dim": 3,
+        "max_entry": 16,
+        "move_family_policy": "mixed"
+      },
+      "measurement": {
+        "warmup_runs": 0,
+        "repeat_runs": 3
+      },
+      "timeout_ms": 16000,
+      "allowed_outcomes": ["equivalent", "unknown", "timeout"],
+      "target_outcome": null,
+      "points": {
+        "equivalent": 0,
+        "not_equivalent": 0,
+        "unknown": 0,
+        "timeout": 0,
+        "panic": 0
+      },
+      "tags": ["riedel-baker", "benchmark-lane", "frontier", "repeat", "mixed"],
+      "campaign": {
+        "id": "riedel_gap_benchmark_k16_frontier",
+        "strategy": "mixed",
+        "schedule_order": 30
+      }
+    }
+  ]
+}
