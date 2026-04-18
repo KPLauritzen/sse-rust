@@ -763,6 +763,7 @@ fn append_representative_outsplit_successor_nodes(
                 }
             })
             .collect();
+        let division = division_matrix_from_assignment(&assignment, parent_count);
 
         for split in split_row_into_children(&parent_rows[split_parent], 2) {
             // The two split children are interchangeable up to permutation.
@@ -786,7 +787,7 @@ fn append_representative_outsplit_successor_nodes(
                     .copied()
                     .collect(),
             );
-            let outsplit = edge.mul(&division_matrix_from_assignment(&assignment, parent_count));
+            let outsplit = edge.mul(&division);
 
             if transpose_result {
                 push_canonical_graph_successor_node(family, outsplit.transpose(), seen, nodes);

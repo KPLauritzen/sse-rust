@@ -4,13 +4,12 @@ use std::time::Instant;
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use crate::factorisation::visit_factorisations_with_family_for_policy;
+use crate::graph_moves::enumerate_graph_move_successor_nodes;
 #[cfg(test)]
+use crate::graph_moves::find_exact_graph_move_witness_between;
 use crate::graph_moves::{
-    enumerate_graph_move_successor_nodes, find_exact_graph_move_witness_between,
-};
-use crate::graph_moves::{
-    enumerate_graph_move_successors, enumerate_graph_proposals, GraphMoveSuccessor,
-    GraphMoveSuccessors, GraphProposal, SameFuturePastSignatureGap,
+    enumerate_graph_move_successors, enumerate_graph_proposals, GraphProposal,
+    SameFuturePastSignatureGap,
 };
 use crate::invariants::{
     check_invariants_2x2, check_same_dimension_square_bowen_franks_invariants,
@@ -164,11 +163,73 @@ fn frontier_expansion_settings(config: &SearchConfig) -> FrontierExpansionSettin
     }
 }
 
+struct GraphOnlyPolicySuccessor {
+    family: &'static str,
+    matrix: DynMatrix,
+    orig_matrix: DynMatrix,
+    step: Option<EsseStep>,
+}
+
+struct GraphOnlyPolicySuccessors {
+    candidates: usize,
+    family_candidates: BTreeMap<&'static str, usize>,
+    nodes: Vec<GraphOnlyPolicySuccessor>,
+}
+
 fn enumerate_graph_only_policy_successors(
     current: &DynMatrix,
     config: &SearchConfig,
-) -> GraphMoveSuccessors {
-    let mut successors = enumerate_graph_move_successors(current, config.max_intermediate_dim);
+) -> GraphOnlyPolicySuccessors {
+    enumerate_graph_only_policy_successors_with_step_mode(current, config, true)
+}
+
+fn enumerate_graph_only_policy_successor_nodes(
+    current: &DynMatrix,
+    config: &SearchConfig,
+) -> GraphOnlyPolicySuccessors {
+    enumerate_graph_only_policy_successors_with_step_mode(current, config, false)
+}
+
+fn enumerate_graph_only_policy_successors_with_step_mode(
+    current: &DynMatrix,
+    config: &SearchConfig,
+    retain_steps: bool,
+) -> GraphOnlyPolicySuccessors {
+    let mut successors = if retain_steps {
+        let graph_successors =
+            enumerate_graph_move_successors(current, config.max_intermediate_dim);
+        GraphOnlyPolicySuccessors {
+            candidates: graph_successors.candidates,
+            family_candidates: graph_successors.family_candidates,
+            nodes: graph_successors
+                .nodes
+                .into_iter()
+                .map(|successor| GraphOnlyPolicySuccessor {
+                    family: successor.family,
+                    matrix: successor.matrix,
+                    orig_matrix: successor.orig_matrix,
+                    step: Some(successor.step),
+                })
+                .collect(),
+        }
+    } else {
+        let graph_successors =
+            enumerate_graph_move_successor_nodes(current, config.max_intermediate_dim);
+        GraphOnlyPolicySuccessors {
+            candidates: graph_successors.candidates,
+            family_candidates: graph_successors.family_candidates,
+            nodes: graph_successors
+                .nodes
+                .into_iter()
+                .map(|successor| GraphOnlyPolicySuccessor {
+                    family: successor.family,
+                    matrix: successor.matrix,
+                    orig_matrix: successor.orig_matrix,
+                    step: None,
+                })
+                .collect(),
+        }
+    };
     let mut seen: HashSet<DynMatrix> = successors
         .nodes
         .iter()
@@ -190,11 +251,11 @@ fn enumerate_graph_only_policy_successors(
                 return;
             }
 
-            successors.nodes.push(GraphMoveSuccessor {
+            successors.nodes.push(GraphOnlyPolicySuccessor {
                 family,
                 matrix: next_canon,
                 orig_matrix: next,
-                step: EsseStep { u, v },
+                step: retain_steps.then_some(EsseStep { u, v }),
             });
         },
     );
@@ -3666,7 +3727,8 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
         let current_frontier_len = current_frontier.len();
-        let computed: Vec<(DynMatrix, GraphMoveSuccessors)> = current_frontier
+        let retain_steps = observer.is_some();
+        let computed: Vec<(DynMatrix, GraphOnlyPolicySuccessors)> = current_frontier
             .par_iter()
             .map(|current_canon| {
                 let current = orig
@@ -3674,7 +3736,11 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                     .expect("frontier node should have an original matrix");
                 (
                     current_canon.clone(),
-                    enumerate_graph_only_policy_successors(current, config),
+                    if retain_steps {
+                        enumerate_graph_only_policy_successors(current, config)
+                    } else {
+                        enumerate_graph_only_policy_successor_nodes(current, config)
+                    },
                 )
             })
             .collect();
@@ -3737,7 +3803,10 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                             to_orig: successor.orig_matrix.clone(),
                             from_depth: layer_depth,
                             to_depth: next_depth,
-                            step: successor.step.clone(),
+                            step: successor
+                                .step
+                                .clone()
+                                .expect("observer graph-only expansion should retain steps"),
                             status: SearchEdgeStatus::SeenCollision,
                             approximate_other_side_hit: false,
                             enqueued: false,
@@ -3798,7 +3867,10 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                                 to_orig: successor.orig_matrix.clone(),
                                 from_depth: layer_depth,
                                 to_depth: next_depth,
-                                step: successor.step.clone(),
+                                step: successor
+                                    .step
+                                    .clone()
+                                    .expect("observer graph-only expansion should retain steps"),
                                 status: record_status,
                                 approximate_other_side_hit: false,
                                 enqueued: false,
@@ -3843,7 +3915,10 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                         to_orig: successor.orig_matrix.clone(),
                         from_depth: layer_depth,
                         to_depth: next_depth,
-                        step: successor.step.clone(),
+                        step: successor
+                            .step
+                            .clone()
+                            .expect("observer graph-only expansion should retain steps"),
                         status: record_status,
                         approximate_other_side_hit: false,
                         enqueued: true,
@@ -4006,7 +4081,7 @@ fn search_graph_only_dyn_with_telemetry(
                 timed_out = true;
                 break;
             }
-            let computed: Vec<(DynMatrix, GraphMoveSuccessors)> = chunk
+            let computed: Vec<(DynMatrix, GraphOnlyPolicySuccessors)> = chunk
                 .par_iter()
                 .map(|current_canon| {
                     let current = orig
@@ -4014,7 +4089,7 @@ fn search_graph_only_dyn_with_telemetry(
                         .expect("frontier node should have an original matrix");
                     (
                         current_canon.clone(),
-                        enumerate_graph_only_policy_successors(current, config),
+                        enumerate_graph_only_policy_successor_nodes(current, config),
                     )
                 })
                 .collect();
