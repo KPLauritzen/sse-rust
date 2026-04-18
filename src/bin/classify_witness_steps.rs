@@ -303,7 +303,7 @@ fn matching_factorisation_families(
         max_entry,
         move_family_policy,
         |family, u, v| {
-            if u.mul(&v) == *from_matrix && v.mul(&u) == *to_matrix {
+            if u.mul(&v) == from_matrix.clone() && v.mul(&u) == to_matrix.clone() {
                 families.push(family.to_string());
             }
         },
