@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sse_core::conjugacy::{
     derive_invariant_compatible_positive_conjugacy_proposals_2x2,
@@ -65,6 +65,7 @@ struct SeedEvaluation {
     local_lag: usize,
     path_families: Vec<String>,
     residual_arithmetic: ResidualArithmeticPriority,
+    residual_one_step: ResidualOneStepPriority,
     result: SseResult<2>,
     telemetry: SearchTelemetry,
 }
@@ -74,6 +75,7 @@ struct RankedLocalSeed {
     local_seed: LocalSeed,
     score: PositiveConjugacySeedCandidate2x2,
     residual_arithmetic: ResidualArithmeticPriority,
+    residual_one_step: ResidualOneStepPriority,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,12 +86,22 @@ struct ResidualArithmeticPriority {
     residual_endpoint_l1_distance: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ResidualOneStepPriority {
+    exact_hit: bool,
+    successor_count: usize,
+    improving_successors: usize,
+    improving_move_families: usize,
+    best_successor_target_l1_distance: u32,
+}
+
 #[derive(Clone)]
 struct ProposalVariantEvaluation {
     label: &'static str,
     proposals: Vec<PositiveConjugacyProposal2x2>,
     seeded_evaluations: Vec<SeedEvaluation>,
     residual_arithmetic_evaluations: Vec<SeedEvaluation>,
+    residual_one_step_evaluations: Vec<SeedEvaluation>,
     blind_evaluations: Vec<SeedEvaluation>,
 }
 
@@ -241,12 +253,16 @@ fn main() -> Result<(), String> {
         println!("Anchor-aware residual arithmetic shortlist:");
         print_seed_evaluations("R", &variant.residual_arithmetic_evaluations);
         println!();
+        println!("Residual one-step continuation shortlist:");
+        print_seed_evaluations("D", &variant.residual_one_step_evaluations);
+        println!();
         println!("Blind target-nearest control shortlist:");
         print_seed_evaluations("C", &variant.blind_evaluations);
         println!();
         print_comparison_summary(
             &variant.seeded_evaluations,
             &variant.residual_arithmetic_evaluations,
+            &variant.residual_one_step_evaluations,
             &variant.blind_evaluations,
         );
         println!();
@@ -284,11 +300,13 @@ fn evaluate_proposal_variant(
         .iter()
         .map(|seed| (seed.matrix.clone(), seed.clone()))
         .collect::<BTreeMap<_, _>>();
-    let ranked_seeds = attach_seed_scores(seeds, &score_by_matrix, source, target);
+    let ranked_seeds = attach_seed_scores(seeds, &score_by_matrix, source, target, search_config);
 
     let seeded_shortlist = build_seeded_shortlist(&ranked_seeds, shortlist_limit);
     let residual_arithmetic_shortlist =
         build_residual_arithmetic_shortlist(&ranked_seeds, shortlist_limit);
+    let residual_one_step_shortlist =
+        build_residual_one_step_shortlist(&ranked_seeds, shortlist_limit);
     let blind_shortlist = build_blind_shortlist(&ranked_seeds, shortlist_limit);
     let seeded_evaluations = seeded_shortlist
         .iter()
@@ -296,6 +314,11 @@ fn evaluate_proposal_variant(
         .map(|ranked| evaluate_seed(ranked, source, target, search_config))
         .collect::<Vec<_>>();
     let residual_arithmetic_evaluations = residual_arithmetic_shortlist
+        .iter()
+        .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
+        .map(|ranked| evaluate_seed(ranked, source, target, search_config))
+        .collect::<Vec<_>>();
+    let residual_one_step_evaluations = residual_one_step_shortlist
         .iter()
         .filter(|ranked| ranked.local_seed.local_lag <= search_config.max_lag)
         .map(|ranked| evaluate_seed(ranked, source, target, search_config))
@@ -311,6 +334,7 @@ fn evaluate_proposal_variant(
         proposals,
         seeded_evaluations,
         residual_arithmetic_evaluations,
+        residual_one_step_evaluations,
         blind_evaluations,
     }
 }
@@ -661,6 +685,7 @@ fn attach_seed_scores(
     score_by_matrix: &BTreeMap<SqMatrix<2>, PositiveConjugacySeedCandidate2x2>,
     source: &SqMatrix<2>,
     target: &SqMatrix<2>,
+    search_config: &SearchConfig,
 ) -> Vec<RankedLocalSeed> {
     seeds
         .iter()
@@ -671,6 +696,12 @@ fn attach_seed_scores(
                     local_seed: seed.clone(),
                     score: score.clone(),
                     residual_arithmetic: derive_residual_arithmetic_priority(seed, source, target),
+                    residual_one_step: derive_residual_one_step_priority(
+                        seed,
+                        source,
+                        target,
+                        search_config,
+                    ),
                 })
         })
         .collect()
@@ -786,6 +817,84 @@ fn build_blind_shortlist(seeds: &[RankedLocalSeed], limit: usize) -> Vec<RankedL
     expand_anchor_variants_for_top_matrices(ranked, limit)
 }
 
+fn build_residual_one_step_shortlist(
+    seeds: &[RankedLocalSeed],
+    limit: usize,
+) -> Vec<RankedLocalSeed> {
+    let mut ranked = seeds.to_vec();
+    ranked.sort_by(|left, right| {
+        usize::from(!left.residual_one_step.exact_hit)
+            .cmp(&usize::from(!right.residual_one_step.exact_hit))
+            .then(
+                left.residual_one_step
+                    .best_successor_target_l1_distance
+                    .cmp(&right.residual_one_step.best_successor_target_l1_distance),
+            )
+            .then(
+                right
+                    .residual_one_step
+                    .improving_successors
+                    .cmp(&left.residual_one_step.improving_successors),
+            )
+            .then(
+                right
+                    .residual_one_step
+                    .improving_move_families
+                    .cmp(&left.residual_one_step.improving_move_families),
+            )
+            .then(
+                right
+                    .residual_one_step
+                    .successor_count
+                    .cmp(&left.residual_one_step.successor_count),
+            )
+            .then(
+                exact_positive_class_sort_key(left.residual_arithmetic.exact_positive_class).cmp(
+                    &exact_positive_class_sort_key(right.residual_arithmetic.exact_positive_class),
+                ),
+            )
+            .then(
+                usize::from(!left.residual_arithmetic.strictly_positive_pair).cmp(&usize::from(
+                    !right.residual_arithmetic.strictly_positive_pair,
+                )),
+            )
+            .then(
+                usize::from(!left.residual_arithmetic.gl2z_similar)
+                    .cmp(&usize::from(!right.residual_arithmetic.gl2z_similar)),
+            )
+            .then(
+                left.residual_arithmetic
+                    .residual_endpoint_l1_distance
+                    .cmp(&right.residual_arithmetic.residual_endpoint_l1_distance),
+            )
+            .then(
+                left.score
+                    .proposal_l1_distance
+                    .cmp(&right.score.proposal_l1_distance),
+            )
+            .then(
+                left.score
+                    .nearest_proposal_rank
+                    .cmp(&right.score.nearest_proposal_rank),
+            )
+            .then(
+                left.score
+                    .target_l1_distance
+                    .cmp(&right.score.target_l1_distance),
+            )
+            .then(left.local_seed.local_lag.cmp(&right.local_seed.local_lag))
+            .then(left.local_seed.anchor.cmp(&right.local_seed.anchor))
+            .then(
+                left.score
+                    .matrix
+                    .max_entry()
+                    .cmp(&right.score.matrix.max_entry()),
+            )
+            .then(left.score.matrix.cmp(&right.score.matrix))
+    });
+    expand_anchor_variants_for_top_matrices(ranked, limit)
+}
+
 fn expand_anchor_variants_for_top_matrices(
     ranked: Vec<RankedLocalSeed>,
     matrix_limit: usize,
@@ -837,6 +946,7 @@ fn evaluate_seed(
         local_lag: ranked_seed.local_seed.local_lag,
         path_families: ranked_seed.local_seed.path_families.clone(),
         residual_arithmetic: ranked_seed.residual_arithmetic,
+        residual_one_step: ranked_seed.residual_one_step,
         result,
         telemetry,
     }
@@ -899,6 +1009,16 @@ fn print_seed_evaluations(prefix: &str, evaluations: &[SeedEvaluation]) {
             yes_no(evaluation.residual_arithmetic.strictly_positive_pair),
             evaluation.residual_arithmetic.residual_endpoint_l1_distance
         );
+        println!(
+            "     one_step_hit={} one_step_best_l1={} one_step_improving={} one_step_families={} one_step_successors={}",
+            yes_no(evaluation.residual_one_step.exact_hit),
+            evaluation
+                .residual_one_step
+                .best_successor_target_l1_distance,
+            evaluation.residual_one_step.improving_successors,
+            evaluation.residual_one_step.improving_move_families,
+            evaluation.residual_one_step.successor_count
+        );
         print_result_summary(
             "residual",
             &evaluation.result,
@@ -920,6 +1040,7 @@ fn proposal_kind_label(kind: PositiveConjugacyProposalKind2x2) -> &'static str {
 fn print_comparison_summary(
     seeded: &[SeedEvaluation],
     residual_arithmetic: &[SeedEvaluation],
+    residual_one_step: &[SeedEvaluation],
     blind: &[SeedEvaluation],
 ) {
     println!("Summary:");
@@ -928,9 +1049,14 @@ fn print_comparison_summary(
         "  residual-arithmetic: {}",
         summarize_attempts(residual_arithmetic)
     );
+    println!(
+        "  residual-one-step: {}",
+        summarize_attempts(residual_one_step)
+    );
     println!("  blind: {}", summarize_attempts(blind));
     print_head_to_head_summary("proposal-guided", seeded, blind);
     print_head_to_head_summary("residual-arithmetic", residual_arithmetic, blind);
+    print_head_to_head_summary("residual-one-step", residual_one_step, blind);
 }
 
 fn print_head_to_head_summary(label: &str, ranked: &[SeedEvaluation], blind: &[SeedEvaluation]) {
@@ -972,11 +1098,12 @@ fn print_variant_summary(variants: &[ProposalVariantEvaluation]) {
     println!("Variant summary:");
     for variant in variants {
         println!(
-            "  {}: proposals={}, proposal-guided={}, residual-arithmetic={}, blind={}",
+            "  {}: proposals={}, proposal-guided={}, residual-arithmetic={}, residual-one-step={}, blind={}",
             variant.label,
             variant.proposals.len(),
             summarize_attempts(&variant.seeded_evaluations),
             summarize_attempts(&variant.residual_arithmetic_evaluations),
+            summarize_attempts(&variant.residual_one_step_evaluations),
             summarize_attempts(&variant.blind_evaluations)
         );
     }
@@ -1026,6 +1153,45 @@ fn derive_residual_arithmetic_priority(
         strictly_positive_pair: profile.source.strictly_positive
             && profile.target.strictly_positive,
         residual_endpoint_l1_distance: matrix_l1_distance(residual_source, residual_target),
+    }
+}
+
+fn derive_residual_one_step_priority(
+    seed: &LocalSeed,
+    source: &SqMatrix<2>,
+    target: &SqMatrix<2>,
+    search_config: &SearchConfig,
+) -> ResidualOneStepPriority {
+    let (residual_source, residual_target) = residual_endpoints(seed, source, target);
+    let current_distance = matrix_l1_distance(residual_source, residual_target);
+    let mut successor_count = 0usize;
+    let mut improving_successors = 0usize;
+    let mut improving_move_families = BTreeSet::<String>::new();
+    let mut best_successor_target_l1_distance = current_distance;
+    let mut exact_hit = false;
+
+    for (successor, family) in
+        enumerate_direct_same_dimension_successors(residual_source, search_config)
+    {
+        successor_count += 1;
+        let successor_distance = matrix_l1_distance(&successor, residual_target);
+        best_successor_target_l1_distance =
+            best_successor_target_l1_distance.min(successor_distance);
+        if successor == *residual_target {
+            exact_hit = true;
+        }
+        if successor_distance < current_distance {
+            improving_successors += 1;
+            improving_move_families.insert(family);
+        }
+    }
+
+    ResidualOneStepPriority {
+        exact_hit,
+        successor_count,
+        improving_successors,
+        improving_move_families: improving_move_families.len(),
+        best_successor_target_l1_distance,
     }
 }
 
@@ -1141,6 +1307,13 @@ mod tests {
                 target_l1_distance,
             },
             residual_arithmetic,
+            residual_one_step: ResidualOneStepPriority {
+                exact_hit: false,
+                successor_count: 0,
+                improving_successors: 0,
+                improving_move_families: 0,
+                best_successor_target_l1_distance: u32::MAX,
+            },
         }
     }
 
@@ -1237,6 +1410,13 @@ mod tests {
                         strictly_positive_pair: true,
                         residual_endpoint_l1_distance: 3,
                     },
+                    residual_one_step: ResidualOneStepPriority {
+                        exact_hit: false,
+                        successor_count: 0,
+                        improving_successors: 0,
+                        improving_move_families: 0,
+                        best_successor_target_l1_distance: u32::MAX,
+                    },
                 },
                 RankedLocalSeed {
                     local_seed: LocalSeed {
@@ -1257,6 +1437,13 @@ mod tests {
                         strictly_positive_pair: true,
                         residual_endpoint_l1_distance: 3,
                     },
+                    residual_one_step: ResidualOneStepPriority {
+                        exact_hit: false,
+                        successor_count: 0,
+                        improving_successors: 0,
+                        improving_move_families: 0,
+                        best_successor_target_l1_distance: u32::MAX,
+                    },
                 },
                 RankedLocalSeed {
                     local_seed: LocalSeed {
@@ -1276,6 +1463,13 @@ mod tests {
                         gl2z_similar: true,
                         strictly_positive_pair: true,
                         residual_endpoint_l1_distance: 4,
+                    },
+                    residual_one_step: ResidualOneStepPriority {
+                        exact_hit: false,
+                        successor_count: 0,
+                        improving_successors: 0,
+                        improving_move_families: 0,
+                        best_successor_target_l1_distance: u32::MAX,
                     },
                 },
             ],
@@ -1342,7 +1536,13 @@ mod tests {
         }];
         let score_by_matrix = [(score.matrix.clone(), score)].into_iter().collect();
 
-        let ranked = attach_seed_scores(&seeds, &score_by_matrix, &source, &target);
+        let ranked = attach_seed_scores(
+            &seeds,
+            &score_by_matrix,
+            &source,
+            &target,
+            &mixed_search_config(6),
+        );
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(
@@ -1350,5 +1550,131 @@ mod tests {
             6
         );
         assert_eq!(ranked[0].score.target_l1_distance, 10);
+    }
+
+    #[test]
+    fn residual_one_step_shortlist_prefers_exact_hit_before_closer_blind_seed() {
+        let exact_hit = RankedLocalSeed {
+            local_seed: LocalSeed {
+                matrix: SqMatrix::new([[1, 2], [3, 1]]),
+                anchor: SeedAnchor::Source,
+                local_lag: 1,
+                path_families: vec!["test".to_string()],
+            },
+            score: PositiveConjugacySeedCandidate2x2 {
+                matrix: SqMatrix::new([[1, 2], [3, 1]]),
+                nearest_proposal_rank: 2,
+                proposal_l1_distance: 2,
+                target_l1_distance: 6,
+            },
+            residual_arithmetic: ResidualArithmeticPriority {
+                exact_positive_class: None,
+                gl2z_similar: true,
+                strictly_positive_pair: true,
+                residual_endpoint_l1_distance: 6,
+            },
+            residual_one_step: ResidualOneStepPriority {
+                exact_hit: true,
+                successor_count: 1,
+                improving_successors: 1,
+                improving_move_families: 1,
+                best_successor_target_l1_distance: 0,
+            },
+        };
+        let closer_but_stuck = RankedLocalSeed {
+            local_seed: LocalSeed {
+                matrix: SqMatrix::new([[0, 5], [1, 2]]),
+                anchor: SeedAnchor::Target,
+                local_lag: 1,
+                path_families: vec!["test".to_string()],
+            },
+            score: PositiveConjugacySeedCandidate2x2 {
+                matrix: SqMatrix::new([[0, 5], [1, 2]]),
+                nearest_proposal_rank: 1,
+                proposal_l1_distance: 0,
+                target_l1_distance: 1,
+            },
+            residual_arithmetic: ResidualArithmeticPriority {
+                exact_positive_class: None,
+                gl2z_similar: true,
+                strictly_positive_pair: false,
+                residual_endpoint_l1_distance: 2,
+            },
+            residual_one_step: ResidualOneStepPriority {
+                exact_hit: false,
+                successor_count: 0,
+                improving_successors: 0,
+                improving_move_families: 0,
+                best_successor_target_l1_distance: 2,
+            },
+        };
+
+        let shortlist = build_residual_one_step_shortlist(&[closer_but_stuck, exact_hit], 1);
+
+        assert_eq!(shortlist.len(), 1);
+        assert!(shortlist[0].residual_one_step.exact_hit);
+    }
+
+    #[test]
+    fn residual_one_step_shortlist_prefers_lower_best_distance_before_extra_width() {
+        let sharper = RankedLocalSeed {
+            local_seed: LocalSeed {
+                matrix: SqMatrix::new([[1, 1], [6, 1]]),
+                anchor: SeedAnchor::Target,
+                local_lag: 1,
+                path_families: vec!["test".to_string()],
+            },
+            score: PositiveConjugacySeedCandidate2x2 {
+                matrix: SqMatrix::new([[1, 1], [6, 1]]),
+                nearest_proposal_rank: 2,
+                proposal_l1_distance: 2,
+                target_l1_distance: 10,
+            },
+            residual_arithmetic: ResidualArithmeticPriority {
+                exact_positive_class: None,
+                gl2z_similar: true,
+                strictly_positive_pair: true,
+                residual_endpoint_l1_distance: 6,
+            },
+            residual_one_step: ResidualOneStepPriority {
+                exact_hit: false,
+                successor_count: 2,
+                improving_successors: 1,
+                improving_move_families: 1,
+                best_successor_target_l1_distance: 3,
+            },
+        };
+        let wider_but_blunter = RankedLocalSeed {
+            local_seed: LocalSeed {
+                matrix: SqMatrix::new([[2, 5], [1, 0]]),
+                anchor: SeedAnchor::Target,
+                local_lag: 2,
+                path_families: vec!["test".to_string()],
+            },
+            score: PositiveConjugacySeedCandidate2x2 {
+                matrix: SqMatrix::new([[2, 5], [1, 0]]),
+                nearest_proposal_rank: 1,
+                proposal_l1_distance: 1,
+                target_l1_distance: 2,
+            },
+            residual_arithmetic: ResidualArithmeticPriority {
+                exact_positive_class: None,
+                gl2z_similar: true,
+                strictly_positive_pair: false,
+                residual_endpoint_l1_distance: 4,
+            },
+            residual_one_step: ResidualOneStepPriority {
+                exact_hit: false,
+                successor_count: 5,
+                improving_successors: 3,
+                improving_move_families: 2,
+                best_successor_target_l1_distance: 4,
+            },
+        };
+
+        let shortlist = build_residual_one_step_shortlist(&[wider_but_blunter, sharper.clone()], 1);
+
+        assert_eq!(shortlist.len(), 1);
+        assert_eq!(shortlist[0].score.matrix, sharper.score.matrix);
     }
 }
