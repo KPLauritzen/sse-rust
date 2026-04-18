@@ -1,8 +1,10 @@
-# Search Improvements
+# Durable Solver Context
 
-This file is intentionally non-authoritative for outstanding work.
+This file keeps durable solver/search context under the historical filename
+`TODO.md`.
 
-Use `bd` as the source of truth for anything actionable:
+It is intentionally non-authoritative for outstanding work. Use `bd` as the
+source of truth for anything actionable:
 
 - `bd prime`
 - `bd ready`
@@ -10,7 +12,8 @@ Use `bd` as the source of truth for anything actionable:
 - `bd list --status open`
 
 This document only keeps durable context that is useful when reading or
-re-orienting the search code.
+re-orienting the search code. Do not add owners, statuses, priorities, or next
+actions here.
 
 ## Current Solver Stack
 
@@ -24,7 +27,6 @@ The current solver stack is:
 - balanced elementary-equivalence witness search in [`src/balanced.rs`](../src/balanced.rs),
 - sampled positive-conjugacy proposal sidecar search in [`src/conjugacy.rs`](../src/conjugacy.rs),
 - research harness and telemetry in [`src/bin/research_harness.rs`](../src/bin/research_harness.rs).
-
 
 ## Durable Research Themes
 

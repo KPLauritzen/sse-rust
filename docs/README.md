@@ -1,13 +1,17 @@
 # Documentation Map
 
-This repo now uses three documentation layers with different jobs:
+This repo uses three documentation layers with different jobs:
 
-- [`../README.md`](../README.md) is the entry point for the project itself:
-  problem statement, research context, capabilities, and build/deploy notes.
-- [`TODO.md`](TODO.md) is roadmap context for solver and search work.
-  It is not the live task list; use `bd` for actionable backlog items.
+- [`../README.md`](../README.md) is the repo entry point: project frame,
+  current solver surfaces, supported front doors, and start links.
+- [`TODO.md`](TODO.md) keeps durable solver/search context under its
+  historical filename. It is not the live task list; use `bd` for actionable
+  backlog items.
 - [`../research/README.md`](../research/README.md) describes the experiment
   workflow, logs, notes, and local run artifacts.
+
+Use `bd` for anything with an owner, status, priority, or next action.
+Use docs under `docs/` for durable orientation and reference notes.
 
 ## Topic Notes
 
@@ -36,7 +40,7 @@ This repo now uses three documentation layers with different jobs:
   autoresearch round types so workers can cite a reusable keep/revert contract.
 - [`research-ideas.md`](research-ideas.md) is the long-horizon idea bank from
   paper reading and code review. It should collect plausible directions and
-  synthesis, not a ranked backlog.
+  synthesis tied to the current solver surfaces, not a ranked backlog.
 - [`brix-ruiz-sidecar-log.md`](brix-ruiz-sidecar-log.md) is the family-specific
   experimental record for Brix-Ruiz sidecar work.
 - [`rfcs/rfc-001-main-search-shortcut-integration.md`](rfcs/rfc-001-main-search-shortcut-integration.md)
@@ -57,6 +61,8 @@ This repo now uses three documentation layers with different jobs:
 ## Rules Of Thumb
 
 - Put active work items in `bd`, not in new markdown TODO lists.
+- Keep [`../README.md`](../README.md) high level; push durable detail into the
+  relevant topic note instead of growing the entrypoint.
 - Put short chronological experiment entries in
   [`../research/log.md`](../research/log.md).
 - Put longer literature notes, experiment dossiers, and synthesis writeups in
