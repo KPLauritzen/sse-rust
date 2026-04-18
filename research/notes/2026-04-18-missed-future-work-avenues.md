@@ -33,8 +33,12 @@ Relevant live bead state while writing:
 - `sse-rust-2uy.3` is in progress and still owns the positive-conjugacy follow-up
 - `sse-rust-2sp` is in progress and still owns graph-only observer parity for
   dynamic endpoint search
-- the recent exact-pruning/orbit-reduction/k4 campaign beads tied to the note
-  clusters below are closed rather than active
+- after this survey was turned into backlog work, three new `2uy` children were
+  opened from this note:
+  - `sse-rust-2uy.29` for exact family-local gates before structured enumeration
+  - `sse-rust-2uy.30` for exact orbit reduction across hot structured families
+  - `sse-rust-2uy.31` for the narrow `graph_plus_structured` `k=4` dim-4
+    profiling/ranking follow-up
 
 ## Strongest underweighted or missing avenues
 
@@ -73,8 +77,8 @@ Why I think this is underweighted rather than already covered:
 
 Recommended bead action:
 
-- create or reframe a bead around **exact family-local pre-enumeration gates**,
-  with the first slice narrowly scoped to the diagonal-refactorization
+- now tracked by `sse-rust-2uy.29`
+- keep the first slice narrowly scoped to the diagonal-refactorization
   admissible-divisor gate
 - keep row/column mass gates as optional secondary follow-ups rather than the
   headline task
@@ -113,8 +117,9 @@ Why I think this is underweighted rather than already covered:
 
 Recommended bead action:
 
-- create or reframe a bead around **exact orbit reduction for structured
-  families**, with two explicit goals:
+- now tracked by `sse-rust-2uy.30`
+- keep the bead centered on **exact orbit reduction for structured families**,
+  with two explicit goals:
   1. frontier-local savings on hot structured enumerators
   2. exact bounded-exhaustion or no-go arguments modulo those same orbit keys
 
@@ -148,9 +153,9 @@ Why I think this is underweighted rather than already covered:
 
 Recommended bead action:
 
-- if Goal 3 is reopened soon, create a bead explicitly scoped to
-  `graph_plus_structured` `k=4` **dim-4** profiling/ranking work using the
-  `beam256 + dim4 + entry12` surface
+- now tracked by `sse-rust-2uy.31`
+- keep the work explicitly scoped to `graph_plus_structured` `k=4` **dim-4**
+  profiling/ranking using the `beam256 + dim4 + entry12` surface
 - do not frame it as another generic reach campaign, and do not send it back
   to graph-only deep-beam or graph-plus-structured dim-5 widening first
 
