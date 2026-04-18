@@ -4067,7 +4067,7 @@ fn search_graph_only_dyn_with_telemetry(
     a: &DynMatrix,
     b: &DynMatrix,
     config: &SearchConfig,
-    observer: Option<&mut dyn SearchObserver>,
+    mut observer: Option<&mut dyn SearchObserver>,
     request: &SearchRequest,
     deadline: Option<Instant>,
 ) -> (DynSseResult, SearchTelemetry) {
@@ -4152,21 +4152,26 @@ fn search_graph_only_dyn_with_telemetry(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
         let current_frontier_len = current_frontier.len();
+        let direction = if expand_forward {
+            SearchDirection::Forward
+        } else {
+            SearchDirection::Backward
+        };
         let mut layer = SearchLayerTelemetry {
             layer_index,
-            direction: Some(if expand_forward {
-                SearchDirection::Forward
-            } else {
-                SearchDirection::Backward
-            }),
+            direction: Some(direction),
             frontier_nodes: current_frontier_len,
             ..SearchLayerTelemetry::default()
         };
         let mut layer_move_family_telemetry = MoveFamilyTelemetryAccumulator::default();
+        let mut layer_records = observer
+            .as_ref()
+            .map(|_| Vec::with_capacity(layer.candidates_after_pruning.max(8)));
         let mut next_frontier = VecDeque::new();
         let next_depth = layer_depth + 1;
         let mut parents_with_progress = HashSet::new();
         let mut timed_out = false;
+        let retain_steps = observer.is_some();
 
         for chunk in current_frontier.chunks(frontier_chunk_size(current_frontier_len, deadline)) {
             if deadline_reached(deadline) {
@@ -4181,12 +4186,20 @@ fn search_graph_only_dyn_with_telemetry(
                         .expect("frontier node should have an original matrix");
                     (
                         current_canon.clone(),
-                        enumerate_graph_only_policy_successor_nodes(current, config),
+                        if retain_steps {
+                            enumerate_graph_only_policy_successors(current, config)
+                        } else {
+                            enumerate_graph_only_policy_successor_nodes(current, config)
+                        },
                     )
                 })
                 .collect();
 
             for (current_canon, successors) in computed {
+                let current_orig = orig
+                    .get(&current_canon)
+                    .expect("frontier node should have an original matrix")
+                    .clone();
                 layer.candidates_generated += successors.candidates;
                 for (family, count) in successors.family_candidates {
                     move_family_telemetry_mut(&mut layer_move_family_telemetry, family)
@@ -4218,6 +4231,26 @@ fn search_graph_only_dyn_with_telemetry(
 
                     if parent.contains_key(&successor.matrix) {
                         layer.collisions_with_seen += 1;
+                        if let Some(records) = layer_records.as_mut() {
+                            records.push(SearchEdgeRecord {
+                                layer_index,
+                                direction,
+                                move_family: successor.family,
+                                from_canonical: current_canon.clone(),
+                                from_orig: current_orig.clone(),
+                                to_canonical: successor.matrix.clone(),
+                                to_orig: successor.orig_matrix.clone(),
+                                from_depth: layer_depth,
+                                to_depth: next_depth,
+                                step: successor
+                                    .step
+                                    .clone()
+                                    .expect("observer graph-only expansion should retain steps"),
+                                status: SearchEdgeStatus::SeenCollision,
+                                approximate_other_side_hit: false,
+                                enqueued: false,
+                            });
+                        }
                         continue;
                     }
 
@@ -4231,6 +4264,7 @@ fn search_graph_only_dyn_with_telemetry(
                     )
                     .discovered_nodes += 1;
                     parents_with_progress.insert(current_canon.clone());
+                    let mut record_status = SearchEdgeStatus::Discovered;
 
                     if let Some(&other_depth) = other_depths.get(&successor.matrix) {
                         layer.collisions_with_other_frontier += 1;
@@ -4239,6 +4273,7 @@ fn search_graph_only_dyn_with_telemetry(
                             successor.family,
                         )
                         .exact_meets += 1;
+                        record_status = SearchEdgeStatus::ExactMeet;
                         let path_depth = next_depth + other_depth;
                         if path_depth <= config.max_lag {
                             layer.next_frontier_nodes = next_frontier.len();
@@ -4263,6 +4298,28 @@ fn search_graph_only_dyn_with_telemetry(
                                 &mut telemetry.move_family_telemetry,
                                 &layer_move_family_telemetry,
                             );
+                            if let Some(records) = layer_records.as_mut() {
+                                records.push(SearchEdgeRecord {
+                                    layer_index,
+                                    direction,
+                                    move_family: successor.family,
+                                    from_canonical: current_canon.clone(),
+                                    from_orig: current_orig.clone(),
+                                    to_canonical: successor.matrix.clone(),
+                                    to_orig: successor.orig_matrix.clone(),
+                                    from_depth: layer_depth,
+                                    to_depth: next_depth,
+                                    step: successor.step.clone().expect(
+                                        "observer graph-only expansion should retain steps",
+                                    ),
+                                    status: record_status,
+                                    approximate_other_side_hit: false,
+                                    enqueued: false,
+                                });
+                            }
+                            if let Some(records) = layer_records.as_ref() {
+                                emit_layer(&mut observer, records);
+                            }
                             layer.move_family_telemetry =
                                 finalize_move_family_telemetry(layer_move_family_telemetry);
                             telemetry.layers.push(layer);
@@ -4290,6 +4347,26 @@ fn search_graph_only_dyn_with_telemetry(
 
                     next_frontier.push_back(successor.matrix.clone());
                     layer.enqueued_nodes += 1;
+                    if let Some(records) = layer_records.as_mut() {
+                        records.push(SearchEdgeRecord {
+                            layer_index,
+                            direction,
+                            move_family: successor.family,
+                            from_canonical: current_canon.clone(),
+                            from_orig: current_orig.clone(),
+                            to_canonical: successor.matrix.clone(),
+                            to_orig: successor.orig_matrix.clone(),
+                            from_depth: layer_depth,
+                            to_depth: next_depth,
+                            step: successor
+                                .step
+                                .clone()
+                                .expect("observer graph-only expansion should retain steps"),
+                            status: record_status,
+                            approximate_other_side_hit: false,
+                            enqueued: true,
+                        });
+                    }
                 }
             }
         }
@@ -4312,6 +4389,9 @@ fn search_graph_only_dyn_with_telemetry(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
         );
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
+        }
         layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
 
@@ -6627,6 +6707,31 @@ mod tests {
             max_entry: 2,
             frontier_mode: FrontierMode::Bfs,
             move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        };
+        let mut observer = LayerEventProbe::default();
+
+        let (result, telemetry) =
+            search_sse_with_telemetry_dyn_and_observer(&a, &b, &config, Some(&mut observer));
+
+        assert!(matches!(result, DynSseResult::Equivalent(_)));
+        assert!(!telemetry.layers.is_empty());
+        assert_eq!(observer.layer_sizes.len(), telemetry.layers.len());
+        assert!(observer.layer_sizes.iter().all(|size| *size > 0));
+    }
+
+    #[test]
+    fn test_dyn_graph_only_search_observer_emits_layers_for_lind_marcus_case() {
+        let a = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 0, 1, 1, 1, 1]);
+        let b = DynMatrix::new(1, 1, vec![2]);
+        let config = SearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 2,
+            max_entry: 2,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
