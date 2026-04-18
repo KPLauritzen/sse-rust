@@ -210,12 +210,13 @@ fn explain_hop(
     to: &DynMatrix,
     step: &EsseStep,
 ) -> Result<HopReport, String> {
-    let (family, interpretation, permutation) =
+    let (family, interpretation, permutation, witness_step) =
         if let Some(successor) = find_exact_graph_move_witness_between(from, to) {
             (
                 successor.family.to_string(),
                 move_interpretation(successor.family).to_string(),
                 None,
+                successor.step,
             )
         } else if let Some(successor) = find_exact_graph_move_witness_between(to, from) {
             let family = inverse_graph_family(successor.family).ok_or_else(|| {
@@ -228,18 +229,24 @@ fn explain_hop(
                 family.to_string(),
                 move_interpretation(family).to_string(),
                 None,
+                EsseStep {
+                    u: successor.step.v,
+                    v: successor.step.u,
+                },
             )
         } else if let Some(permutation) = find_permutation_relabeling(from, to)? {
             (
                 "permutation_relabeling".to_string(),
                 "graph_isomorphism".to_string(),
                 Some(permutation),
+                step.clone(),
             )
         } else {
             (
                 "unclassified_step".to_string(),
                 "unclassified".to_string(),
                 None,
+                step.clone(),
             )
         };
 
@@ -268,8 +275,8 @@ fn explain_hop(
         duplicate_row_classes,
         duplicate_column_classes,
         witness: StepWitnessReport {
-            u: matrix_rows(&step.u),
-            v: matrix_rows(&step.v),
+            u: matrix_rows(&witness_step.u),
+            v: matrix_rows(&witness_step.v),
         },
     })
 }
@@ -596,10 +603,12 @@ fn parse_entries(s: &str) -> Result<Vec<u32>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        duplicate_column_classes, duplicate_row_classes, find_permutation_relabeling,
+        duplicate_column_classes, duplicate_row_classes, explain_hop, find_permutation_relabeling,
         inverse_graph_family,
     };
+    use sse_core::graph_moves::find_exact_graph_move_witness_between;
     use sse_core::matrix::DynMatrix;
+    use sse_core::types::EsseStep;
 
     #[test]
     fn duplicate_class_helpers_use_one_based_indices() {
@@ -628,5 +637,25 @@ mod tests {
         assert_eq!(inverse_graph_family("out_amalgamation"), Some("insplit"));
         assert_eq!(inverse_graph_family("in_amalgamation"), Some("outsplit"));
         assert_eq!(inverse_graph_family("unknown"), None);
+    }
+
+    #[test]
+    fn reverse_exact_graph_match_reorients_witness_to_forward_direction() {
+        let from = DynMatrix::new(3, 3, vec![3, 0, 1, 2, 4, 2, 1, 2, 1]);
+        let to = DynMatrix::new(4, 4, vec![3, 0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2, 1]);
+        let reverse = find_exact_graph_move_witness_between(&to, &from)
+            .expect("reverse exact graph move should exist");
+        let step = EsseStep {
+            u: reverse.step.v,
+            v: reverse.step.u,
+        };
+
+        let hop = explain_hop(0, &from, &to, &step).expect("hop should classify");
+        let u = DynMatrix::new(3, 4, hop.witness.u.into_iter().flatten().collect());
+        let v = DynMatrix::new(4, 3, hop.witness.v.into_iter().flatten().collect());
+
+        assert_eq!(hop.family, "insplit");
+        assert_eq!(u.mul(&v), from);
+        assert_eq!(v.mul(&u), to);
     }
 }
