@@ -19,7 +19,8 @@ This note stays narrow:
 Promoted slice:
 
 - `elementary_conjugation_3x3` as the **only** structured family exposed to the
-  dedicated `graph_only` endpoint search
+  dedicated `graph_only` endpoint search on the retained `max_intermediate_dim = 3`
+  surface
 
 Code seam:
 
@@ -28,6 +29,10 @@ Code seam:
 - graph-only witness reconstruction now replays exact one-step witnesses through
   the same bounded policy surface, so promoted edges still validate as ordinary
   ESSE steps
+- after the merge-safety follow-up, the promotion is intentionally gated off for
+  broader graph-only searches with `max_intermediate_dim > 3`, so the retained
+  low-rung lane keeps the promotion while the repo merge check does not pay the
+  wider branching cost
 
 Why this slice was chosen over the alternatives:
 

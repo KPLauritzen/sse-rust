@@ -3576,12 +3576,10 @@ fn enabled_elementary_conjugation_3x3(
 ) -> bool {
     input_dim == 3
         && max_intermediate_dim >= 3
-        && matches!(
-            move_family_policy,
-            MoveFamilyPolicy::Mixed
-                | MoveFamilyPolicy::GraphPlusStructured
-                | MoveFamilyPolicy::GraphOnly
-        )
+        && match move_family_policy {
+            MoveFamilyPolicy::GraphOnly => max_intermediate_dim == 3,
+            MoveFamilyPolicy::Mixed | MoveFamilyPolicy::GraphPlusStructured => true,
+        }
 }
 
 fn enabled_binary_sparse_factorisation_4x4_to_3(
@@ -4946,8 +4944,16 @@ mod tests {
     #[test]
     fn test_selected_family_labels_for_graph_only_3x3_keep_retained_conjugation_only() {
         assert_eq!(
-            selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::GraphOnly),
+            selected_factorisation_family_labels(3, 3, MoveFamilyPolicy::GraphOnly),
             vec!["elementary_conjugation_3x3"]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_graph_only_3x3_skip_promotion_above_retained_dim_cap() {
+        assert_eq!(
+            selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::GraphOnly),
+            Vec::<&'static str>::new()
         );
     }
 
