@@ -23,7 +23,9 @@ Per-turn workflow:
 
 2. If a worker is `done`, take it through coordinator review.
    - run `workmux run <handle> -- roborev review --branch --wait --base main`
-   - if review finds a real issue, fix it on the worker branch or in the worktree
+   - consider the issues revealed, read the context to validate if it is a real issue
+   - if review finds a real issue, send a message to the worker to ask it to fix the issue
+   - wait until the issue is fixed
    - rerun `roborev` until it passes cleanly
 
 3. Merge ready work.
