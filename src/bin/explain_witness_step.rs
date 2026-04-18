@@ -8,6 +8,8 @@ use sse_core::matrix::DynMatrix;
 use sse_core::search::search_sse_dyn;
 use sse_core::types::{DynSseResult, EsseStep, FrontierMode, MoveFamilyPolicy, SearchConfig};
 
+const MAX_BRUTE_FORCE_PERMUTATION_DIM: usize = 8;
+
 #[derive(Debug)]
 struct Cli {
     from: DynMatrix,
@@ -146,7 +148,7 @@ fn build_report(cli: &Cli) -> Result<Report, String> {
                         step,
                     )
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, _>>()?;
             let interpretation = path_interpretation(&hops);
 
             GraphOnlyExplanation {
@@ -194,7 +196,7 @@ fn build_report(cli: &Cli) -> Result<Report, String> {
             exact_graph_family,
             has_diagonal_refactorization_match: graph_plus_structured_families
                 .iter()
-                .any(|family| family == "diagonal_refactorization_3x3"),
+                .any(|family| family.starts_with("diagonal_refactorization_")),
             graph_plus_structured_families,
             mixed_families,
         },
@@ -202,7 +204,12 @@ fn build_report(cli: &Cli) -> Result<Report, String> {
     })
 }
 
-fn explain_hop(step_index: usize, from: &DynMatrix, to: &DynMatrix, step: &EsseStep) -> HopReport {
+fn explain_hop(
+    step_index: usize,
+    from: &DynMatrix,
+    to: &DynMatrix,
+    step: &EsseStep,
+) -> Result<HopReport, String> {
     let (family, interpretation, permutation) =
         if let Some(successor) = find_exact_graph_move_witness_between(from, to) {
             (
@@ -210,7 +217,7 @@ fn explain_hop(step_index: usize, from: &DynMatrix, to: &DynMatrix, step: &EsseS
                 move_interpretation(successor.family).to_string(),
                 None,
             )
-        } else if let Some(permutation) = find_permutation_relabeling(from, to) {
+        } else if let Some(permutation) = find_permutation_relabeling(from, to)? {
             (
                 "permutation_relabeling".to_string(),
                 "graph_isomorphism".to_string(),
@@ -239,7 +246,7 @@ fn explain_hop(step_index: usize, from: &DynMatrix, to: &DynMatrix, step: &EsseS
         Vec::new()
     };
 
-    HopReport {
+    Ok(HopReport {
         step_index,
         from_dimension: from.rows,
         to_dimension: to.rows,
@@ -252,7 +259,7 @@ fn explain_hop(step_index: usize, from: &DynMatrix, to: &DynMatrix, step: &EsseS
             u: matrix_rows(&step.u),
             v: matrix_rows(&step.v),
         },
-    }
+    })
 }
 
 fn path_interpretation(hops: &[HopReport]) -> Option<String> {
@@ -360,9 +367,18 @@ where
     classes
 }
 
-fn find_permutation_relabeling(from: &DynMatrix, to: &DynMatrix) -> Option<Vec<usize>> {
+fn find_permutation_relabeling(from: &DynMatrix, to: &DynMatrix) -> Result<Option<Vec<usize>>, String> {
     if from.rows != from.cols || to.rows != to.cols || from.rows != to.rows {
-        return None;
+        return Ok(None);
+    }
+    if from.rows > MAX_BRUTE_FORCE_PERMUTATION_DIM {
+        return Err(format!(
+            "permutation relabeling check is only supported up to {}x{} in this bounded helper; got {}x{}",
+            MAX_BRUTE_FORCE_PERMUTATION_DIM,
+            MAX_BRUTE_FORCE_PERMUTATION_DIM,
+            from.rows,
+            from.cols
+        ));
     }
 
     let mut permutation: Vec<usize> = (0..from.rows).collect();
@@ -379,7 +395,7 @@ fn find_permutation_relabeling(from: &DynMatrix, to: &DynMatrix) -> Option<Vec<u
             result = Some(perm.iter().map(|idx| idx + 1).collect());
         }
     });
-    result
+    Ok(result)
 }
 
 fn permutation_matrices(permutation: &[usize]) -> (DynMatrix, DynMatrix) {
@@ -572,7 +588,7 @@ mod tests {
         let from = DynMatrix::new(4, 4, vec![1, 1, 1, 2, 1, 0, 0, 3, 2, 4, 4, 2, 1, 0, 0, 3]);
         let to = DynMatrix::new(4, 4, vec![1, 2, 1, 1, 1, 3, 0, 0, 1, 3, 0, 0, 2, 2, 4, 4]);
         assert_eq!(
-            find_permutation_relabeling(&from, &to),
+            find_permutation_relabeling(&from, &to).unwrap(),
             Some(vec![1, 3, 4, 2])
         );
     }
