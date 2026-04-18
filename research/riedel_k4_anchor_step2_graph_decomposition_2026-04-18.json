@@ -1,0 +1,156 @@
+{
+  "source": {
+    "dimension": 3,
+    "entries": [
+      [
+        1,
+        2,
+        1
+      ],
+      [
+        1,
+        3,
+        0
+      ],
+      [
+        3,
+        5,
+        4
+      ]
+    ]
+  },
+  "target": {
+    "dimension": 3,
+    "entries": [
+      [
+        4,
+        3,
+        5
+      ],
+      [
+        1,
+        1,
+        2
+      ],
+      [
+        0,
+        1,
+        3
+      ]
+    ]
+  },
+  "bounds": {
+    "graph_only": {
+      "max_lag": 2,
+      "max_intermediate_dim": 3,
+      "max_entry": 12
+    },
+    "factorisation_match_max_entry": 12
+  },
+  "direct_match": {
+    "exact_graph_family": null,
+    "graph_plus_structured_families": [],
+    "mixed_families": [],
+    "has_diagonal_refactorization_match": false
+  },
+  "graph_only_explanation": {
+    "outcome": "equivalent",
+    "lag": 1,
+    "interpretation": "graph_isomorphism",
+    "matrices": [
+      {
+        "dimension": 3,
+        "entries": [
+          [
+            1,
+            2,
+            1
+          ],
+          [
+            1,
+            3,
+            0
+          ],
+          [
+            3,
+            5,
+            4
+          ]
+        ]
+      },
+      {
+        "dimension": 3,
+        "entries": [
+          [
+            4,
+            3,
+            5
+          ],
+          [
+            1,
+            1,
+            2
+          ],
+          [
+            0,
+            1,
+            3
+          ]
+        ]
+      }
+    ],
+    "hops": [
+      {
+        "step_index": 0,
+        "from_dimension": 3,
+        "to_dimension": 3,
+        "family": "permutation_relabeling",
+        "interpretation": "graph_isomorphism",
+        "permutation": [
+          2,
+          3,
+          1
+        ],
+        "duplicate_row_classes": [],
+        "duplicate_column_classes": [],
+        "witness": {
+          "u": [
+            [
+              1,
+              1,
+              2
+            ],
+            [
+              0,
+              1,
+              3
+            ],
+            [
+              4,
+              3,
+              5
+            ]
+          ],
+          "v": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    ],
+    "negative_result": null
+  }
+}

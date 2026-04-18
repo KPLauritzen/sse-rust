@@ -1,0 +1,666 @@
+{
+  "source": {
+    "dimension": 2,
+    "entries": [
+      [
+        4,
+        2
+      ],
+      [
+        1,
+        4
+      ]
+    ]
+  },
+  "target": {
+    "dimension": 3,
+    "entries": [
+      [
+        1,
+        3,
+        1
+      ],
+      [
+        1,
+        3,
+        0
+      ],
+      [
+        2,
+        6,
+        4
+      ]
+    ]
+  },
+  "bounds": {
+    "graph_only": {
+      "max_lag": 6,
+      "max_intermediate_dim": 5,
+      "max_entry": 12
+    },
+    "factorisation_match_max_entry": 12
+  },
+  "direct_match": {
+    "exact_graph_family": null,
+    "graph_plus_structured_families": [
+      "rectangular_factorisation_2x3"
+    ],
+    "mixed_families": [
+      "rectangular_factorisation_2x3"
+    ],
+    "has_diagonal_refactorization_match": false
+  },
+  "graph_only_explanation": {
+    "outcome": "equivalent",
+    "lag": 6,
+    "interpretation": "elementary_row_split_then_elementary_row_split_then_elementary_row_split_then_graph_isomorphism_then_elementary_column_amalgamation_then_elementary_column_amalgamation",
+    "matrices": [
+      {
+        "dimension": 2,
+        "entries": [
+          [
+            4,
+            2
+          ],
+          [
+            1,
+            4
+          ]
+        ]
+      },
+      {
+        "dimension": 3,
+        "entries": [
+          [
+            4,
+            2,
+            2
+          ],
+          [
+            0,
+            1,
+            1
+          ],
+          [
+            1,
+            3,
+            3
+          ]
+        ]
+      },
+      {
+        "dimension": 4,
+        "entries": [
+          [
+            4,
+            2,
+            2,
+            2
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            2,
+            2
+          ]
+        ]
+      },
+      {
+        "dimension": 5,
+        "entries": [
+          [
+            4,
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            0,
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            0,
+            1,
+            1
+          ]
+        ]
+      },
+      {
+        "dimension": 5,
+        "entries": [
+          [
+            1,
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            1,
+            1,
+            0,
+            2,
+            0
+          ],
+          [
+            2,
+            2,
+            4,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            0,
+            1,
+            1
+          ]
+        ]
+      },
+      {
+        "dimension": 4,
+        "entries": [
+          [
+            1,
+            1,
+            1,
+            2
+          ],
+          [
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            2,
+            2,
+            4,
+            4
+          ],
+          [
+            1,
+            1,
+            0,
+            2
+          ]
+        ]
+      },
+      {
+        "dimension": 3,
+        "entries": [
+          [
+            1,
+            3,
+            1
+          ],
+          [
+            1,
+            3,
+            0
+          ],
+          [
+            2,
+            6,
+            4
+          ]
+        ]
+      }
+    ],
+    "hops": [
+      {
+        "step_index": 0,
+        "from_dimension": 2,
+        "to_dimension": 3,
+        "family": "outsplit",
+        "interpretation": "elementary_row_split",
+        "permutation": null,
+        "duplicate_row_classes": [],
+        "duplicate_column_classes": [
+          [
+            2,
+            3
+          ]
+        ],
+        "witness": {
+          "u": [
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              1
+            ]
+          ],
+          "v": [
+            [
+              4,
+              2
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              3
+            ]
+          ]
+        }
+      },
+      {
+        "step_index": 1,
+        "from_dimension": 3,
+        "to_dimension": 4,
+        "family": "outsplit",
+        "interpretation": "elementary_row_split",
+        "permutation": null,
+        "duplicate_row_classes": [],
+        "duplicate_column_classes": [
+          [
+            2,
+            3,
+            4
+          ]
+        ],
+        "witness": {
+          "u": [
+            [
+              1,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              1,
+              1
+            ]
+          ],
+          "v": [
+            [
+              4,
+              2,
+              2
+            ],
+            [
+              0,
+              1,
+              1
+            ],
+            [
+              0,
+              1,
+              1
+            ],
+            [
+              1,
+              2,
+              2
+            ]
+          ]
+        }
+      },
+      {
+        "step_index": 2,
+        "from_dimension": 4,
+        "to_dimension": 5,
+        "family": "outsplit",
+        "interpretation": "elementary_row_split",
+        "permutation": null,
+        "duplicate_row_classes": [],
+        "duplicate_column_classes": [
+          [
+            4,
+            5
+          ]
+        ],
+        "witness": {
+          "u": [
+            [
+              1,
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0,
+              1,
+              1
+            ]
+          ],
+          "v": [
+            [
+              4,
+              2,
+              2,
+              2
+            ],
+            [
+              0,
+              1,
+              1,
+              1
+            ],
+            [
+              0,
+              1,
+              1,
+              1
+            ],
+            [
+              0,
+              0,
+              2,
+              1
+            ],
+            [
+              1,
+              2,
+              0,
+              1
+            ]
+          ]
+        }
+      },
+      {
+        "step_index": 3,
+        "from_dimension": 5,
+        "to_dimension": 5,
+        "family": "permutation_relabeling",
+        "interpretation": "graph_isomorphism",
+        "permutation": [
+          3,
+          5,
+          4,
+          2,
+          1
+        ],
+        "duplicate_row_classes": [],
+        "duplicate_column_classes": [],
+        "witness": {
+          "u": [
+            [
+              2,
+              2,
+              4,
+              2,
+              2
+            ],
+            [
+              1,
+              1,
+              0,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              0,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              0,
+              2,
+              0
+            ],
+            [
+              1,
+              1,
+              1,
+              0,
+              2
+            ]
+          ],
+          "v": [
+            [
+              0,
+              0,
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              0,
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          ]
+        }
+      },
+      {
+        "step_index": 4,
+        "from_dimension": 5,
+        "to_dimension": 4,
+        "family": "in_amalgamation",
+        "interpretation": "elementary_column_amalgamation",
+        "permutation": null,
+        "duplicate_row_classes": [
+          [
+            4,
+            5
+          ]
+        ],
+        "duplicate_column_classes": [],
+        "witness": {
+          "u": [
+            [
+              1,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              1,
+              0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "v": [
+            [
+              1,
+              1,
+              1,
+              0,
+              2
+            ],
+            [
+              1,
+              1,
+              0,
+              2,
+              0
+            ],
+            [
+              2,
+              2,
+              4,
+              2,
+              2
+            ],
+            [
+              1,
+              1,
+              0,
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      {
+        "step_index": 5,
+        "from_dimension": 4,
+        "to_dimension": 3,
+        "family": "in_amalgamation",
+        "interpretation": "elementary_column_amalgamation",
+        "permutation": null,
+        "duplicate_row_classes": [
+          [
+            2,
+            4
+          ]
+        ],
+        "duplicate_column_classes": [],
+        "witness": {
+          "u": [
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0
+            ]
+          ],
+          "v": [
+            [
+              1,
+              1,
+              1,
+              2
+            ],
+            [
+              1,
+              1,
+              0,
+              2
+            ],
+            [
+              2,
+              2,
+              4,
+              4
+            ]
+          ]
+        }
+      }
+    ],
+    "negative_result": null
+  }
+}

@@ -217,6 +217,18 @@ fn explain_hop(
                 move_interpretation(successor.family).to_string(),
                 None,
             )
+        } else if let Some(successor) = find_exact_graph_move_witness_between(to, from) {
+            let family = inverse_graph_family(successor.family).ok_or_else(|| {
+                format!(
+                    "no inverse family mapping for reverse exact graph move family {}",
+                    successor.family
+                )
+            })?;
+            (
+                family.to_string(),
+                move_interpretation(family).to_string(),
+                None,
+            )
         } else if let Some(permutation) = find_permutation_relabeling(from, to)? {
             (
                 "permutation_relabeling".to_string(),
@@ -260,6 +272,16 @@ fn explain_hop(
             v: matrix_rows(&step.v),
         },
     })
+}
+
+fn inverse_graph_family(family: &str) -> Option<&'static str> {
+    match family {
+        "outsplit" => Some("in_amalgamation"),
+        "insplit" => Some("out_amalgamation"),
+        "out_amalgamation" => Some("insplit"),
+        "in_amalgamation" => Some("outsplit"),
+        _ => None,
+    }
 }
 
 fn path_interpretation(hops: &[HopReport]) -> Option<String> {
@@ -367,7 +389,10 @@ where
     classes
 }
 
-fn find_permutation_relabeling(from: &DynMatrix, to: &DynMatrix) -> Result<Option<Vec<usize>>, String> {
+fn find_permutation_relabeling(
+    from: &DynMatrix,
+    to: &DynMatrix,
+) -> Result<Option<Vec<usize>>, String> {
     if from.rows != from.cols || to.rows != to.cols || from.rows != to.rows {
         return Ok(None);
     }
@@ -570,7 +595,10 @@ fn parse_entries(s: &str) -> Result<Vec<u32>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{duplicate_column_classes, duplicate_row_classes, find_permutation_relabeling};
+    use super::{
+        duplicate_column_classes, duplicate_row_classes, find_permutation_relabeling,
+        inverse_graph_family,
+    };
     use sse_core::matrix::DynMatrix;
 
     #[test]
@@ -591,5 +619,14 @@ mod tests {
             find_permutation_relabeling(&from, &to).unwrap(),
             Some(vec![1, 3, 4, 2])
         );
+    }
+
+    #[test]
+    fn inverse_graph_family_maps_split_amalgamation_pairs() {
+        assert_eq!(inverse_graph_family("outsplit"), Some("in_amalgamation"));
+        assert_eq!(inverse_graph_family("insplit"), Some("out_amalgamation"));
+        assert_eq!(inverse_graph_family("out_amalgamation"), Some("insplit"));
+        assert_eq!(inverse_graph_family("in_amalgamation"), Some("outsplit"));
+        assert_eq!(inverse_graph_family("unknown"), None);
     }
 }
