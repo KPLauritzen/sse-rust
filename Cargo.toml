@@ -190,6 +190,11 @@ path = "src/bin/classify_witness_steps.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "explain_witness_step"
+path = "src/bin/explain_witness_step.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "research_harness"
 path = "src/bin/research_harness.rs"
 required-features = ["research-tools"]
