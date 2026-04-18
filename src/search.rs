@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
+#[cfg(test)]
+use crate::factorisation::binary_sparse_factorisation_4x4_to_3_permutation_orbit_key;
 use crate::factorisation::visit_factorisations_with_family_for_policy;
 use crate::graph_moves::enumerate_graph_move_successor_nodes;
 #[cfg(test)]
@@ -6370,6 +6372,63 @@ mod tests {
             .move_family_telemetry
             .get("diagonal_refactorization_4x4")
             .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+    }
+
+    #[test]
+    fn test_expand_frontier_layer_deduplicates_binary_sparse_4x4_to_3_permutation_orbits() {
+        let current = DynMatrix::new(4, 4, vec![1, 1, 1, 1, 3, 0, 2, 2, 1, 0, 0, 0, 0, 1, 1, 1]);
+        let current_canon = current.canonical_perm();
+        let mut orig = HashMap::new();
+        orig.insert(current_canon.clone(), current.clone());
+
+        let mut raw_callbacks = 0usize;
+        let mut raw_orbits = HashSet::new();
+        visit_factorisations_with_family_for_policy(
+            &current,
+            4,
+            5,
+            MoveFamilyPolicy::Mixed,
+            |family, u, v| {
+                if family != "binary_sparse_rectangular_factorisation_4x3_to_3" {
+                    return;
+                }
+                raw_callbacks += 1;
+                raw_orbits.insert(
+                    binary_sparse_factorisation_4x4_to_3_permutation_orbit_key(&u, &v)
+                        .expect("family witness should admit a permutation orbit key"),
+                );
+            },
+        );
+
+        assert!(raw_callbacks > raw_orbits.len());
+
+        let (expansions, stats, _timing) = expand_frontier_layer(
+            &[current_canon],
+            &orig,
+            FrontierExpansionSettings {
+                max_intermediate_dim: 4,
+                max_entry: 5,
+                move_family_policy: MoveFamilyPolicy::Mixed,
+            },
+        );
+
+        let family_expansions = expansions
+            .iter()
+            .filter(|expansion| {
+                expansion.move_family == "binary_sparse_rectangular_factorisation_4x3_to_3"
+            })
+            .count();
+
+        assert_eq!(
+            stats
+                .move_family_telemetry
+                .get("binary_sparse_rectangular_factorisation_4x3_to_3")
+                .expect("family telemetry should be present")
+                .candidates_generated,
+            raw_callbacks,
+        );
+        assert!(family_expansions <= raw_orbits.len());
+        assert!(family_expansions < raw_callbacks);
     }
 
     #[test]

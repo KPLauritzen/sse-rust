@@ -4176,6 +4176,67 @@ fn permuted_square_factorisation_3x3_pair_data(
     data
 }
 
+/// Canonicalize a `binary_sparse_rectangular_factorisation_4x3_to_3` witness
+/// pair up to simultaneous permutation of the 3-dimensional intermediate basis.
+///
+/// This family constrains the 4x3 factor `U` only by requiring each row to stay
+/// binary-sparse. That row vocabulary is closed under column permutation, while
+/// the solved 3x4 factor `V` only carries entry bounds. So every intermediate-
+/// basis renaming `(U', V') = (U P, P^{-1} V)` stays inside the same exact
+/// structured family and produces a permutation-similar successor `V'U'`.
+pub fn binary_sparse_factorisation_4x4_to_3_permutation_orbit_key(
+    u: &DynMatrix,
+    v: &DynMatrix,
+) -> Option<[u32; 24]> {
+    if u.rows != 4 || u.cols != 3 || v.rows != 3 || v.cols != 4 {
+        return None;
+    }
+
+    const PERMS: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+
+    let mut best = permuted_binary_sparse_factorisation_4x4_to_3_pair_data(u, v, &PERMS[0]);
+    for perm in PERMS.iter().skip(1) {
+        let candidate = permuted_binary_sparse_factorisation_4x4_to_3_pair_data(u, v, perm);
+        if candidate < best {
+            best = candidate;
+        }
+    }
+    Some(best)
+}
+
+fn permuted_binary_sparse_factorisation_4x4_to_3_pair_data(
+    u: &DynMatrix,
+    v: &DynMatrix,
+    perm: &[usize; 3],
+) -> [u32; 24] {
+    let mut data = [0u32; 24];
+
+    for row in 0..4 {
+        let base = row * 3;
+        data[base] = u.get(row, perm[0]);
+        data[base + 1] = u.get(row, perm[1]);
+        data[base + 2] = u.get(row, perm[2]);
+    }
+
+    for row in 0..3 {
+        let source_row = perm[row];
+        let base = 12 + row * 4;
+        data[base] = v.get(source_row, 0);
+        data[base + 1] = v.get(source_row, 1);
+        data[base + 2] = v.get(source_row, 2);
+        data[base + 3] = v.get(source_row, 3);
+    }
+
+    data
+}
+
 /// Canonicalize a `binary_sparse_rectangular_factorisation_3x3_to_4` witness
 /// pair up to simultaneous renaming of the intermediate basis that keeps the
 /// pair inside the same exact structured family.
@@ -4699,6 +4760,60 @@ mod tests {
         assert_eq!(
             binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, 6),
             binary_sparse_factorisation_3x3_to_4_orbit_key(&permuted_u, &permuted_v, 6)
+        );
+    }
+
+    #[test]
+    fn test_binary_sparse_factorisation_4x4_to_3_permutation_orbit_key_collapses_middle_basis_renaming(
+    ) {
+        let u = DynMatrix::new(4, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0]);
+        let v = DynMatrix::new(3, 4, vec![2, 1, 0, 1, 0, 2, 1, 1, 1, 0, 2, 1]);
+        let perm = [1usize, 2, 0];
+        let permuted_u = DynMatrix::new(
+            4,
+            3,
+            vec![
+                u.get(0, perm[0]),
+                u.get(0, perm[1]),
+                u.get(0, perm[2]),
+                u.get(1, perm[0]),
+                u.get(1, perm[1]),
+                u.get(1, perm[2]),
+                u.get(2, perm[0]),
+                u.get(2, perm[1]),
+                u.get(2, perm[2]),
+                u.get(3, perm[0]),
+                u.get(3, perm[1]),
+                u.get(3, perm[2]),
+            ],
+        );
+        let permuted_v = DynMatrix::new(
+            3,
+            4,
+            vec![
+                v.get(perm[0], 0),
+                v.get(perm[0], 1),
+                v.get(perm[0], 2),
+                v.get(perm[0], 3),
+                v.get(perm[1], 0),
+                v.get(perm[1], 1),
+                v.get(perm[1], 2),
+                v.get(perm[1], 3),
+                v.get(perm[2], 0),
+                v.get(perm[2], 1),
+                v.get(perm[2], 2),
+                v.get(perm[2], 3),
+            ],
+        );
+
+        assert_eq!(u.mul(&v), permuted_u.mul(&permuted_v));
+        assert_eq!(
+            v.mul(&u).canonical_perm(),
+            permuted_v.mul(&permuted_u).canonical_perm()
+        );
+        assert_eq!(
+            binary_sparse_factorisation_4x4_to_3_permutation_orbit_key(&u, &v),
+            binary_sparse_factorisation_4x4_to_3_permutation_orbit_key(&permuted_u, &permuted_v)
         );
     }
 

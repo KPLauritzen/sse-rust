@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use sse_core::factorisation::visit_all_factorisations_with_family;
+use sse_core::factorisation::{
+    binary_sparse_factorisation_4x4_to_3_permutation_orbit_key,
+    visit_all_factorisations_with_family,
+};
 use sse_core::matrix::DynMatrix;
 use sse_core::search::execute_search_request_and_observer;
 use sse_core::search_observer::{SearchEdgeStatus, SearchEvent, SearchObserver};
 use sse_core::types::{FrontierMode, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchStage};
 
 const BINARY_SPARSE_3X3_TO_4: &str = "binary_sparse_rectangular_factorisation_3x3_to_4";
+const BINARY_SPARSE_4X3_TO_3: &str = "binary_sparse_rectangular_factorisation_4x3_to_3";
 const SINGLE_ROW_SPLIT_3X3_TO_4: &str = "single_row_split_3x3_to_4x4";
 
 #[derive(Default)]
@@ -48,7 +52,7 @@ impl SearchObserver for FamilySourceObserver {
         for edge in edges {
             if !matches!(
                 edge.move_family,
-                BINARY_SPARSE_3X3_TO_4 | SINGLE_ROW_SPLIT_3X3_TO_4
+                BINARY_SPARSE_3X3_TO_4 | BINARY_SPARSE_4X3_TO_3 | SINGLE_ROW_SPLIT_3X3_TO_4
             ) {
                 continue;
             }
@@ -100,7 +104,11 @@ fn main() -> Result<(), String> {
     );
 
     println!("Control family breakdown");
-    for family in [BINARY_SPARSE_3X3_TO_4, SINGLE_ROW_SPLIT_3X3_TO_4] {
+    for family in [
+        BINARY_SPARSE_3X3_TO_4,
+        BINARY_SPARSE_4X3_TO_3,
+        SINGLE_ROW_SPLIT_3X3_TO_4,
+    ] {
         let stats = telemetry
             .move_family_telemetry
             .get(family)
@@ -115,7 +123,11 @@ fn main() -> Result<(), String> {
         );
     }
 
-    for family in [BINARY_SPARSE_3X3_TO_4, SINGLE_ROW_SPLIT_3X3_TO_4] {
+    for family in [
+        BINARY_SPARSE_3X3_TO_4,
+        BINARY_SPARSE_4X3_TO_3,
+        SINGLE_ROW_SPLIT_3X3_TO_4,
+    ] {
         println!();
         println!("Top sources for {family}");
         let mut rows = observer
@@ -159,6 +171,22 @@ fn main() -> Result<(), String> {
                         format_matrix(&matrix),
                     );
                 }
+                BINARY_SPARSE_4X3_TO_3 => {
+                    let raw = measure_binary_sparse_4x4_to_3(&matrix, request.config.max_entry);
+                    println!(
+                        "{}. total={} discovered={} seen={} meets={} raw={} orbit={} exact={} canon={} matrix={}",
+                        idx + 1,
+                        stats.total_edges,
+                        stats.discovered_edges,
+                        stats.seen_collisions,
+                        stats.exact_meets,
+                        raw.callbacks,
+                        raw.orbit_callbacks,
+                        raw.exact_successors,
+                        raw.canonical_successors,
+                        format_matrix(&matrix),
+                    );
+                }
                 SINGLE_ROW_SPLIT_3X3_TO_4 => {
                     let raw = measure_single_row_split_3x3_to_4(&matrix, request.config.max_entry);
                     println!(
@@ -183,16 +211,28 @@ fn main() -> Result<(), String> {
 
     println!();
     println!("Direct samples");
-    let binary_sparse_sample = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
-    let binary_sparse_summary =
-        measure_binary_sparse_3x3_to_4(&binary_sparse_sample, request.config.max_entry);
+    let binary_sparse_up_sample = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
+    let binary_sparse_up_summary =
+        measure_binary_sparse_3x3_to_4(&binary_sparse_up_sample, request.config.max_entry);
     println!(
-        "binary_sparse sample: raw={} orbit={} exact={} canon={} matrix={}",
-        binary_sparse_summary.callbacks,
-        binary_sparse_summary.orbit_callbacks,
-        binary_sparse_summary.exact_successors,
-        binary_sparse_summary.canonical_successors,
-        format_matrix(&binary_sparse_sample),
+        "binary_sparse_up sample: raw={} orbit={} exact={} canon={} matrix={}",
+        binary_sparse_up_summary.callbacks,
+        binary_sparse_up_summary.orbit_callbacks,
+        binary_sparse_up_summary.exact_successors,
+        binary_sparse_up_summary.canonical_successors,
+        format_matrix(&binary_sparse_up_sample),
+    );
+    let binary_sparse_down_sample =
+        DynMatrix::new(4, 4, vec![1, 1, 1, 1, 3, 0, 2, 2, 1, 0, 0, 0, 0, 1, 1, 1]);
+    let binary_sparse_down_summary =
+        measure_binary_sparse_4x4_to_3(&binary_sparse_down_sample, request.config.max_entry);
+    println!(
+        "binary_sparse_down sample: raw={} orbit={} exact={} canon={} matrix={}",
+        binary_sparse_down_summary.callbacks,
+        binary_sparse_down_summary.orbit_callbacks,
+        binary_sparse_down_summary.exact_successors,
+        binary_sparse_down_summary.canonical_successors,
+        format_matrix(&binary_sparse_down_sample),
     );
     let row_split_sample = DynMatrix::new(3, 3, vec![2, 1, 1, 1, 0, 2, 0, 1, 1]);
     let row_split_summary = measure_single_row_split_3x3_to_4(&row_split_sample, 3);
@@ -235,6 +275,33 @@ fn measure_binary_sparse_3x3_to_4(matrix: &DynMatrix, max_entry: u32) -> BinaryS
         }
         callbacks += 1;
         if let Some(key) = binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, max_entry) {
+            orbit_callbacks.insert(key);
+        }
+        let next = v.mul(&u);
+        exact_successors.insert(next.data.clone());
+        canonical_successors.insert(next.canonical_perm().data);
+    });
+
+    BinarySparseSummary {
+        callbacks,
+        orbit_callbacks: orbit_callbacks.len(),
+        exact_successors: exact_successors.len(),
+        canonical_successors: canonical_successors.len(),
+    }
+}
+
+fn measure_binary_sparse_4x4_to_3(matrix: &DynMatrix, max_entry: u32) -> BinarySparseSummary {
+    let mut callbacks = 0usize;
+    let mut orbit_callbacks = BTreeSet::new();
+    let mut exact_successors = BTreeSet::new();
+    let mut canonical_successors = BTreeSet::new();
+
+    visit_all_factorisations_with_family(matrix, 4, max_entry, |family, u, v| {
+        if family != BINARY_SPARSE_4X3_TO_3 {
+            return;
+        }
+        callbacks += 1;
+        if let Some(key) = binary_sparse_factorisation_4x4_to_3_permutation_orbit_key(&u, &v) {
             orbit_callbacks.insert(key);
         }
         let next = v.mul(&u);
