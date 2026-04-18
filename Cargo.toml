@@ -185,6 +185,11 @@ path = "src/bin/replay_graph_path_scores.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "classify_witness_steps"
+path = "src/bin/classify_witness_steps.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "research_harness"
 path = "src/bin/research_harness.rs"
 required-features = ["research-tools"]

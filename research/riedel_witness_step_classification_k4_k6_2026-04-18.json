@@ -1,0 +1,2152 @@
+{
+  "graph_probe": {
+    "max_lag": 3,
+    "max_intermediate_dim": 4
+  },
+  "artifacts": [
+    {
+      "source_path": "tmp/riedel_k4_graph_plus_structured_guide.json",
+      "artifact_id": "search-endpoint_search-lag-5",
+      "endpoint_lag": 5,
+      "step_reports": [
+        {
+          "step_index": 0,
+          "from_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              4,
+              2,
+              1,
+              4
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              3,
+              0,
+              2,
+              6,
+              4
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 1,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              3,
+              0,
+              2,
+              6,
+              4
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              2,
+              1,
+              1,
+              3,
+              0,
+              3,
+              5,
+              4
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3",
+            "square_factorisation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  3,
+                  0,
+                  2,
+                  6,
+                  4
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  0,
+                  3,
+                  2,
+                  4,
+                  4,
+                  2,
+                  1,
+                  0,
+                  0,
+                  3
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  3,
+                  0,
+                  0,
+                  1,
+                  3,
+                  0,
+                  0,
+                  2,
+                  2,
+                  4,
+                  4
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  2,
+                  1,
+                  1,
+                  3,
+                  0,
+                  3,
+                  5,
+                  4
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "mixed-only additional families: elementary_conjugation_3x3, square_factorisation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 2,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              2,
+              1,
+              1,
+              3,
+              0,
+              3,
+              5,
+              4
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              3,
+              5,
+              1,
+              1,
+              2,
+              0,
+              1,
+              3
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [],
+          "mixed_families": [],
+          "graph_probe": {
+            "lag": 1,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  2,
+                  1,
+                  1,
+                  3,
+                  0,
+                  3,
+                  5,
+                  4
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  4,
+                  3,
+                  5,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  3
+                ]
+              }
+            ]
+          },
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 3,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              3,
+              5,
+              1,
+              1,
+              2,
+              0,
+              1,
+              3
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              4,
+              4,
+              1,
+              1,
+              1,
+              0,
+              1,
+              3
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3",
+            "square_factorisation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  4,
+                  3,
+                  5,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  3
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  4,
+                  3,
+                  1,
+                  4,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  3,
+                  0,
+                  0,
+                  1,
+                  3,
+                  0
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  3,
+                  0,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  3,
+                  0,
+                  4,
+                  3,
+                  1,
+                  4
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  4,
+                  4,
+                  4,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  3
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "mixed-only additional families: elementary_conjugation_3x3, square_factorisation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 4,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              4,
+              4,
+              1,
+              1,
+              1,
+              0,
+              1,
+              3
+            ]
+          },
+          "to_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              3,
+              1,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        }
+      ]
+    },
+    {
+      "source_path": "tmp/riedel_k6_graph_plus_structured_guide.json",
+      "artifact_id": "search-endpoint_search-lag-7",
+      "endpoint_lag": 7,
+      "step_reports": [
+        {
+          "step_index": 0,
+          "from_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              6,
+              2,
+              1,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              5,
+              1,
+              1,
+              5,
+              0,
+              2,
+              10,
+              6
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 1,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              5,
+              1,
+              1,
+              5,
+              0,
+              2,
+              10,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              4,
+              1,
+              1,
+              5,
+              0,
+              3,
+              9,
+              6
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  5,
+                  1,
+                  1,
+                  5,
+                  0,
+                  2,
+                  10,
+                  6
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  4,
+                  1,
+                  0,
+                  0,
+                  5,
+                  2,
+                  6,
+                  6,
+                  4,
+                  1,
+                  0,
+                  0,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  4,
+                  1,
+                  1,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  2,
+                  4,
+                  6,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  4,
+                  1,
+                  1,
+                  5,
+                  0,
+                  3,
+                  9,
+                  6
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 2,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              4,
+              1,
+              1,
+              5,
+              0,
+              3,
+              9,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              5,
+              0,
+              4,
+              8,
+              6
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  4,
+                  1,
+                  1,
+                  5,
+                  0,
+                  3,
+                  9,
+                  6
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  3,
+                  1,
+                  0,
+                  0,
+                  5,
+                  3,
+                  6,
+                  6,
+                  3,
+                  1,
+                  0,
+                  0,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  3,
+                  3,
+                  6,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  5,
+                  0,
+                  4,
+                  8,
+                  6
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 3,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              5,
+              0,
+              4,
+              8,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              4,
+              8,
+              1,
+              1,
+              3,
+              0,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [],
+          "mixed_families": [],
+          "graph_probe": {
+            "lag": 1,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  5,
+                  0,
+                  4,
+                  8,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  4,
+                  8,
+                  1,
+                  1,
+                  3,
+                  0,
+                  1,
+                  5
+                ]
+              }
+            ]
+          },
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 4,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              4,
+              8,
+              1,
+              1,
+              3,
+              0,
+              1,
+              5
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              5,
+              7,
+              1,
+              1,
+              2,
+              0,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  4,
+                  8,
+                  1,
+                  1,
+                  3,
+                  0,
+                  1,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  6,
+                  4,
+                  2,
+                  6,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  5,
+                  0,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  6,
+                  4,
+                  2,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  5,
+                  7,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  5
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 5,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              5,
+              7,
+              1,
+              1,
+              2,
+              0,
+              1,
+              5
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              6,
+              6,
+              1,
+              1,
+              1,
+              0,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  5,
+                  7,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  6,
+                  5,
+                  1,
+                  6,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  5,
+                  0,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  6,
+                  5,
+                  1,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  6,
+                  6,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  5
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 6,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              6,
+              6,
+              1,
+              1,
+              1,
+              0,
+              1,
+              5
+            ]
+          },
+          "to_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              5,
+              1,
+              1,
+              7
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        }
+      ]
+    },
+    {
+      "source_path": "tmp/riedel_k4_mixed_guide.json",
+      "artifact_id": "search-endpoint_search-lag-5",
+      "endpoint_lag": 5,
+      "step_reports": [
+        {
+          "step_index": 0,
+          "from_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              4,
+              2,
+              1,
+              4
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              3,
+              0,
+              2,
+              6,
+              4
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 1,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              3,
+              0,
+              2,
+              6,
+              4
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              3,
+              5,
+              1,
+              1,
+              2,
+              0,
+              1,
+              3
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [],
+          "mixed_families": [
+            "square_factorisation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  3,
+                  0,
+                  2,
+                  6,
+                  4
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  0,
+                  3,
+                  2,
+                  4,
+                  4,
+                  2,
+                  1,
+                  0,
+                  0,
+                  3
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  3,
+                  0,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  1,
+                  3,
+                  0,
+                  4,
+                  2,
+                  2,
+                  4
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  4,
+                  3,
+                  5,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  3
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "mixed-only additional families: square_factorisation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 2,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              3,
+              5,
+              1,
+              1,
+              2,
+              0,
+              1,
+              3
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              2,
+              1,
+              1,
+              3,
+              0,
+              3,
+              5,
+              4
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [],
+          "mixed_families": [],
+          "graph_probe": {
+            "lag": 1,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  4,
+                  3,
+                  5,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  3
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  2,
+                  1,
+                  1,
+                  3,
+                  0,
+                  3,
+                  5,
+                  4
+                ]
+              }
+            ]
+          },
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 3,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              2,
+              1,
+              1,
+              3,
+              0,
+              3,
+              5,
+              4
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              4,
+              4,
+              1,
+              1,
+              1,
+              0,
+              1,
+              3
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [],
+          "mixed_families": [
+            "square_factorisation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  2,
+                  1,
+                  1,
+                  3,
+                  0,
+                  3,
+                  5,
+                  4
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  0,
+                  3,
+                  3,
+                  4,
+                  4,
+                  1,
+                  1,
+                  0,
+                  0,
+                  3
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  3,
+                  0,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  3,
+                  0,
+                  4,
+                  3,
+                  1,
+                  4
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  4,
+                  4,
+                  4,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  3
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "mixed-only additional families: square_factorisation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 4,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              4,
+              4,
+              4,
+              1,
+              1,
+              1,
+              0,
+              1,
+              3
+            ]
+          },
+          "to_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              3,
+              1,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        }
+      ]
+    },
+    {
+      "source_path": "tmp/riedel_k6_mixed_guide.json",
+      "artifact_id": "search-endpoint_search-lag-7",
+      "endpoint_lag": 7,
+      "step_reports": [
+        {
+          "step_index": 0,
+          "from_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              6,
+              2,
+              1,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              5,
+              1,
+              1,
+              5,
+              0,
+              2,
+              10,
+              6
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_2x3"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 1,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              5,
+              1,
+              1,
+              5,
+              0,
+              2,
+              10,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              4,
+              1,
+              1,
+              5,
+              0,
+              3,
+              9,
+              6
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  5,
+                  1,
+                  1,
+                  5,
+                  0,
+                  2,
+                  10,
+                  6
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  4,
+                  1,
+                  0,
+                  0,
+                  5,
+                  2,
+                  6,
+                  6,
+                  4,
+                  1,
+                  0,
+                  0,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  4,
+                  1,
+                  1,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  2,
+                  4,
+                  6,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  4,
+                  1,
+                  1,
+                  5,
+                  0,
+                  3,
+                  9,
+                  6
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 2,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              4,
+              1,
+              1,
+              5,
+              0,
+              3,
+              9,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              5,
+              0,
+              4,
+              8,
+              6
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  4,
+                  1,
+                  1,
+                  5,
+                  0,
+                  3,
+                  9,
+                  6
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  1,
+                  1,
+                  3,
+                  1,
+                  0,
+                  0,
+                  5,
+                  3,
+                  6,
+                  6,
+                  3,
+                  1,
+                  0,
+                  0,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  3,
+                  3,
+                  6,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  5,
+                  0,
+                  4,
+                  8,
+                  6
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 3,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              1,
+              3,
+              1,
+              1,
+              5,
+              0,
+              4,
+              8,
+              6
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              4,
+              8,
+              1,
+              1,
+              3,
+              0,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [],
+          "mixed_families": [],
+          "graph_probe": {
+            "lag": 1,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  1,
+                  3,
+                  1,
+                  1,
+                  5,
+                  0,
+                  4,
+                  8,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  4,
+                  8,
+                  1,
+                  1,
+                  3,
+                  0,
+                  1,
+                  5
+                ]
+              }
+            ]
+          },
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 4,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              4,
+              8,
+              1,
+              1,
+              3,
+              0,
+              1,
+              5
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              5,
+              7,
+              1,
+              1,
+              2,
+              0,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  4,
+                  8,
+                  1,
+                  1,
+                  3,
+                  0,
+                  1,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  6,
+                  4,
+                  2,
+                  6,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  5,
+                  0,
+                  1,
+                  1,
+                  2,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  6,
+                  4,
+                  2,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  5,
+                  7,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  5
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 5,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              5,
+              7,
+              1,
+              1,
+              2,
+              0,
+              1,
+              5
+            ]
+          },
+          "to_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              6,
+              6,
+              1,
+              1,
+              1,
+              0,
+              1,
+              5
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "mixed_families": [
+            "elementary_conjugation_3x3"
+          ],
+          "graph_probe": {
+            "lag": 3,
+            "matrices": [
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  5,
+                  7,
+                  1,
+                  1,
+                  2,
+                  0,
+                  1,
+                  5
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  6,
+                  5,
+                  1,
+                  6,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  0,
+                  1,
+                  5,
+                  0
+                ]
+              },
+              {
+                "rows": 4,
+                "cols": 4,
+                "data": [
+                  0,
+                  1,
+                  5,
+                  0,
+                  1,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  5,
+                  0,
+                  6,
+                  5,
+                  1,
+                  6
+                ]
+              },
+              {
+                "rows": 3,
+                "cols": 3,
+                "data": [
+                  6,
+                  6,
+                  6,
+                  1,
+                  1,
+                  1,
+                  0,
+                  1,
+                  5
+                ]
+              }
+            ]
+          },
+          "classification": "needs_longer_split_amalgamation_expansion",
+          "reasoning": [
+            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+          ]
+        },
+        {
+          "step_index": 6,
+          "from_matrix": {
+            "rows": 3,
+            "cols": 3,
+            "data": [
+              6,
+              6,
+              6,
+              1,
+              1,
+              1,
+              0,
+              1,
+              5
+            ]
+          },
+          "to_matrix": {
+            "rows": 2,
+            "cols": 2,
+            "data": [
+              5,
+              1,
+              1,
+              7
+            ]
+          },
+          "exact_graph_family": null,
+          "graph_plus_structured_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "mixed_families": [
+            "rectangular_factorisation_3x3_to_2"
+          ],
+          "graph_probe": null,
+          "classification": "not_represented_by_current_one_step_graph_move_families",
+          "reasoning": [
+            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+          ]
+        }
+      ]
+    }
+  ]
+}
