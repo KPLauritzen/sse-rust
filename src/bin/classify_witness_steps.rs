@@ -63,6 +63,13 @@ fn main() -> Result<(), String> {
     for path in &cli.guide_paths {
         for artifact in load_guide_artifacts_from_path(path)? {
             let GuideArtifactPayload::FullPath { path: witness_path } = artifact.payload;
+            if witness_path.matrices.len() != witness_path.steps.len() + 1 {
+                return Err(format!(
+                    "guide artifact at {path} contains {} matrices but {} steps",
+                    witness_path.matrices.len(),
+                    witness_path.steps.len()
+                ));
+            }
             let step_reports = witness_path
                 .steps
                 .iter()
@@ -171,6 +178,13 @@ fn classify_step(
     to_matrix: &DynMatrix,
     graph_probe: GraphProbeConfig,
 ) -> Result<StepReport, String> {
+    if !from_matrix.is_square() || !to_matrix.is_square() {
+        return Err(format!(
+            "step {step_index} is not between square matrices: {}x{} -> {}x{}",
+            from_matrix.rows, from_matrix.cols, to_matrix.rows, to_matrix.cols
+        ));
+    }
+
     let exact_graph_family = find_exact_graph_move_witness_between(from_matrix, to_matrix)
         .map(|successor| successor.family.to_string());
 
@@ -183,14 +197,14 @@ fn classify_step(
         factorisation_max_intermediate_dim,
         factorisation_max_entry,
         MoveFamilyPolicy::GraphPlusStructured,
-    );
+    )?;
     let mixed_families = matching_factorisation_families(
         from_matrix,
         to_matrix,
         factorisation_max_intermediate_dim,
         factorisation_max_entry,
         MoveFamilyPolicy::Mixed,
-    );
+    )?;
 
     let graph_probe_result = if exact_graph_family.is_none() {
         probe_graph_only_expansion(from_matrix, to_matrix, graph_probe)
@@ -274,7 +288,14 @@ fn matching_factorisation_families(
     max_intermediate_dim: usize,
     max_entry: u32,
     move_family_policy: MoveFamilyPolicy,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
+    if !from_matrix.is_square() || !to_matrix.is_square() {
+        return Err(format!(
+            "factorisation matching requires square matrices, got {}x{} and {}x{}",
+            from_matrix.rows, from_matrix.cols, to_matrix.rows, to_matrix.cols
+        ));
+    }
+
     let mut families = Vec::new();
     visit_factorisations_with_family_for_policy(
         from_matrix,
@@ -289,7 +310,7 @@ fn matching_factorisation_families(
     );
     families.sort();
     families.dedup();
-    families
+    Ok(families)
 }
 
 fn probe_graph_only_expansion(
