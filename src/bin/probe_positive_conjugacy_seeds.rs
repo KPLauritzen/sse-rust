@@ -1167,7 +1167,7 @@ fn derive_residual_one_step_priority(
     let mut successor_count = 0usize;
     let mut improving_successors = 0usize;
     let mut improving_move_families = BTreeSet::<String>::new();
-    let mut best_successor_target_l1_distance = current_distance;
+    let mut best_successor_target_l1_distance = u32::MAX;
     let mut exact_hit = false;
 
     for (successor, family) in
@@ -1676,5 +1676,23 @@ mod tests {
 
         assert_eq!(shortlist.len(), 1);
         assert_eq!(shortlist[0].score.matrix, sharper.score.matrix);
+    }
+
+    #[test]
+    fn residual_one_step_priority_treats_no_successor_seed_as_worst_distance() {
+        let source = SqMatrix::new([[0, 1], [1, 0]]);
+        let target = SqMatrix::new([[1, 1], [1, 1]]);
+        let seed = LocalSeed {
+            matrix: source.clone(),
+            anchor: SeedAnchor::Source,
+            local_lag: 0,
+            path_families: Vec::new(),
+        };
+
+        let priority =
+            derive_residual_one_step_priority(&seed, &source, &target, &mixed_search_config(1));
+
+        assert_eq!(priority.successor_count, 0);
+        assert_eq!(priority.best_successor_target_l1_distance, u32::MAX);
     }
 }
