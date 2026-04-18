@@ -1,7 +1,11 @@
 {
+  "factorisation_match": {
+    "max_entry": 12
+  },
   "graph_probe": {
     "max_lag": 3,
-    "max_intermediate_dim": 4
+    "max_intermediate_dim": 4,
+    "max_entry": 12
   },
   "artifacts": [
     {
@@ -46,8 +50,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_2x3",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         },
         {
@@ -171,9 +175,9 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
             "mixed-only additional families: elementary_conjugation_3x3, square_factorisation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -248,7 +252,7 @@
           },
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -372,9 +376,9 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
             "mixed-only additional families: elementary_conjugation_3x3, square_factorisation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -414,8 +418,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         }
       ]
@@ -462,8 +466,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_2x3",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         },
         {
@@ -586,8 +590,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -710,8 +714,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -786,7 +790,7 @@
           },
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -909,8 +913,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1033,8 +1037,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1074,8 +1078,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         }
       ]
@@ -1122,8 +1126,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_2x3",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         },
         {
@@ -1245,7 +1249,7 @@
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
             "mixed-only additional families: square_factorisation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1320,7 +1324,7 @@
           },
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1442,7 +1446,7 @@
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
             "mixed-only additional families: square_factorisation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1482,8 +1486,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         }
       ]
@@ -1530,8 +1534,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_2x3",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_2x3",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         },
         {
@@ -1654,8 +1658,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1778,8 +1782,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1854,7 +1858,7 @@
           },
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4"
+            "graph-only bounded probe succeeded at lag 1 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -1977,8 +1981,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -2101,8 +2105,8 @@
           },
           "classification": "needs_longer_split_amalgamation_expansion",
           "reasoning": [
-            "graph_plus_structured matching families: elementary_conjugation_3x3",
-            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): elementary_conjugation_3x3",
+            "graph-only bounded probe succeeded at lag 3 with max_intermediate_dim=4 and max_entry=12"
           ]
         },
         {
@@ -2142,8 +2146,8 @@
           "graph_probe": null,
           "classification": "not_represented_by_current_one_step_graph_move_families",
           "reasoning": [
-            "graph_plus_structured matching families: rectangular_factorisation_3x3_to_2",
-            "graph-only bounded probe found no path within lag 3 and max_intermediate_dim=4"
+            "graph_plus_structured matching families (factorisation max_entry=12): rectangular_factorisation_3x3_to_2",
+            "graph-only bounded probe found no path within lag 3, max_intermediate_dim=4, max_entry=12"
           ]
         }
       ]

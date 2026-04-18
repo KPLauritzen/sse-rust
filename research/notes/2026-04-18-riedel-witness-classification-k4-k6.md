@@ -117,10 +117,17 @@ target/dist/classify_witness_steps \
   --guide-artifact tmp/riedel_k6_graph_plus_structured_guide.json \
   --guide-artifact tmp/riedel_k4_mixed_guide.json \
   --guide-artifact tmp/riedel_k6_mixed_guide.json \
+  --factorisation-max-entry 12 \
+  --graph-probe-max-entry 12 \
   > research/riedel_witness_step_classification_k4_k6_2026-04-18.json
 ```
 
-The classifier's bounded graph-only probe used:
+The classifier used explicit retained entry caps:
+
+- factorisation matching `max_entry = 12`
+- bounded graph-only probe `max_entry = 12`
+
+The bounded graph-only probe also used:
 
 - `max_lag = 3`
 - `max_intermediate_dim = 4`

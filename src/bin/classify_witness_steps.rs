@@ -19,14 +19,21 @@ enum StepClassification {
 
 #[derive(Debug, Serialize)]
 struct Report {
+    factorisation_match: FactorisationMatchConfig,
     graph_probe: GraphProbeConfig,
     artifacts: Vec<ArtifactReport>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+struct FactorisationMatchConfig {
+    max_entry: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
 struct GraphProbeConfig {
     max_lag: usize,
     max_intermediate_dim: usize,
+    max_entry: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +86,7 @@ fn main() -> Result<(), String> {
                         step_index,
                         &witness_path.matrices[step_index],
                         &witness_path.matrices[step_index + 1],
+                        cli.factorisation_match,
                         cli.graph_probe,
                     )
                 })
@@ -94,6 +102,7 @@ fn main() -> Result<(), String> {
     }
 
     let report = Report {
+        factorisation_match: cli.factorisation_match,
         graph_probe: cli.graph_probe,
         artifacts,
     };
@@ -108,14 +117,17 @@ fn main() -> Result<(), String> {
 
 struct Cli {
     guide_paths: Vec<String>,
+    factorisation_match: FactorisationMatchConfig,
     graph_probe: GraphProbeConfig,
 }
 
 fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     let mut guide_paths = Vec::new();
+    let mut factorisation_match = FactorisationMatchConfig { max_entry: None };
     let mut graph_probe = GraphProbeConfig {
         max_lag: 3,
         max_intermediate_dim: 4,
+        max_entry: None,
     };
     let mut args = args.peekable();
 
@@ -134,10 +146,18 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                 graph_probe.max_intermediate_dim =
                     parse_usize_arg(&mut args, "--graph-probe-max-intermediate-dim")?;
             }
+            "--factorisation-max-entry" => {
+                factorisation_match.max_entry =
+                    Some(parse_u32_arg(&mut args, "--factorisation-max-entry")?);
+            }
+            "--graph-probe-max-entry" => {
+                graph_probe.max_entry = Some(parse_u32_arg(&mut args, "--graph-probe-max-entry")?);
+            }
             "--help" | "-h" => {
                 return Err(
                     "Usage: classify_witness_steps --guide-artifact PATH [--guide-artifact PATH ...]\
-\n       [--graph-probe-max-lag N] [--graph-probe-max-intermediate-dim N]"
+\n       [--factorisation-max-entry N] [--graph-probe-max-lag N]\
+\n       [--graph-probe-max-intermediate-dim N] [--graph-probe-max-entry N]"
                         .to_string(),
                 );
             }
@@ -161,6 +181,7 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
 
     Ok(Cli {
         guide_paths,
+        factorisation_match,
         graph_probe,
     })
 }
@@ -172,10 +193,18 @@ fn parse_usize_arg(args: &mut impl Iterator<Item = String>, flag: &str) -> Resul
         .map_err(|err| format!("failed to parse {flag} value {value:?}: {err}"))
 }
 
+fn parse_u32_arg(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<u32, String> {
+    let value = args.next().ok_or(format!("{flag} requires a value"))?;
+    value
+        .parse::<u32>()
+        .map_err(|err| format!("failed to parse {flag} value {value:?}: {err}"))
+}
+
 fn classify_step(
     step_index: usize,
     from_matrix: &DynMatrix,
     to_matrix: &DynMatrix,
+    factorisation_match: FactorisationMatchConfig,
     graph_probe: GraphProbeConfig,
 ) -> Result<StepReport, String> {
     if !from_matrix.is_square() || !to_matrix.is_square() {
@@ -190,7 +219,8 @@ fn classify_step(
 
     let factorisation_max_intermediate_dim =
         factorisation_max_intermediate_dim(from_matrix, to_matrix);
-    let factorisation_max_entry = factorisation_max_entry(from_matrix, to_matrix);
+    let factorisation_max_entry =
+        factorisation_match_max_entry(from_matrix, to_matrix, factorisation_match);
     let graph_plus_structured_families = matching_factorisation_families(
         from_matrix,
         to_matrix,
@@ -235,7 +265,8 @@ fn classify_step(
     }
     if !graph_plus_structured_families.is_empty() {
         reasoning.push(format!(
-            "graph_plus_structured matching families: {}",
+            "graph_plus_structured matching families (factorisation max_entry={}): {}",
+            factorisation_max_entry,
             graph_plus_structured_families.join(", ")
         ));
     }
@@ -247,12 +278,16 @@ fn classify_step(
     }
     match &graph_probe_result {
         Some(probe) => reasoning.push(format!(
-            "graph-only bounded probe succeeded at lag {} with max_intermediate_dim={}",
-            probe.lag, graph_probe.max_intermediate_dim
+            "graph-only bounded probe succeeded at lag {} with max_intermediate_dim={} and max_entry={}",
+            probe.lag,
+            graph_probe.max_intermediate_dim,
+            graph_probe_max_entry(from_matrix, to_matrix, graph_probe)
         )),
         None if exact_graph_family.is_none() => reasoning.push(format!(
-            "graph-only bounded probe found no path within lag {} and max_intermediate_dim={}",
-            graph_probe.max_lag, graph_probe.max_intermediate_dim
+            "graph-only bounded probe found no path within lag {}, max_intermediate_dim={}, max_entry={}",
+            graph_probe.max_lag,
+            graph_probe.max_intermediate_dim,
+            graph_probe_max_entry(from_matrix, to_matrix, graph_probe)
         )),
         None => {}
     }
@@ -280,6 +315,16 @@ fn factorisation_max_intermediate_dim(from_matrix: &DynMatrix, to_matrix: &DynMa
 
 fn factorisation_max_entry(from_matrix: &DynMatrix, to_matrix: &DynMatrix) -> u32 {
     from_matrix.max_entry().max(to_matrix.max_entry())
+}
+
+fn factorisation_match_max_entry(
+    from_matrix: &DynMatrix,
+    to_matrix: &DynMatrix,
+    factorisation_match: FactorisationMatchConfig,
+) -> u32 {
+    factorisation_match
+        .max_entry
+        .unwrap_or_else(|| factorisation_max_entry(from_matrix, to_matrix))
 }
 
 fn matching_factorisation_families(
@@ -318,7 +363,7 @@ fn probe_graph_only_expansion(
     to_matrix: &DynMatrix,
     graph_probe: GraphProbeConfig,
 ) -> Option<GraphProbeResult> {
-    let max_entry = factorisation_max_entry(from_matrix, to_matrix);
+    let max_entry = graph_probe_max_entry(from_matrix, to_matrix, graph_probe);
     let result = search_sse_dyn(
         from_matrix,
         to_matrix,
@@ -340,4 +385,14 @@ fn probe_graph_only_expansion(
         }),
         _ => None,
     }
+}
+
+fn graph_probe_max_entry(
+    from_matrix: &DynMatrix,
+    to_matrix: &DynMatrix,
+    graph_probe: GraphProbeConfig,
+) -> u32 {
+    graph_probe
+        .max_entry
+        .unwrap_or_else(|| factorisation_max_entry(from_matrix, to_matrix))
 }
