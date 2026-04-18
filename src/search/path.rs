@@ -1,7 +1,6 @@
 use ahash::AHashMap as HashMap;
 
 use super::frontier::{expand_frontier_layer, FrontierExpansionSettings};
-use crate::graph_moves::find_exact_graph_move_witness_between;
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::types::{
     DynSsePath, EsseStep, GuideArtifact, GuideArtifactCompatibility, GuideArtifactEndpoints,
@@ -259,7 +258,7 @@ fn walk_canon_parent_chain(
     matrices
 }
 
-fn find_exact_policy_step_between(
+pub(super) fn find_exact_policy_step_between(
     from: &DynMatrix,
     to: &DynMatrix,
     settings: FrontierExpansionSettings,
@@ -273,32 +272,6 @@ fn find_exact_policy_step_between(
         .into_iter()
         .find(|expansion| expansion.next_orig == *to)
         .map(|expansion| expansion.step)
-}
-
-fn reconstruct_deferred_step(from: &DynMatrix, to: &DynMatrix) -> EsseStep {
-    if let Some(step) = permutation_step_between(from, to) {
-        return step;
-    }
-
-    if let Some(successor) = find_exact_graph_move_witness_between(from, to) {
-        return successor.step;
-    }
-
-    if let Some(successor) = find_exact_graph_move_witness_between(to, from) {
-        return EsseStep {
-            u: successor.step.v,
-            v: successor.step.u,
-        };
-    }
-
-    panic!("graph-only matrix path should admit an exact one-step witness: from={from:?} to={to:?}")
-}
-
-fn reconstruct_deferred_steps(matrices: &[DynMatrix]) -> Vec<EsseStep> {
-    matrices
-        .windows(2)
-        .map(|pair| reconstruct_deferred_step(&pair[0], &pair[1]))
-        .collect()
 }
 
 fn reconstruct_policy_bounded_step(
@@ -484,6 +457,7 @@ pub(super) fn reconstruct_graph_only_bidirectional_path(
     fwd_orig: &HashMap<DynMatrix, DynMatrix>,
     bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
     bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    settings: FrontierExpansionSettings,
 ) -> SsePath<2> {
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
@@ -496,7 +470,7 @@ pub(super) fn reconstruct_graph_only_bidirectional_path(
         bwd_parent,
         bwd_orig,
     );
-    let all_steps = reconstruct_deferred_steps(&all_dyn_matrices);
+    let all_steps = reconstruct_policy_bounded_steps(&all_dyn_matrices, settings);
     let sq_matrices: Vec<SqMatrix<2>> = all_dyn_matrices
         .drain(..)
         .filter_map(|dm| dm.to_sq::<2>())
@@ -516,6 +490,7 @@ pub(super) fn reconstruct_graph_only_bidirectional_dyn_path(
     fwd_orig: &HashMap<DynMatrix, DynMatrix>,
     bwd_parent: &HashMap<DynMatrix, Option<DynMatrix>>,
     bwd_orig: &HashMap<DynMatrix, DynMatrix>,
+    settings: FrontierExpansionSettings,
 ) -> DynSsePath {
     let matrices = reconstruct_graph_only_bidirectional_dyn_matrices(
         a,
@@ -526,7 +501,7 @@ pub(super) fn reconstruct_graph_only_bidirectional_dyn_path(
         bwd_parent,
         bwd_orig,
     );
-    let steps = reconstruct_deferred_steps(&matrices);
+    let steps = reconstruct_policy_bounded_steps(&matrices, settings);
 
     DynSsePath { matrices, steps }
 }

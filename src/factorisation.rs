@@ -3420,7 +3420,7 @@ const THREE_BY_THREE_SAME_DIMENSION_FAMILIES: [FactorisationFamilyDescriptor; 6]
     ),
     FactorisationFamilyDescriptor::new(
         "elementary_conjugation_3x3",
-        enabled_three_by_three_same_dimension_family,
+        enabled_elementary_conjugation_3x3,
         enumerate_elementary_conjugation_3x3_family,
     ),
     FactorisationFamilyDescriptor::new(
@@ -3506,49 +3506,49 @@ const GENERIC_SAME_DIMENSION_CONJUGATION_FAMILIES: [FactorisationFamilyDescripto
 fn enabled_square_factorisation_2x2(
     input_dim: usize,
     _max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 2
+    input_dim == 2 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_rectangular_factorisation_2x3(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 2 && max_intermediate_dim >= 3
+    input_dim == 2 && max_intermediate_dim >= 3 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_rectangular_factorisation_3x3_to_2(
     input_dim: usize,
     _max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3
+    input_dim == 3 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_binary_sparse_factorisation_3x3_to_4(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && max_intermediate_dim >= 4
+    input_dim == 3 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_row_split_3x3_to_4x4(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && max_intermediate_dim >= 4
+    input_dim == 3 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_column_split_3x3_to_4x4(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && max_intermediate_dim >= 4
+    input_dim == 3 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_square_factorisation_3x3(
@@ -3564,97 +3564,114 @@ fn enabled_square_factorisation_3x3(
 fn enabled_three_by_three_same_dimension_family(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && max_intermediate_dim >= 3
+    input_dim == 3 && max_intermediate_dim >= 3 && move_family_policy.permits_factorisations()
+}
+
+fn enabled_elementary_conjugation_3x3(
+    input_dim: usize,
+    max_intermediate_dim: usize,
+    move_family_policy: MoveFamilyPolicy,
+) -> bool {
+    input_dim == 3
+        && max_intermediate_dim >= 3
+        && matches!(
+            move_family_policy,
+            MoveFamilyPolicy::Mixed
+                | MoveFamilyPolicy::GraphPlusStructured
+                | MoveFamilyPolicy::GraphOnly
+        )
 }
 
 fn enabled_binary_sparse_factorisation_4x4_to_3(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 4
+    input_dim == 4 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_row_amalgamation_4x4_to_3x3(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 4
+    input_dim == 4 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_column_amalgamation_4x4_to_3x3(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 4
+    input_dim == 4 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_row_split_4x4_to_5x5(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 5
+    input_dim == 4 && max_intermediate_dim >= 5 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_column_split_4x4_to_5x5(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 5
+    input_dim == 4 && max_intermediate_dim >= 5 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_binary_sparse_factorisation_4x4_to_5(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 5
+    input_dim == 4 && max_intermediate_dim >= 5 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_four_by_four_same_dimension_family(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 4
+    input_dim == 4 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_row_amalgamation_5x5_to_4x4(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 5 && max_intermediate_dim >= 5
+    input_dim == 5 && max_intermediate_dim >= 5 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_single_column_amalgamation_5x5_to_4x4(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 5 && max_intermediate_dim >= 5
+    input_dim == 5 && max_intermediate_dim >= 5 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_binary_sparse_factorisation_5x5_to_4(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 5 && max_intermediate_dim >= 5
+    input_dim == 5 && max_intermediate_dim >= 5 && move_family_policy.permits_factorisations()
 }
 
 fn enabled_generic_same_dimension_conjugation(
     input_dim: usize,
     max_intermediate_dim: usize,
-    _move_family_policy: MoveFamilyPolicy,
+    move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim >= 4 && max_intermediate_dim >= input_dim
+    input_dim >= 4
+        && max_intermediate_dim >= input_dim
+        && move_family_policy.permits_factorisations()
 }
 
 fn enumerate_square_factorisation_2x2_family(
@@ -4297,11 +4314,9 @@ pub fn visit_factorisations_with_family_for_policy<F>(
 ) where
     F: FnMut(&'static str, DynMatrix, DynMatrix),
 {
-    if !move_family_policy.permits_factorisations() {
-        return;
-    }
-
     assert!(a.is_square());
+    // Family-level enable gates decide which retained promotions remain visible
+    // under narrower policies such as `graph_only`.
     visit_selected_factorisation_families(
         a,
         max_intermediate_dim,
@@ -4925,6 +4940,14 @@ mod tests {
                 "parallel_shear_conjugation_3x3",
                 "convergent_shear_conjugation_3x3",
             ]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_graph_only_3x3_keep_retained_conjugation_only() {
+        assert_eq!(
+            selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::GraphOnly),
+            vec!["elementary_conjugation_3x3"]
         );
     }
 

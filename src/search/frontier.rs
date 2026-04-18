@@ -355,53 +355,51 @@ fn expand_frontier_node(
         });
     }
 
-    if settings.move_family_policy.permits_factorisations() {
-        visit_factorisations_with_family_for_policy(
-            current,
-            settings.max_intermediate_dim,
-            settings.max_entry,
-            settings.move_family_policy,
-            |move_family, u, v| {
-                move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
-                    .candidates_generated += 1;
-                stats.factorisations_enumerated += 1;
-                stats.candidates_generated += 1;
-                if move_family == "square_factorisation_3x3"
-                    && square_factorisation_3x3_permutation_orbit_key(&u, &v)
-                        .is_some_and(|key| !seen_square_factorisation_orbits.insert(key))
-                {
-                    return;
-                }
-                if move_family == "binary_sparse_rectangular_factorisation_3x3_to_4"
-                    && binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, settings.max_entry)
-                        .is_some_and(|key| !seen_binary_sparse_3x3_to_4_orbits.insert(key))
-                {
-                    return;
-                }
-                let next = v.mul(&u);
+    visit_factorisations_with_family_for_policy(
+        current,
+        settings.max_intermediate_dim,
+        settings.max_entry,
+        settings.move_family_policy,
+        |move_family, u, v| {
+            move_family_telemetry_mut(&mut stats.move_family_telemetry, move_family)
+                .candidates_generated += 1;
+            stats.factorisations_enumerated += 1;
+            stats.candidates_generated += 1;
+            if move_family == "square_factorisation_3x3"
+                && square_factorisation_3x3_permutation_orbit_key(&u, &v)
+                    .is_some_and(|key| !seen_square_factorisation_orbits.insert(key))
+            {
+                return;
+            }
+            if move_family == "binary_sparse_rectangular_factorisation_3x3_to_4"
+                && binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, settings.max_entry)
+                    .is_some_and(|key| !seen_binary_sparse_3x3_to_4_orbits.insert(key))
+            {
+                return;
+            }
+            let next = v.mul(&u);
 
-                if next.rows > settings.max_intermediate_dim {
-                    stats.pruned_by_size += 1;
-                    return;
-                }
+            if next.rows > settings.max_intermediate_dim {
+                stats.pruned_by_size += 1;
+                return;
+            }
 
-                let next_canon = next.canonical_perm();
-                if !seen_successors.insert(next_canon.clone()) {
-                    return;
-                }
-                let step = EsseStep { u, v };
-                expansions.push(FrontierExpansion {
-                    order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
-                    parent_canon: current_canon.clone(),
-                    next_canon,
-                    next_orig: next,
-                    step,
-                    move_family,
-                    same_future_past_signature: None,
-                });
-            },
-        );
-    }
+            let next_canon = next.canonical_perm();
+            if !seen_successors.insert(next_canon.clone()) {
+                return;
+            }
+            let step = EsseStep { u, v };
+            expansions.push(FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(frontier_index, expansions.len()),
+                parent_canon: current_canon.clone(),
+                next_canon,
+                next_orig: next,
+                step,
+                move_family,
+                same_future_past_signature: None,
+            });
+        },
+    );
 
     (expansions, stats)
 }

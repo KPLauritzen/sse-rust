@@ -3,9 +3,14 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
+use crate::factorisation::visit_factorisations_with_family_for_policy;
 use crate::graph_moves::{
-    enumerate_graph_move_successor_nodes, enumerate_graph_proposals,
-    find_exact_graph_move_witness_between, GraphProposal, SameFuturePastSignatureGap,
+    enumerate_graph_move_successors, enumerate_graph_proposals, GraphMoveSuccessor,
+    GraphMoveSuccessors, GraphProposal, SameFuturePastSignatureGap,
+};
+#[cfg(test)]
+use crate::graph_moves::{
+    enumerate_graph_move_successor_nodes, find_exact_graph_move_witness_between,
 };
 use crate::invariants::{
     check_invariants_2x2, check_same_dimension_square_bowen_franks_invariants,
@@ -157,6 +162,44 @@ fn frontier_expansion_settings(config: &SearchConfig) -> FrontierExpansionSettin
         max_entry: config.max_entry,
         move_family_policy: config.move_family_policy,
     }
+}
+
+fn enumerate_graph_only_policy_successors(
+    current: &DynMatrix,
+    config: &SearchConfig,
+) -> GraphMoveSuccessors {
+    let mut successors = enumerate_graph_move_successors(current, config.max_intermediate_dim);
+    let mut seen: HashSet<DynMatrix> = successors
+        .nodes
+        .iter()
+        .map(|successor| successor.matrix.clone())
+        .collect();
+
+    visit_factorisations_with_family_for_policy(
+        current,
+        config.max_intermediate_dim,
+        config.max_entry,
+        MoveFamilyPolicy::GraphOnly,
+        |family, u, v| {
+            successors.candidates += 1;
+            *successors.family_candidates.entry(family).or_default() += 1;
+
+            let next = v.mul(&u);
+            let next_canon = next.canonical_perm();
+            if !seen.insert(next_canon.clone()) {
+                return;
+            }
+
+            successors.nodes.push(GraphMoveSuccessor {
+                family,
+                matrix: next_canon,
+                orig_matrix: next,
+                step: EsseStep { u, v },
+            });
+        },
+    );
+
+    successors
 }
 
 /// Search for a strong shift equivalence path between two 2x2 matrices.
@@ -3540,6 +3583,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
+    let graph_only_settings = frontier_expansion_settings(config);
     let a_canon = a_dyn.canonical_perm();
     let b_canon = b_dyn.canonical_perm();
 
@@ -3622,7 +3666,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry.max_frontier_size.max(frontier.len());
         let current_frontier: Vec<DynMatrix> = frontier.drain(..).collect();
         let current_frontier_len = current_frontier.len();
-        let computed: Vec<(DynMatrix, crate::graph_moves::GraphMoveNodes)> = current_frontier
+        let computed: Vec<(DynMatrix, GraphMoveSuccessors)> = current_frontier
             .par_iter()
             .map(|current_canon| {
                 let current = orig
@@ -3630,7 +3674,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                     .expect("frontier node should have an original matrix");
                 (
                     current_canon.clone(),
-                    enumerate_graph_move_successor_nodes(current, config.max_intermediate_dim),
+                    enumerate_graph_only_policy_successors(current, config),
                 )
             })
             .collect();
@@ -3693,12 +3737,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                             to_orig: successor.orig_matrix.clone(),
                             from_depth: layer_depth,
                             to_depth: next_depth,
-                            step: find_exact_graph_move_witness_between(
-                                &current_orig,
-                                &successor.orig_matrix,
-                            )
-                            .expect("graph-only observer edge should admit an exact witness")
-                            .step,
+                            step: successor.step.clone(),
                             status: SearchEdgeStatus::SeenCollision,
                             approximate_other_side_hit: false,
                             enqueued: false,
@@ -3759,12 +3798,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                                 to_orig: successor.orig_matrix.clone(),
                                 from_depth: layer_depth,
                                 to_depth: next_depth,
-                                step: find_exact_graph_move_witness_between(
-                                    &current_orig,
-                                    &successor.orig_matrix,
-                                )
-                                .expect("graph-only observer edge should admit an exact witness")
-                                .step,
+                                step: successor.step.clone(),
                                 status: record_status,
                                 approximate_other_side_hit: false,
                                 enqueued: false,
@@ -3787,6 +3821,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                                 &fwd_orig,
                                 &bwd_parent,
                                 &bwd_orig,
+                                graph_only_settings,
                             )),
                             telemetry,
                         );
@@ -3808,12 +3843,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                         to_orig: successor.orig_matrix.clone(),
                         from_depth: layer_depth,
                         to_depth: next_depth,
-                        step: find_exact_graph_move_witness_between(
-                            &current_orig,
-                            &successor.orig_matrix,
-                        )
-                        .expect("graph-only observer edge should admit an exact witness")
-                        .step,
+                        step: successor.step.clone(),
                         status: record_status,
                         approximate_other_side_hit: false,
                         enqueued: true,
@@ -3875,6 +3905,7 @@ fn search_graph_only_dyn_with_telemetry(
     deadline: Option<Instant>,
 ) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
+    let graph_only_settings = frontier_expansion_settings(config);
     let a_canon = a.canonical_perm();
     let b_canon = b.canonical_perm();
 
@@ -3975,7 +4006,7 @@ fn search_graph_only_dyn_with_telemetry(
                 timed_out = true;
                 break;
             }
-            let computed: Vec<(DynMatrix, crate::graph_moves::GraphMoveNodes)> = chunk
+            let computed: Vec<(DynMatrix, GraphMoveSuccessors)> = chunk
                 .par_iter()
                 .map(|current_canon| {
                     let current = orig
@@ -3983,7 +4014,7 @@ fn search_graph_only_dyn_with_telemetry(
                         .expect("frontier node should have an original matrix");
                     (
                         current_canon.clone(),
-                        enumerate_graph_move_successor_nodes(current, config.max_intermediate_dim),
+                        enumerate_graph_only_policy_successors(current, config),
                     )
                 })
                 .collect();
@@ -4080,6 +4111,7 @@ fn search_graph_only_dyn_with_telemetry(
                                         &fwd_orig,
                                         &bwd_parent,
                                         &bwd_orig,
+                                        graph_only_settings,
                                     ),
                                 ),
                                 telemetry,
@@ -5680,6 +5712,36 @@ mod tests {
         assert_eq!(path.steps.len(), 1);
         assert_eq!(telemetry.frontier_nodes_expanded, 1);
         assert_eq!(telemetry.factorisations_enumerated, 0);
+    }
+
+    #[test]
+    fn test_graph_only_dyn_promotes_retained_elementary_conjugation_step() {
+        let source = DynMatrix::new(3, 3, vec![1, 3, 1, 1, 3, 0, 2, 6, 4]);
+        let target = DynMatrix::new(3, 3, vec![1, 2, 1, 1, 3, 0, 3, 5, 4]);
+        let config = SearchConfig {
+            max_lag: 1,
+            max_intermediate_dim: 3,
+            max_entry: 12,
+            frontier_mode: FrontierMode::Bfs,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: None,
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+        };
+
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
+        let path = match result {
+            DynSseResult::Equivalent(path) => path,
+            other => panic!(
+                "expected promoted graph-only search to find the retained conjugation step, got {other:?}"
+            ),
+        };
+
+        validate_sse_path_dyn(&source, &target, &path).unwrap();
+        assert_eq!(path.steps.len(), 1);
+        assert!(telemetry
+            .move_family_telemetry
+            .contains_key("elementary_conjugation_3x3"));
     }
 
     #[test]
