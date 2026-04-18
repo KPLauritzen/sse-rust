@@ -459,7 +459,9 @@ fn measure_binary_sparse_4x3_to_3_bounded_exhaustion(
     };
 
     for (source, _) in sources {
-        let max_other_depth = max_lag.saturating_sub(source.depth + 1);
+        let Some(max_other_depth) = max_lag.checked_sub(source.depth + 1) else {
+            continue;
+        };
         let opposite_depths = observer
             .visited_depths
             .get(opposite_direction_label(source.direction));
