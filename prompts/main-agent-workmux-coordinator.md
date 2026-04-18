@@ -76,6 +76,7 @@ Prompt-writing guidance:
 - list the exact repo files/notes to read first
 - define the desired bounded slice
 - state hard boundaries explicitly
+- require a durable note whenever the worker produces measurement, a keep/reject decision, a negative result, or a conclusion likely to guide later work
 - include focused validation commands
 - tell the worker to update `bd`, commit, and run `roborev`
 
