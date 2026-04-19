@@ -7030,8 +7030,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expand_frontier_layer_graph_plus_structured_exposes_single_row_amalgamation_4x4_to_3x3()
-    {
+    fn test_expand_frontier_layer_graph_plus_structured_skips_single_row_amalgamation_4x4_to_3x3() {
         let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
         let current_canon = current.canonical_perm();
         let mut orig = HashMap::new();
@@ -7047,18 +7046,17 @@ mod tests {
             },
         );
 
-        assert!(stats.factorisations_enumerated > 0);
-        assert!(expansions
+        assert!(!expansions
             .iter()
-            .any(|expansion| expansion.next_orig.rows == 3));
+            .any(|expansion| expansion.move_family == "single_row_amalgamation_4x4_to_3x3"));
         assert!(stats
             .move_family_telemetry
             .get("single_row_amalgamation_4x4_to_3x3")
-            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+            .is_none());
     }
 
     #[test]
-    fn test_expand_frontier_layer_graph_plus_structured_exposes_single_column_amalgamation_4x4_to_3x3(
+    fn test_expand_frontier_layer_graph_plus_structured_skips_single_column_amalgamation_4x4_to_3x3(
     ) {
         let current = DynMatrix::new(4, 4, vec![1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1]);
         let current_canon = current.canonical_perm();
@@ -7075,14 +7073,13 @@ mod tests {
             },
         );
 
-        assert!(stats.factorisations_enumerated > 0);
-        assert!(expansions
+        assert!(!expansions
             .iter()
-            .any(|expansion| expansion.next_orig.rows == 3));
+            .any(|expansion| expansion.move_family == "single_column_amalgamation_4x4_to_3x3"));
         assert!(stats
             .move_family_telemetry
             .get("single_column_amalgamation_4x4_to_3x3")
-            .is_some_and(|telemetry| telemetry.candidates_generated > 0));
+            .is_none());
     }
 
     #[test]

@@ -3611,7 +3611,12 @@ fn enabled_single_row_amalgamation_4x4_to_3x3(
     max_intermediate_dim: usize,
     move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
+    // On the retained Brix-Ruiz k=4 dim4 lane, the broader binary-sparse
+    // 4x4->3 lift stays enabled while the explicit row/column amalgamation
+    // siblings are tested as duplicate-volume cuts for GraphPlusStructured.
+    input_dim == 4
+        && max_intermediate_dim >= 4
+        && matches!(move_family_policy, MoveFamilyPolicy::Mixed)
 }
 
 fn enabled_single_column_amalgamation_4x4_to_3x3(
@@ -3619,7 +3624,9 @@ fn enabled_single_column_amalgamation_4x4_to_3x3(
     max_intermediate_dim: usize,
     move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 4 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
+    input_dim == 4
+        && max_intermediate_dim >= 4
+        && matches!(move_family_policy, MoveFamilyPolicy::Mixed)
 }
 
 fn enabled_single_row_split_4x4_to_5x5(
@@ -5117,6 +5124,19 @@ mod tests {
                 "single_row_split_4x4_to_5x5",
                 "single_column_split_4x4_to_5x5",
                 "binary_sparse_rectangular_factorisation_4x4_to_5",
+                "diagonal_refactorization_4x4",
+                "elementary_conjugation",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_selected_family_labels_for_graph_plus_structured_4x4_skip_explicit_amalgamation_families(
+    ) {
+        assert_eq!(
+            selected_factorisation_family_labels(4, 4, MoveFamilyPolicy::GraphPlusStructured),
+            vec![
+                "binary_sparse_rectangular_factorisation_4x3_to_3",
                 "diagonal_refactorization_4x4",
                 "elementary_conjugation",
             ]
