@@ -974,7 +974,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                             step: expansion.step.clone(),
                             status: record_status,
                             approximate_other_side_hit: approximate_hit,
-                            enqueued,
+                            enqueued: false,
                         });
                     }
                     continue;
@@ -995,7 +995,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                         step: expansion.step.clone(),
                         status: record_status,
                         approximate_other_side_hit: approximate_hit,
-                        enqueued,
+                        enqueued: false,
                     });
                 }
                 if let Some(retention) = retained_exact_meets.as_mut() {
@@ -1561,7 +1561,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                             step: expansion.step.clone(),
                             status: record_status,
                             approximate_other_side_hit: approximate_hit,
-                            enqueued,
+                            enqueued: false,
                         });
                     }
                     continue;
@@ -1580,7 +1580,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                         step: expansion.step.clone(),
                         status: record_status,
                         approximate_other_side_hit: approximate_hit,
-                        enqueued,
+                        enqueued: false,
                     });
                 }
                 if let Some(retention) = retained_exact_meets.as_mut() {
@@ -2047,7 +2047,7 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                             step: expansion.step.clone(),
                             status: record_status,
                             approximate_other_side_hit: approximate_hit,
-                            enqueued,
+                            enqueued: false,
                         });
                     }
                     continue;
@@ -2066,7 +2066,7 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                         step: expansion.step.clone(),
                         status: record_status,
                         approximate_other_side_hit: approximate_hit,
-                        enqueued,
+                        enqueued: false,
                     });
                 }
                 if let Some(retention) = retained_exact_meets.as_mut() {
