@@ -167,7 +167,7 @@ The result to keep is:
 - `graph_only` stays cheap on unsolved higher rungs because the widened dim-3
   frontier still exhausts quickly;
 - `graph_plus_structured` remains the solving policy on every retained rung and
-  pays between roughly `6x` and `80x` the wall time of `graph_only` on the same
+  pays between roughly `2x` and `80x` the wall time of `graph_only` on the same
   widened endpoints; and
 - even on the single recovered rung `k = 4`, `graph_only` still needs a worse
   witness lag (`6` vs `5`) than `graph_plus_structured` on the same surface.
