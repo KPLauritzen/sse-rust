@@ -3549,7 +3549,12 @@ fn enabled_single_row_split_3x3_to_4x4(
     max_intermediate_dim: usize,
     move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
+    // The graph_plus_structured lane keeps the broader binary-sparse 3x3->4 lift
+    // and drops these explicit split families after they benchmarked as pure
+    // duplicate volume on the retained Brix-Ruiz k=4 dim4 surface.
+    input_dim == 3
+        && max_intermediate_dim >= 4
+        && matches!(move_family_policy, MoveFamilyPolicy::Mixed)
 }
 
 fn enabled_single_column_split_3x3_to_4x4(
@@ -3557,7 +3562,9 @@ fn enabled_single_column_split_3x3_to_4x4(
     max_intermediate_dim: usize,
     move_family_policy: MoveFamilyPolicy,
 ) -> bool {
-    input_dim == 3 && max_intermediate_dim >= 4 && move_family_policy.permits_factorisations()
+    input_dim == 3
+        && max_intermediate_dim >= 4
+        && matches!(move_family_policy, MoveFamilyPolicy::Mixed)
 }
 
 fn enabled_square_factorisation_3x3(
@@ -5053,8 +5060,6 @@ mod tests {
             selected_factorisation_family_labels(3, 4, MoveFamilyPolicy::GraphPlusStructured),
             vec![
                 "rectangular_factorisation_3x3_to_2",
-                "single_row_split_3x3_to_4x4",
-                "single_column_split_3x3_to_4x4",
                 "binary_sparse_rectangular_factorisation_3x3_to_4",
                 "diagonal_refactorization_3x3",
                 "elementary_conjugation_3x3",
