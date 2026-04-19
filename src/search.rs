@@ -1158,8 +1158,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
-        if !timed_out
-            && retained_exact_meets
+        if retained_exact_meets
             .as_ref()
             .is_some_and(ExactMeetRetention::has_retained)
         {
@@ -1167,24 +1166,26 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 .as_ref()
                 .and_then(ExactMeetRetention::first)
                 .expect("retained endpoint exact meet should exist before returning");
-            store_endpoint_exact_meets(
-                &mut telemetry,
-                retained_exact_meets
-                    .as_ref()
-                    .expect("retention should exist when retained exact meets are present"),
-                |canonical| {
-                    reconstruct_bidirectional_dyn_path(
-                        a,
-                        b,
-                        canonical,
-                        &fwd_parent,
-                        &fwd_orig,
-                        &bwd_parent,
-                        &bwd_orig,
-                    )
-                },
-                Clone::clone,
-            );
+            if !timed_out {
+                store_endpoint_exact_meets(
+                    &mut telemetry,
+                    retained_exact_meets
+                        .as_ref()
+                        .expect("retention should exist when retained exact meets are present"),
+                    |canonical| {
+                        reconstruct_bidirectional_dyn_path(
+                            a,
+                            b,
+                            canonical,
+                            &fwd_parent,
+                            &fwd_orig,
+                            &bwd_parent,
+                            &bwd_orig,
+                        )
+                    },
+                    Clone::clone,
+                );
+            }
             return finish_search_dyn(
                 observer,
                 &request,
@@ -4726,8 +4727,7 @@ fn search_graph_only_dyn_with_telemetry(
         }
         layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
-        if !timed_out
-            && retained_exact_meets
+        if retained_exact_meets
             .as_ref()
             .is_some_and(ExactMeetRetention::has_retained)
         {
@@ -4739,25 +4739,27 @@ fn search_graph_only_dyn_with_telemetry(
                 .as_ref()
                 .and_then(ExactMeetRetention::first)
                 .expect("retained endpoint exact meet should exist before returning");
-            store_endpoint_exact_meets(
-                &mut telemetry,
-                retained_exact_meets
-                    .as_ref()
-                    .expect("retention should exist when retained exact meets are present"),
-                |canonical| {
-                    reconstruct_graph_only_bidirectional_dyn_path(
-                        a,
-                        b,
-                        canonical,
-                        &fwd_parent,
-                        &fwd_orig,
-                        &bwd_parent,
-                        &bwd_orig,
-                        graph_only_settings,
-                    )
-                },
-                Clone::clone,
-            );
+            if !timed_out {
+                store_endpoint_exact_meets(
+                    &mut telemetry,
+                    retained_exact_meets
+                        .as_ref()
+                        .expect("retention should exist when retained exact meets are present"),
+                    |canonical| {
+                        reconstruct_graph_only_bidirectional_dyn_path(
+                            a,
+                            b,
+                            canonical,
+                            &fwd_parent,
+                            &fwd_orig,
+                            &bwd_parent,
+                            &bwd_orig,
+                            graph_only_settings,
+                        )
+                    },
+                    Clone::clone,
+                );
+            }
             return finish_search_dyn(
                 observer,
                 request,

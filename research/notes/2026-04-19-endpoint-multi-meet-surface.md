@@ -68,7 +68,9 @@ Do not assume those two numbers are equal.
 
 The dynamic endpoint-search variants only publish the retained multi-meet
 surface after a full merge layer completes. If a deadline interrupts the layer,
-the search does not claim a ranked retained result from that partial layer.
+dynamic search can still return `Equivalent` from the best retained exact meet,
+but it does not publish the ranked `endpoint_exact_meets` surface for that
+partial layer.
 
 ## Focused validation case
 
