@@ -4,13 +4,14 @@ use crate::search_observer::{
     SearchStartRecord,
 };
 use crate::types::{
-    DynSseResult, FrontierMode, GuidedRefinementConfig, SearchConfig, SearchRequest,
-    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
+    DynSseResult, GuidedRefinementConfig, SearchConfig, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
 };
 
 use super::stages::{search_guided_refinement_with_observer, search_shortcut_search_with_observer};
 use super::{
     search_sse_2x2_with_telemetry_and_observer, search_sse_with_telemetry_dyn_and_observer,
+    validate_endpoint_multi_meet_config,
 };
 
 pub(super) fn execute_search_request(
@@ -41,12 +42,7 @@ fn validate_request(request: &SearchRequest) -> Result<(), String> {
     if request.stage != SearchStage::EndpointSearch {
         return Err("endpoint_multi_meet_cap only supports --stage endpoint-search".to_string());
     }
-    if request.config.frontier_mode != FrontierMode::Bfs {
-        return Err(
-            "endpoint_multi_meet_cap currently only supports --frontier-mode bfs".to_string(),
-        );
-    }
-    Ok(())
+    validate_endpoint_multi_meet_config(&request.config)
 }
 
 pub(super) fn endpoint_search_request(

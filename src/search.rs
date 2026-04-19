@@ -174,6 +174,27 @@ fn frontier_expansion_settings(config: &SearchConfig) -> FrontierExpansionSettin
     }
 }
 
+pub(super) fn validate_endpoint_multi_meet_config(config: &SearchConfig) -> Result<(), String> {
+    let Some(cap) = config.endpoint_multi_meet_cap else {
+        return Ok(());
+    };
+    if cap == 0 {
+        return Err("endpoint_multi_meet_cap must be at least 1 when requested".to_string());
+    }
+    if config.frontier_mode != FrontierMode::Bfs {
+        return Err(
+            "endpoint_multi_meet_cap currently only supports --frontier-mode bfs".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn assert_valid_endpoint_multi_meet_config(config: &SearchConfig) {
+    if let Err(message) = validate_endpoint_multi_meet_config(config) {
+        panic!("{message}");
+    }
+}
+
 #[derive(Clone, Debug)]
 struct RetainedExactMeetCandidate<M> {
     canonical: M,
@@ -200,7 +221,7 @@ impl<M: Clone> ExactMeetRetention<M> {
         Self {
             requested_cap,
             next_discovery_order: 0,
-            retained: Vec::with_capacity(requested_cap),
+            retained: Vec::new(),
         }
     }
 
@@ -578,6 +599,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     mut observer: Option<&mut dyn SearchObserver>,
     deadline: Option<Instant>,
 ) -> (DynSseResult, SearchTelemetry) {
+    assert_valid_endpoint_multi_meet_config(config);
     let mut telemetry = SearchTelemetry::default();
     let request = endpoint_search_request(a, b, config);
 
@@ -1184,6 +1206,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     config: &SearchConfig,
     mut observer: Option<&mut dyn SearchObserver>,
 ) -> (SseResult<2>, SearchTelemetry) {
+    assert_valid_endpoint_multi_meet_config(config);
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
@@ -4288,6 +4311,9 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
             .is_some_and(ExactMeetRetention::has_retained)
         {
             telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+            if let Some(layer) = telemetry.layers.last_mut() {
+                layer.total_visited_nodes = telemetry.total_visited_nodes;
+            }
             let best_exact_meet = retained_exact_meets
                 .as_ref()
                 .and_then(ExactMeetRetention::first)
@@ -4691,6 +4717,9 @@ fn search_graph_only_dyn_with_telemetry(
             .is_some_and(ExactMeetRetention::has_retained)
         {
             telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+            if let Some(layer) = telemetry.layers.last_mut() {
+                layer.total_visited_nodes = telemetry.total_visited_nodes;
+            }
             let best_exact_meet = retained_exact_meets
                 .as_ref()
                 .and_then(ExactMeetRetention::first)
