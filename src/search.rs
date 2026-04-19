@@ -203,7 +203,7 @@ struct ExactMeetRetention<M> {
     retained: Vec<RetainedExactMeetCandidate<M>>,
 }
 
-impl<M: Clone> ExactMeetRetention<M> {
+impl<M: Clone + PartialEq> ExactMeetRetention<M> {
     fn from_config(config: &SearchConfig) -> Option<Self> {
         if validate_endpoint_multi_meet_config(config).is_err() {
             return None;
@@ -233,6 +233,24 @@ impl<M: Clone> ExactMeetRetention<M> {
             discovery_order: self.next_discovery_order,
         };
         self.next_discovery_order += 1;
+        if let Some(existing) = self
+            .retained
+            .iter_mut()
+            .find(|existing| existing.canonical == candidate.canonical)
+        {
+            if candidate.path_depth < existing.path_depth
+                || (candidate.path_depth == existing.path_depth
+                    && candidate.discovery_order < existing.discovery_order)
+            {
+                *existing = candidate;
+            }
+            self.retained.sort_by(|left, right| {
+                left.path_depth
+                    .cmp(&right.path_depth)
+                    .then(left.discovery_order.cmp(&right.discovery_order))
+            });
+            return;
+        }
         self.retained.push(candidate);
         self.retained.sort_by(|left, right| {
             left.path_depth
@@ -255,7 +273,7 @@ fn store_endpoint_exact_meets<M, FPath, FCanon>(
     mut reconstruct_path: FPath,
     mut to_dyn_matrix: FCanon,
 ) where
-    M: Clone,
+    M: Clone + PartialEq,
     FPath: FnMut(&M) -> DynSsePath,
     FCanon: FnMut(&M) -> DynMatrix,
 {
@@ -1140,7 +1158,8 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
-        if retained_exact_meets
+        if !timed_out
+            && retained_exact_meets
             .as_ref()
             .is_some_and(ExactMeetRetention::has_retained)
         {
@@ -4707,7 +4726,8 @@ fn search_graph_only_dyn_with_telemetry(
         }
         layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
-        if retained_exact_meets
+        if !timed_out
+            && retained_exact_meets
             .as_ref()
             .is_some_and(ExactMeetRetention::has_retained)
         {
@@ -5022,6 +5042,16 @@ mod tests {
             .retained
             .windows(2)
             .all(|window| window[0].path_lag <= window[1].path_lag));
+        assert_eq!(
+            surface
+                .retained
+                .iter()
+                .map(|witness| witness.meeting_canonical.clone())
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            surface.retained.len(),
+            "retained endpoint exact meets should be canonical-unique",
+        );
 
         let SseResult::Equivalent(primary_path) = result else {
             panic!("expected equivalent result for retained multi-meet case");

@@ -23,6 +23,7 @@ It means:
 - with the flag enabled, the search finishes that current merge layer instead
   of returning immediately on the first admissible meet;
 - it retains at most `N` admissible exact meets from that layer;
+- retained items are canonical-unique by meeting state within that layer;
 - each retained item includes:
   - the canonical meeting state;
   - the meet lag used for ranking (`next_depth + other_depth`);
@@ -48,6 +49,7 @@ Cap semantics:
 - the retained JSON array is already sorted in ranking order;
 - if more than `N` admissible meets are observed, later lower-ranked meets are
   dropped.
+- duplicate sightings of the same canonical meet do not consume extra cap slots.
 
 ## Caveat: meet lag vs reconstructed path length
 
@@ -61,6 +63,12 @@ So the surface should be read as:
 - `path.steps.len()`: reusable witness length after representative replay.
 
 Do not assume those two numbers are equal.
+
+## Timeout caveat
+
+The dynamic endpoint-search variants only publish the retained multi-meet
+surface after a full merge layer completes. If a deadline interrupts the layer,
+the search does not claim a ranked retained result from that partial layer.
 
 ## Focused validation case
 
