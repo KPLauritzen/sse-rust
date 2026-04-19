@@ -2586,78 +2586,63 @@ mod tests {
     }
 
     #[test]
-    fn research_corpus_keeps_rectangular_positive_pair_bounded_certificate_split() {
+    fn research_corpus_keeps_bounded_dim_certificate_control_slice() {
         let cases_path = Path::new("research/cases.json");
         let corpus = load_corpus(cases_path).expect("research corpus should load");
-        let mut rectangular_cases = corpus
+        let mut control_cases = corpus
             .cases
             .iter()
-            .filter(|case| case.id.starts_with("rectangular_positive_pair"))
+            .filter(|case| {
+                matches!(
+                    case.id.as_str(),
+                    "rectangular_positive_pair_dim2_bounded_no_go"
+                        | "riedel_baker_k4_dim3_positive_control"
+                )
+            })
             .cloned()
             .collect::<Vec<_>>();
 
-        rectangular_cases.sort_by_key(|case| case.config.max_intermediate_dim);
+        control_cases.sort_by_key(|case| case.id.clone());
 
-        assert_eq!(rectangular_cases.len(), 2);
+        assert_eq!(control_cases.len(), 2);
         assert_eq!(
-            rectangular_cases
+            control_cases
                 .iter()
                 .map(|case| case.id.as_str())
                 .collect::<Vec<_>>(),
             vec![
                 "rectangular_positive_pair_dim2_bounded_no_go",
-                "rectangular_positive_pair",
+                "riedel_baker_k4_dim3_positive_control",
             ]
         );
         assert_eq!(
-            rectangular_cases[0].allowed_outcomes,
+            control_cases[0].allowed_outcomes,
             vec!["unknown".to_string()]
         );
+        assert_eq!(control_cases[0].target_outcome.as_deref(), Some("unknown"));
         assert_eq!(
-            rectangular_cases[0].target_outcome.as_deref(),
-            Some("unknown")
-        );
-        assert_eq!(
-            rectangular_cases[1].allowed_outcomes,
+            control_cases[1].allowed_outcomes,
             vec!["equivalent".to_string()]
         );
         assert_eq!(
-            rectangular_cases[1].target_outcome.as_deref(),
+            control_cases[1].target_outcome.as_deref(),
             Some("equivalent")
         );
 
-        let cases = rectangular_cases
+        let cases = control_cases
             .iter()
             .map(|case| {
-                let actual_outcome = if case.id == "rectangular_positive_pair_dim2_bounded_no_go" {
-                    "unknown"
-                } else {
-                    "equivalent"
+                let actual_outcome = match case.id.as_str() {
+                    "rectangular_positive_pair_dim2_bounded_no_go" => "unknown",
+                    "riedel_baker_k4_dim3_positive_control" => "equivalent",
+                    other => panic!("unexpected control case {other}"),
                 };
                 summary_case(case, actual_outcome, 1)
             })
             .collect::<Vec<_>>();
         let comparisons = build_comparison_summaries(&cases);
 
-        assert_eq!(comparisons.len(), 1);
-        assert_eq!(comparisons[0].variants.len(), 2);
-        assert_eq!(
-            comparisons[0]
-                .variants
-                .iter()
-                .map(|variant| {
-                    (
-                        variant.case_id.as_str(),
-                        variant.config.max_intermediate_dim,
-                        variant.actual_outcome.as_str(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-            vec![
-                ("rectangular_positive_pair_dim2_bounded_no_go", 2, "unknown",),
-                ("rectangular_positive_pair", 3, "equivalent"),
-            ]
-        );
+        assert!(comparisons.is_empty());
 
         let summary = HarnessSummary {
             schema_version: 5,
@@ -2678,7 +2663,7 @@ mod tests {
                 best_known_lag_score: 0,
                 best_known_improvements: 0,
                 generalized_cases: 0,
-                comparison_groups: comparisons.len(),
+                comparison_groups: 0,
                 campaign_groups: 0,
                 deepening_schedule_groups: 0,
                 strategy_groups: 0,
@@ -2696,10 +2681,16 @@ mod tests {
 
         let pretty = format_pretty_summary(&summary);
         assert!(pretty.contains("rectangular_positive_pair_dim2_bounded_no_go"));
+        assert!(pretty.contains("riedel_baker_k4_dim3_positive_control"));
         assert!(pretty.contains("outcome=unknown"));
+        assert!(pretty.contains("outcome=equivalent"));
         assert!(pretty.contains("max_dim=2"));
+        assert!(pretty.contains("max_dim=3"));
+        assert!(pretty.contains(
+            "description: Exact bounded-envelope guard on the old rectangular dim-split pair"
+        ));
         assert!(pretty
-            .contains("description: Exact bounded-envelope guard on rectangular_positive_pair"));
+            .contains("description: Replacement positive-side control for the bounded dim split"));
     }
 
     #[test]

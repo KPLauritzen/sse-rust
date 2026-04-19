@@ -501,7 +501,7 @@
     },
     {
       "id": "rectangular_positive_pair_dim2_bounded_no_go",
-      "description": "Exact bounded-envelope guard on rectangular_positive_pair: under lag4 / entry6 with max_intermediate_dim=2, the bounded search must exhaust with unknown rather than prove a witness.",
+      "description": "Exact bounded-envelope guard on the old rectangular dim-split pair: under lag4 / entry6 with max_intermediate_dim=2, the bounded search must exhaust with unknown rather than prove a witness.",
       "a": [[3, 4], [3, 4]],
       "b": [[4, 4], [3, 3]],
       "config": {
@@ -527,16 +527,16 @@
       }
     },
     {
-      "id": "rectangular_positive_pair",
-      "description": "Positive-side companion for the bounded-envelope certificate: under lag4 / entry6 with max_intermediate_dim=3, the current bounded search must prove this pair equivalent.",
-      "a": [[3, 4], [3, 4]],
-      "b": [[4, 4], [3, 3]],
+      "id": "riedel_baker_k4_dim3_positive_control",
+      "description": "Replacement positive-side control for the bounded dim split: current bounded search must prove the Riedel/Baker k=4 pair equivalent under lag5 / entry4 with max_intermediate_dim=3, while the corresponding dim-2 envelope stays unknown.",
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
       "config": {
-        "max_lag": 4,
+        "max_lag": 5,
         "max_intermediate_dim": 3,
-        "max_entry": 6
+        "max_entry": 4
       },
-      "timeout_ms": 1000,
+      "timeout_ms": 2000,
       "allowed_outcomes": ["equivalent"],
       "target_outcome": "equivalent",
       "points": {
@@ -546,7 +546,7 @@
         "timeout": -3500,
         "panic": -3500
       },
-      "tags": ["correctness", "rectangular-positive", "bounded-no-go-certificate"],
+      "tags": ["correctness", "riedel-baker", "positive-control", "bounded-no-go-certificate"],
       "campaign": {
         "id": "baseline_corpus",
         "strategy": "mixed_baseline",
