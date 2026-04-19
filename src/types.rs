@@ -547,6 +547,8 @@ pub struct ShortcutSearchTelemetry {
 /// Aggregate telemetry for a full `search_sse_2x2` invocation.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SearchTelemetry {
+    #[serde(default)]
+    pub invalid_config: Option<String>,
     pub invariant_filtered: bool,
     pub permutation_shortcut: bool,
     pub canonical_shortcut: bool,

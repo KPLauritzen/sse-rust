@@ -189,6 +189,10 @@ pub(super) fn validate_endpoint_multi_meet_config(config: &SearchConfig) -> Resu
     Ok(())
 }
 
+fn invalid_endpoint_multi_meet_signal(config: &SearchConfig) -> Option<String> {
+    validate_endpoint_multi_meet_config(config).err()
+}
+
 #[derive(Clone, Debug)]
 struct RetainedExactMeetCandidate<M> {
     canonical: M,
@@ -205,9 +209,6 @@ struct ExactMeetRetention<M> {
 
 impl<M: Clone + PartialEq> ExactMeetRetention<M> {
     fn from_config(config: &SearchConfig) -> Option<Self> {
-        if validate_endpoint_multi_meet_config(config).is_err() {
-            return None;
-        }
         config
             .endpoint_multi_meet_cap
             .filter(|cap| *cap > 0)
@@ -293,6 +294,36 @@ fn store_endpoint_exact_meets<M, FPath, FCanon>(
             })
             .collect(),
     });
+}
+
+fn best_retained_exact_meet_path<M, FPath>(
+    retention: &ExactMeetRetention<M>,
+    mut reconstruct_path: FPath,
+) -> Option<DynSsePath>
+where
+    M: Clone + PartialEq,
+    FPath: FnMut(&M) -> DynSsePath,
+{
+    retention
+        .first()
+        .map(|candidate| reconstruct_path(&candidate.canonical))
+}
+
+fn maybe_store_endpoint_exact_meets<M, FPath, FCanon>(
+    telemetry: &mut SearchTelemetry,
+    retention: &ExactMeetRetention<M>,
+    timed_out: bool,
+    reconstruct_path: FPath,
+    to_dyn_matrix: FCanon,
+) where
+    M: Clone + PartialEq,
+    FPath: FnMut(&M) -> DynSsePath,
+    FCanon: FnMut(&M) -> DynMatrix,
+{
+    if timed_out {
+        return;
+    }
+    store_endpoint_exact_meets(telemetry, retention, reconstruct_path, to_dyn_matrix);
 }
 
 fn reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
@@ -616,6 +647,11 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
 ) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let request = endpoint_search_request(a, b, config);
+
+    if let Some(message) = invalid_endpoint_multi_meet_signal(config) {
+        telemetry.invalid_config = Some(message);
+        return finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry);
+    }
 
     if deadline_reached(deadline) {
         return finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry);
@@ -1162,42 +1198,46 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             .as_ref()
             .is_some_and(ExactMeetRetention::has_retained)
         {
-            let best_exact_meet = retained_exact_meets
-                .as_ref()
-                .and_then(ExactMeetRetention::first)
-                .expect("retained endpoint exact meet should exist before returning");
-            if !timed_out {
-                store_endpoint_exact_meets(
-                    &mut telemetry,
-                    retained_exact_meets
-                        .as_ref()
-                        .expect("retention should exist when retained exact meets are present"),
-                    |canonical| {
-                        reconstruct_bidirectional_dyn_path(
-                            a,
-                            b,
-                            canonical,
-                            &fwd_parent,
-                            &fwd_orig,
-                            &bwd_parent,
-                            &bwd_orig,
-                        )
-                    },
-                    Clone::clone,
-                );
-            }
+            maybe_store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                timed_out,
+                |canonical| {
+                    reconstruct_bidirectional_dyn_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    )
+                },
+                Clone::clone,
+            );
+            let best_path = best_retained_exact_meet_path(
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_bidirectional_dyn_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    )
+                },
+            )
+            .expect("retained endpoint exact meet should reconstruct a best path");
             return finish_search_dyn(
                 observer,
                 &request,
-                DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
-                    a,
-                    b,
-                    &best_exact_meet.canonical,
-                    &fwd_parent,
-                    &fwd_orig,
-                    &bwd_parent,
-                    &bwd_orig,
-                )),
+                DynSseResult::Equivalent(best_path),
                 telemetry,
             );
         }
@@ -1228,6 +1268,12 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     let a_canon = a_dyn.canonical_perm();
     let b_canon = b_dyn.canonical_perm();
     let request = endpoint_search_request(&a_dyn, &b_dyn, config);
+
+    if let Some(message) = invalid_endpoint_multi_meet_signal(config) {
+        telemetry.invalid_config = Some(message);
+        return finish_search_2x2(observer, &request, SseResult::Unknown, telemetry);
+    }
+
     emit_started(&mut observer, &request, &a_canon, &b_canon);
     emit_roots(
         &mut observer,
@@ -4735,44 +4781,48 @@ fn search_graph_only_dyn_with_telemetry(
             if let Some(layer) = telemetry.layers.last_mut() {
                 layer.total_visited_nodes = telemetry.total_visited_nodes;
             }
-            let best_exact_meet = retained_exact_meets
-                .as_ref()
-                .and_then(ExactMeetRetention::first)
-                .expect("retained endpoint exact meet should exist before returning");
-            if !timed_out {
-                store_endpoint_exact_meets(
-                    &mut telemetry,
-                    retained_exact_meets
-                        .as_ref()
-                        .expect("retention should exist when retained exact meets are present"),
-                    |canonical| {
-                        reconstruct_graph_only_bidirectional_dyn_path(
-                            a,
-                            b,
-                            canonical,
-                            &fwd_parent,
-                            &fwd_orig,
-                            &bwd_parent,
-                            &bwd_orig,
-                            graph_only_settings,
-                        )
-                    },
-                    Clone::clone,
-                );
-            }
+            maybe_store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                timed_out,
+                |canonical| {
+                    reconstruct_graph_only_bidirectional_dyn_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                        graph_only_settings,
+                    )
+                },
+                Clone::clone,
+            );
+            let best_path = best_retained_exact_meet_path(
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_graph_only_bidirectional_dyn_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                        graph_only_settings,
+                    )
+                },
+            )
+            .expect("retained endpoint exact meet should reconstruct a best path");
             return finish_search_dyn(
                 observer,
                 request,
-                DynSseResult::Equivalent(reconstruct_graph_only_bidirectional_dyn_path(
-                    a,
-                    b,
-                    &best_exact_meet.canonical,
-                    &fwd_parent,
-                    &fwd_orig,
-                    &bwd_parent,
-                    &bwd_orig,
-                    graph_only_settings,
-                )),
+                DynSseResult::Equivalent(best_path),
                 telemetry,
             );
         }
@@ -5091,6 +5141,127 @@ mod tests {
             )
             .expect("retained witness path should validate");
         }
+    }
+
+    #[test]
+    fn test_direct_2x2_search_surfaces_invalid_endpoint_multi_meet_config_in_telemetry() {
+        let source = SqMatrix::new([[0, 0], [0, 1]]);
+        let target = SqMatrix::new([[0, 1], [0, 1]]);
+        let config = SearchConfig {
+            frontier_mode: FrontierMode::Beam,
+            beam_width: Some(2),
+            endpoint_multi_meet_cap: Some(2),
+            ..default_config()
+        };
+
+        let (result, telemetry) = search_sse_2x2_with_telemetry(&source, &target, &config);
+
+        assert!(matches!(result, SseResult::Unknown));
+        assert_eq!(
+            telemetry.invalid_config.as_deref(),
+            Some("endpoint_multi_meet_cap currently only supports --frontier-mode bfs")
+        );
+        assert!(telemetry.endpoint_exact_meets.is_none());
+        assert!(telemetry.layers.is_empty());
+    }
+
+    #[test]
+    fn test_direct_dynamic_search_surfaces_invalid_endpoint_multi_meet_config_in_telemetry() {
+        let source = DynMatrix::new(2, 2, vec![0, 0, 0, 1]);
+        let target = DynMatrix::new(2, 2, vec![0, 1, 0, 1]);
+        let config = SearchConfig {
+            frontier_mode: FrontierMode::Beam,
+            beam_width: Some(2),
+            endpoint_multi_meet_cap: Some(2),
+            ..default_config()
+        };
+
+        let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
+
+        assert!(matches!(result, DynSseResult::Unknown));
+        assert_eq!(
+            telemetry.invalid_config.as_deref(),
+            Some("endpoint_multi_meet_cap currently only supports --frontier-mode bfs")
+        );
+        assert!(telemetry.endpoint_exact_meets.is_none());
+        assert!(telemetry.layers.is_empty());
+    }
+
+    #[test]
+    fn test_request_dispatch_rejects_invalid_endpoint_multi_meet_config() {
+        let request = SearchRequest {
+            source: DynMatrix::new(2, 2, vec![0, 0, 0, 1]),
+            target: DynMatrix::new(2, 2, vec![0, 1, 0, 1]),
+            config: SearchConfig {
+                frontier_mode: FrontierMode::Beam,
+                beam_width: Some(2),
+                endpoint_multi_meet_cap: Some(2),
+                ..default_config()
+            },
+            stage: SearchStage::EndpointSearch,
+            guide_artifacts: Vec::new(),
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        };
+
+        let err = execute_search_request(&request).unwrap_err();
+        assert!(err.contains("--frontier-mode bfs"));
+    }
+
+    #[test]
+    fn test_timed_out_dynamic_multi_meet_keeps_best_path_but_omits_surface() {
+        let meet_a = DynMatrix::new(2, 2, vec![0, 0, 0, 1]);
+        let meet_b = DynMatrix::new(2, 2, vec![0, 0, 1, 1]);
+        let config = SearchConfig {
+            endpoint_multi_meet_cap: Some(4),
+            ..default_config()
+        };
+        let retention =
+            ExactMeetRetention::from_config(&config).expect("valid config should retain meets");
+        let retention = {
+            let mut retention = retention;
+            retention.retain(&meet_b, 2);
+            retention.retain(&meet_a, 1);
+            retention
+        };
+
+        let build_path = |canonical: &DynMatrix| DynSsePath {
+            matrices: vec![canonical.clone()],
+            steps: vec![],
+        };
+
+        let best_path = best_retained_exact_meet_path(&retention, build_path)
+            .expect("retained exact meet should still provide a best path under timeout");
+        assert_eq!(best_path.matrices, vec![meet_a.clone()]);
+
+        let mut timed_out_telemetry = SearchTelemetry::default();
+        maybe_store_endpoint_exact_meets(
+            &mut timed_out_telemetry,
+            &retention,
+            true,
+            build_path,
+            Clone::clone,
+        );
+        assert!(
+            timed_out_telemetry.endpoint_exact_meets.is_none(),
+            "partial timed-out layers should not publish the ranked multi-meet surface"
+        );
+
+        let mut complete_telemetry = SearchTelemetry::default();
+        maybe_store_endpoint_exact_meets(
+            &mut complete_telemetry,
+            &retention,
+            false,
+            build_path,
+            Clone::clone,
+        );
+        assert_eq!(
+            complete_telemetry
+                .endpoint_exact_meets
+                .as_ref()
+                .map(|surface| surface.retained.len()),
+            Some(2)
+        );
     }
 
     fn full_path_artifact(id: &str, path: DynSsePath) -> GuideArtifact {
