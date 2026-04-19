@@ -73,6 +73,26 @@ struct BinarySparseExhaustionRow {
     max_other_depth: usize,
 }
 
+#[derive(Default)]
+struct BinarySparseUpExhaustionSummary {
+    observed_sources: usize,
+    orbit_eq_canon_sources: usize,
+    raw_callbacks: usize,
+    orbit_callbacks: usize,
+    canonical_successors: usize,
+    lag_feasible_hits: usize,
+    rows: Vec<BinarySparseUpExhaustionRow>,
+}
+
+struct BinarySparseUpExhaustionRow {
+    source: SourceKey,
+    raw_callbacks: usize,
+    orbit_callbacks: usize,
+    canonical_successors: usize,
+    lag_feasible_hits: usize,
+    max_other_depth: usize,
+}
+
 impl SearchObserver for FamilySourceObserver {
     fn on_event(&mut self, event: &SearchEvent) {
         match event {
@@ -138,6 +158,7 @@ fn main() -> Result<(), String> {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         },
         stage: SearchStage::EndpointSearch,
         guide_artifacts: Vec::new(),
@@ -325,6 +346,58 @@ fn main() -> Result<(), String> {
         }
     }
 
+    let up_exhaustion = measure_binary_sparse_3x3_to_4_bounded_exhaustion(
+        &observer,
+        request.config.max_entry,
+        request.config.max_lag,
+    );
+    println!();
+    println!("Bounded orbit exhaustion for {BINARY_SPARSE_3X3_TO_4}");
+    println!(
+        "observed_sources={} orbit_eq_canon_sources={} raw={} orbit={} canon={} lag_feasible_hits={}",
+        up_exhaustion.observed_sources,
+        up_exhaustion.orbit_eq_canon_sources,
+        up_exhaustion.raw_callbacks,
+        up_exhaustion.orbit_callbacks,
+        up_exhaustion.canonical_successors,
+        up_exhaustion.lag_feasible_hits,
+    );
+    for (idx, row) in up_exhaustion.rows.iter().take(16).enumerate() {
+        println!(
+            "{}. side={} depth={} max_other_depth={} raw={} orbit={} canon={} lag_feasible_hits={} matrix={}",
+            idx + 1,
+            row.source.direction,
+            row.source.depth,
+            row.max_other_depth,
+            row.raw_callbacks,
+            row.orbit_callbacks,
+            row.canonical_successors,
+            row.lag_feasible_hits,
+            format_matrix(&row.source.matrix),
+        );
+    }
+    let up_exceptional_rows = up_exhaustion
+        .rows
+        .iter()
+        .filter(|row| row.orbit_callbacks != row.canonical_successors || row.lag_feasible_hits > 0)
+        .collect::<Vec<_>>();
+    if !up_exceptional_rows.is_empty() {
+        println!("Exceptional bounded rows for {BINARY_SPARSE_3X3_TO_4}");
+        for row in up_exceptional_rows {
+            println!(
+                "side={} depth={} max_other_depth={} raw={} orbit={} canon={} lag_feasible_hits={} matrix={}",
+                row.source.direction,
+                row.source.depth,
+                row.max_other_depth,
+                row.raw_callbacks,
+                row.orbit_callbacks,
+                row.canonical_successors,
+                row.lag_feasible_hits,
+                format_matrix(&row.source.matrix),
+            );
+        }
+    }
+
     println!();
     println!("Direct samples");
     let binary_sparse_up_sample = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
@@ -492,6 +565,92 @@ fn measure_binary_sparse_4x3_to_3_bounded_exhaustion(
     });
 
     summary
+}
+
+fn measure_binary_sparse_3x3_to_4_bounded_exhaustion(
+    observer: &FamilySourceObserver,
+    max_entry: u32,
+    max_lag: usize,
+) -> BinarySparseUpExhaustionSummary {
+    let mut summary = BinarySparseUpExhaustionSummary::default();
+    let Some(sources) = observer.family_counts.get(BINARY_SPARSE_3X3_TO_4) else {
+        return summary;
+    };
+
+    for (source, _) in sources {
+        let Some(max_other_depth) = max_lag.checked_sub(source.depth + 1) else {
+            continue;
+        };
+        let opposite_depths = observer
+            .visited_depths
+            .get(opposite_direction_label(source.direction));
+        let row = measure_binary_sparse_3x3_to_4_source_exhaustion(
+            source,
+            max_entry,
+            opposite_depths,
+            max_other_depth,
+        );
+        summary.observed_sources += 1;
+        summary.raw_callbacks += row.raw_callbacks;
+        summary.orbit_callbacks += row.orbit_callbacks;
+        summary.canonical_successors += row.canonical_successors;
+        summary.lag_feasible_hits += row.lag_feasible_hits;
+        if row.orbit_callbacks == row.canonical_successors {
+            summary.orbit_eq_canon_sources += 1;
+        }
+        summary.rows.push(row);
+    }
+
+    summary.rows.sort_by(|left, right| {
+        right
+            .raw_callbacks
+            .cmp(&left.raw_callbacks)
+            .then_with(|| left.source.direction.cmp(right.source.direction))
+            .then_with(|| left.source.depth.cmp(&right.source.depth))
+            .then_with(|| left.source.matrix.data.cmp(&right.source.matrix.data))
+    });
+
+    summary
+}
+
+fn measure_binary_sparse_3x3_to_4_source_exhaustion(
+    source: &SourceKey,
+    max_entry: u32,
+    opposite_depths: Option<&BTreeMap<DynMatrix, usize>>,
+    max_other_depth: usize,
+) -> BinarySparseUpExhaustionRow {
+    let mut callbacks = 0usize;
+    let mut orbit_callbacks = BTreeSet::new();
+    let mut canonical_successors = BTreeSet::new();
+    let mut lag_feasible_hits = BTreeSet::new();
+
+    visit_all_factorisations_with_family(&source.matrix, 4, max_entry, |family, u, v| {
+        if family != BINARY_SPARSE_3X3_TO_4 {
+            return;
+        }
+        callbacks += 1;
+        if let Some(key) = binary_sparse_factorisation_3x3_to_4_orbit_key(&u, &v, max_entry) {
+            orbit_callbacks.insert(key);
+        }
+        let next_canon = v.mul(&u).canonical_perm();
+        canonical_successors.insert(next_canon.data.clone());
+        if opposite_depths.is_some_and(|depths| {
+            depths
+                .get(&next_canon)
+                .is_some_and(|depth| *depth <= max_other_depth)
+        }) {
+            lag_feasible_hits.insert(next_canon.data);
+        }
+    });
+
+    BinarySparseUpExhaustionRow {
+        source: source.clone(),
+        raw_callbacks: callbacks,
+        orbit_callbacks: orbit_callbacks.len(),
+        canonical_successors: canonical_successors.len(),
+        lag_feasible_hits: lag_feasible_hits.len(),
+        max_other_depth,
+    }
 }
 
 fn measure_binary_sparse_4x3_to_3_source_exhaustion(
