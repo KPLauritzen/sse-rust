@@ -1149,7 +1149,7 @@
     },
     {
       "id": "riedel_k4_graph_only_widened_endpoint_ceiling_control",
-      "description": "Retained Riedel/Baker widened control: the k=4 endpoint pair is equivalent for plain graph-only endpoint_search on the exact endpoint-ceiling surface (`lag <= 6`, `dim <= 3`, `max_entry <= 5`). Reuse the committed 2026-04-19 guide artifact instead of re-deriving the witness.",
+      "description": "Retained Riedel/Baker widened control: the k=4 endpoint pair is equivalent for plain graph-only endpoint_search on the exact endpoint-ceiling surface (`lag <= 6`, `dim <= 3`, `max_entry <= 5`). The matching 2026-04-19 guide artifact is retained separately for witness citation and replay.",
       "required": true,
       "a": [[4, 2], [1, 4]],
       "b": [[3, 1], [1, 5]],
@@ -1169,7 +1169,7 @@
         "timeout": -2600,
         "panic": -2600
       },
-      "tags": ["correctness", "graph-only", "riedel-baker", "retained-control", "widened-control", "endpoint-ceiling", "artifact-backed"],
+      "tags": ["correctness", "graph-only", "riedel-baker", "retained-control", "widened-control", "endpoint-ceiling"],
       "campaign": {
         "id": "riedel_k4_graph_only_widened_control",
         "strategy": "endpoint_search_widened_entry_ceiling",
