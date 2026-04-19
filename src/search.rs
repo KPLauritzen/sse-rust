@@ -27,9 +27,10 @@ use crate::search_observer::{
     SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
 };
 use crate::types::{
-    DynSsePath, DynSseResult, EsseStep, FrontierMode, MoveFamilyPolicy, SearchConfig,
-    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
-    SearchRequest, SearchRunResult, SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    DynSsePath, DynSseResult, EndpointExactMeetSurface, EndpointExactMeetWitness, EsseStep,
+    FrontierMode, MoveFamilyPolicy, SearchConfig, SearchDirection, SearchLayerTelemetry,
+    SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
+    SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 #[cfg(test)]
 use crate::types::{SearchStage, ShortcutSearchConfig, ShortcutSearchStopReason};
@@ -171,6 +172,91 @@ fn frontier_expansion_settings(config: &SearchConfig) -> FrontierExpansionSettin
         max_entry: config.max_entry,
         move_family_policy: config.move_family_policy,
     }
+}
+
+#[derive(Clone, Debug)]
+struct RetainedExactMeetCandidate<M> {
+    canonical: M,
+    path_depth: usize,
+    discovery_order: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ExactMeetRetention<M> {
+    requested_cap: usize,
+    next_discovery_order: usize,
+    retained: Vec<RetainedExactMeetCandidate<M>>,
+}
+
+impl<M: Clone> ExactMeetRetention<M> {
+    fn from_config(config: &SearchConfig) -> Option<Self> {
+        config
+            .endpoint_multi_meet_cap
+            .filter(|cap| *cap > 0)
+            .map(Self::new)
+    }
+
+    fn new(requested_cap: usize) -> Self {
+        Self {
+            requested_cap,
+            next_discovery_order: 0,
+            retained: Vec::with_capacity(requested_cap),
+        }
+    }
+
+    fn has_retained(&self) -> bool {
+        !self.retained.is_empty()
+    }
+
+    fn retain(&mut self, canonical: &M, path_depth: usize) {
+        let candidate = RetainedExactMeetCandidate {
+            canonical: canonical.clone(),
+            path_depth,
+            discovery_order: self.next_discovery_order,
+        };
+        self.next_discovery_order += 1;
+        self.retained.push(candidate);
+        self.retained.sort_by(|left, right| {
+            left.path_depth
+                .cmp(&right.path_depth)
+                .then(left.discovery_order.cmp(&right.discovery_order))
+        });
+        if self.retained.len() > self.requested_cap {
+            self.retained.truncate(self.requested_cap);
+        }
+    }
+
+    fn first(&self) -> Option<&RetainedExactMeetCandidate<M>> {
+        self.retained.first()
+    }
+}
+
+fn store_endpoint_exact_meets<M, FPath, FCanon>(
+    telemetry: &mut SearchTelemetry,
+    retention: &ExactMeetRetention<M>,
+    mut reconstruct_path: FPath,
+    mut to_dyn_matrix: FCanon,
+) where
+    M: Clone,
+    FPath: FnMut(&M) -> DynSsePath,
+    FCanon: FnMut(&M) -> DynMatrix,
+{
+    if !retention.has_retained() {
+        return;
+    }
+
+    telemetry.endpoint_exact_meets = Some(EndpointExactMeetSurface {
+        requested_cap: retention.requested_cap,
+        retained: retention
+            .retained
+            .iter()
+            .map(|candidate| EndpointExactMeetWitness {
+                path_lag: candidate.path_depth,
+                meeting_canonical: to_dyn_matrix(&candidate.canonical),
+                path: reconstruct_path(&candidate.canonical),
+            })
+            .collect(),
+    });
 }
 
 fn reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
@@ -416,6 +502,7 @@ pub fn probe_graph_proposal_shortlist(
         beam_width: None,
         beam_bfs_handoff_depth: None,
         beam_bfs_handoff_deferred_cap: None,
+        endpoint_multi_meet_cap: None,
     };
     let attempts = shortlist
         .into_iter()
@@ -648,6 +735,8 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     let mut bwd_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
+    let mut retained_exact_meets: Option<ExactMeetRetention<DynMatrix>> =
+        ExactMeetRetention::from_config(config);
 
     emit_started(&mut observer, &request, &a_canon, &b_canon);
     emit_roots(
@@ -854,24 +943,6 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     }
                     continue;
                 }
-                let merge_nanos = elapsed_nanos(merge_started);
-                let finalize_started = Instant::now();
-                telemetry.collisions_with_seen += collisions_with_seen;
-                telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
-                telemetry.approximate_other_side_hits += approximate_other_side_hits;
-                telemetry.same_future_past_collisions +=
-                    expansion_stats.same_future_past_collisions;
-                telemetry.discovered_nodes += discovered_nodes;
-                let dead_end_nodes = current_frontier
-                    .len()
-                    .saturating_sub(parents_with_progress.len());
-                telemetry.dead_end_nodes += dead_end_nodes;
-                telemetry.enqueued_nodes += enqueued_nodes;
-                telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
-                accumulate_move_family_telemetry(
-                    &mut telemetry.move_family_telemetry,
-                    &layer_move_family_telemetry,
-                );
                 if let Some(records) = layer_records.as_mut() {
                     records.push(SearchEdgeRecord {
                         layer_index,
@@ -891,6 +962,29 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                         enqueued,
                     });
                 }
+                if let Some(retention) = retained_exact_meets.as_mut() {
+                    retention.retain(&expansion.next_canon, path_depth);
+                    continue;
+                }
+
+                let merge_nanos = elapsed_nanos(merge_started);
+                let finalize_started = Instant::now();
+                telemetry.collisions_with_seen += collisions_with_seen;
+                telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
+                telemetry.approximate_other_side_hits += approximate_other_side_hits;
+                telemetry.same_future_past_collisions +=
+                    expansion_stats.same_future_past_collisions;
+                telemetry.discovered_nodes += discovered_nodes;
+                let dead_end_nodes = current_frontier
+                    .len()
+                    .saturating_sub(parents_with_progress.len());
+                telemetry.dead_end_nodes += dead_end_nodes;
+                telemetry.enqueued_nodes += enqueued_nodes;
+                telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+                accumulate_move_family_telemetry(
+                    &mut telemetry.move_family_telemetry,
+                    &layer_move_family_telemetry,
+                );
                 if let Some(records) = layer_records.as_ref() {
                     emit_layer(&mut observer, records);
                 }
@@ -1028,6 +1122,47 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
+        if retained_exact_meets
+            .as_ref()
+            .is_some_and(ExactMeetRetention::has_retained)
+        {
+            let best_exact_meet = retained_exact_meets
+                .as_ref()
+                .and_then(ExactMeetRetention::first)
+                .expect("retained endpoint exact meet should exist before returning");
+            store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_bidirectional_dyn_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    )
+                },
+                Clone::clone,
+            );
+            return finish_search_dyn(
+                observer,
+                &request,
+                DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
+                    a,
+                    b,
+                    &best_exact_meet.canonical,
+                    &fwd_parent,
+                    &fwd_orig,
+                    &bwd_parent,
+                    &bwd_orig,
+                )),
+                telemetry,
+            );
+        }
 
         if timed_out {
             break;
@@ -1171,6 +1306,8 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     let mut bwd_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
+    let mut retained_exact_meets: Option<ExactMeetRetention<DynMatrix>> =
+        ExactMeetRetention::from_config(config);
 
     // Edge case: A and B canonicalise to the same form (should have been
     // caught by the permutation check above, but handle for safety).
@@ -1391,6 +1528,28 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     }
                     continue;
                 }
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: record_status,
+                        approximate_other_side_hit: approximate_hit,
+                        enqueued,
+                    });
+                }
+                if let Some(retention) = retained_exact_meets.as_mut() {
+                    retention.retain(&expansion.next_canon, path_depth);
+                    continue;
+                }
+
                 let merge_nanos = elapsed_nanos(merge_started);
                 let finalize_started = Instant::now();
                 telemetry.collisions_with_seen += collisions_with_seen;
@@ -1409,23 +1568,6 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     &mut telemetry.move_family_telemetry,
                     &layer_move_family_telemetry,
                 );
-                if let Some(records) = layer_records.as_mut() {
-                    records.push(SearchEdgeRecord {
-                        layer_index,
-                        direction,
-                        move_family: expansion.move_family,
-                        from_canonical: expansion.parent_canon.clone(),
-                        from_orig: parent_orig.clone(),
-                        to_canonical: expansion.next_canon.clone(),
-                        to_orig: expansion.next_orig.clone(),
-                        from_depth: layer_depth,
-                        to_depth: next_depth,
-                        step: expansion.step.clone(),
-                        status: record_status,
-                        approximate_other_side_hit: approximate_hit,
-                        enqueued,
-                    });
-                }
                 if let Some(records) = layer_records.as_ref() {
                     emit_layer(&mut observer, records);
                 }
@@ -1566,6 +1708,48 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
+        if retained_exact_meets
+            .as_ref()
+            .is_some_and(ExactMeetRetention::has_retained)
+        {
+            let best_exact_meet = retained_exact_meets
+                .as_ref()
+                .and_then(ExactMeetRetention::first)
+                .expect("retained endpoint exact meet should exist before returning");
+            store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_bidirectional_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    )
+                    .into()
+                },
+                Clone::clone,
+            );
+            return finish_search_2x2(
+                observer,
+                &request,
+                SseResult::Equivalent(reconstruct_bidirectional_path(
+                    a,
+                    b,
+                    &best_exact_meet.canonical,
+                    &fwd_parent,
+                    &fwd_orig,
+                    &bwd_parent,
+                    &bwd_orig,
+                )),
+                telemetry,
+            );
+        }
 
         if next_frontier.is_empty() {
             break;
@@ -1638,6 +1822,8 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
     let mut bwd_signatures = HashSet::new();
     fwd_signatures.insert(approx_signature(&a_canon));
     bwd_signatures.insert(approx_signature(&b_canon));
+    let mut retained_exact_meets: Option<ExactMeetRetention<DynMatrix>> =
+        ExactMeetRetention::from_config(config);
 
     if a_canon == b_canon {
         telemetry.canonical_shortcut = true;
@@ -1828,6 +2014,28 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                     }
                     continue;
                 }
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: layer_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: record_status,
+                        approximate_other_side_hit: approximate_hit,
+                        enqueued,
+                    });
+                }
+                if let Some(retention) = retained_exact_meets.as_mut() {
+                    retention.retain(&expansion.next_canon, path_depth);
+                    continue;
+                }
+
                 let merge_nanos = elapsed_nanos(merge_started);
                 let finalize_started = Instant::now();
                 telemetry.collisions_with_seen += collisions_with_seen;
@@ -1846,23 +2054,6 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                     &mut telemetry.move_family_telemetry,
                     &layer_move_family_telemetry,
                 );
-                if let Some(records) = layer_records.as_mut() {
-                    records.push(SearchEdgeRecord {
-                        layer_index,
-                        direction,
-                        move_family: expansion.move_family,
-                        from_canonical: expansion.parent_canon.clone(),
-                        from_orig: parent_orig.clone(),
-                        to_canonical: expansion.next_canon.clone(),
-                        to_orig: expansion.next_orig.clone(),
-                        from_depth: layer_depth,
-                        to_depth: next_depth,
-                        step: expansion.step.clone(),
-                        status: record_status,
-                        approximate_other_side_hit: approximate_hit,
-                        enqueued,
-                    });
-                }
                 if let Some(records) = layer_records.as_ref() {
                     emit_layer(&mut observer, records);
                 }
@@ -2001,6 +2192,50 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
             timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
             move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
         });
+        if retained_exact_meets
+            .as_ref()
+            .is_some_and(ExactMeetRetention::has_retained)
+        {
+            let best_exact_meet = retained_exact_meets
+                .as_ref()
+                .and_then(ExactMeetRetention::first)
+                .expect("retained endpoint exact meet should exist before returning");
+            store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_graph_plus_structured_bidirectional_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                        frontier_expansion_settings(config),
+                    )
+                    .into()
+                },
+                Clone::clone,
+            );
+            return finish_search_2x2(
+                observer,
+                request,
+                SseResult::Equivalent(reconstruct_graph_plus_structured_bidirectional_path(
+                    a,
+                    b,
+                    &best_exact_meet.canonical,
+                    &fwd_parent,
+                    &fwd_orig,
+                    &bwd_parent,
+                    &bwd_orig,
+                    frontier_expansion_settings(config),
+                )),
+                telemetry,
+            );
+        }
 
         if next_frontier.is_empty() {
             break;
@@ -3764,6 +3999,8 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
     let mut bwd_candidates_per_node = 1.0f64;
     let mut fwd_cost_sample_nodes = 0usize;
     let mut bwd_cost_sample_nodes = 0usize;
+    let mut retained_exact_meets: Option<ExactMeetRetention<DynMatrix>> =
+        ExactMeetRetention::from_config(config);
 
     for layer_index in 0..config.max_lag {
         let next_fwd_depth = fwd_frontier
@@ -3926,6 +4163,30 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                     record_status = SearchEdgeStatus::ExactMeet;
                     let path_depth = next_depth + other_depth;
                     if path_depth <= config.max_lag {
+                        if let Some(records) = layer_records.as_mut() {
+                            records.push(SearchEdgeRecord {
+                                layer_index,
+                                direction,
+                                move_family: successor.family,
+                                from_canonical: current_canon.clone(),
+                                from_orig: current_orig.clone(),
+                                to_canonical: successor.matrix.clone(),
+                                to_orig: successor.orig_matrix.clone(),
+                                from_depth: layer_depth,
+                                to_depth: next_depth,
+                                step: successor
+                                    .step
+                                    .clone()
+                                    .expect("observer graph-only expansion should retain steps"),
+                                status: record_status,
+                                approximate_other_side_hit: false,
+                                enqueued: false,
+                            });
+                        }
+                        if let Some(retention) = retained_exact_meets.as_mut() {
+                            retention.retain(&successor.matrix, path_depth);
+                            continue;
+                        }
                         layer.next_frontier_nodes = next_frontier.len();
                         layer.total_visited_nodes = telemetry.total_visited_nodes;
                         layer.dead_end_nodes =
@@ -3948,26 +4209,6 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                             &mut telemetry.move_family_telemetry,
                             &layer_move_family_telemetry,
                         );
-                        if let Some(records) = layer_records.as_mut() {
-                            records.push(SearchEdgeRecord {
-                                layer_index,
-                                direction,
-                                move_family: successor.family,
-                                from_canonical: current_canon.clone(),
-                                from_orig: current_orig.clone(),
-                                to_canonical: successor.matrix.clone(),
-                                to_orig: successor.orig_matrix.clone(),
-                                from_depth: layer_depth,
-                                to_depth: next_depth,
-                                step: successor
-                                    .step
-                                    .clone()
-                                    .expect("observer graph-only expansion should retain steps"),
-                                status: record_status,
-                                approximate_other_side_hit: false,
-                                enqueued: false,
-                            });
-                        }
                         if let Some(records) = layer_records.as_ref() {
                             emit_layer(&mut observer, records);
                         }
@@ -4042,6 +4283,51 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
         }
         layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
+        if retained_exact_meets
+            .as_ref()
+            .is_some_and(ExactMeetRetention::has_retained)
+        {
+            telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+            let best_exact_meet = retained_exact_meets
+                .as_ref()
+                .and_then(ExactMeetRetention::first)
+                .expect("retained endpoint exact meet should exist before returning");
+            store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_graph_only_bidirectional_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                        graph_only_settings,
+                    )
+                    .into()
+                },
+                Clone::clone,
+            );
+            return finish_search_2x2(
+                observer,
+                request,
+                SseResult::Equivalent(reconstruct_graph_only_bidirectional_path(
+                    a,
+                    b,
+                    &best_exact_meet.canonical,
+                    &fwd_parent,
+                    &fwd_orig,
+                    &bwd_parent,
+                    &bwd_orig,
+                    graph_only_settings,
+                )),
+                telemetry,
+            );
+        }
 
         if next_frontier.is_empty() {
             break;
@@ -4100,6 +4386,8 @@ fn search_graph_only_dyn_with_telemetry(
     let mut bwd_candidates_per_node = 1.0f64;
     let mut fwd_cost_sample_nodes = 0usize;
     let mut bwd_cost_sample_nodes = 0usize;
+    let mut retained_exact_meets: Option<ExactMeetRetention<DynMatrix>> =
+        ExactMeetRetention::from_config(config);
 
     for layer_index in 0..config.max_lag {
         if deadline_reached(deadline) {
@@ -4276,6 +4564,29 @@ fn search_graph_only_dyn_with_telemetry(
                         record_status = SearchEdgeStatus::ExactMeet;
                         let path_depth = next_depth + other_depth;
                         if path_depth <= config.max_lag {
+                            if let Some(records) = layer_records.as_mut() {
+                                records.push(SearchEdgeRecord {
+                                    layer_index,
+                                    direction,
+                                    move_family: successor.family,
+                                    from_canonical: current_canon.clone(),
+                                    from_orig: current_orig.clone(),
+                                    to_canonical: successor.matrix.clone(),
+                                    to_orig: successor.orig_matrix.clone(),
+                                    from_depth: layer_depth,
+                                    to_depth: next_depth,
+                                    step: successor.step.clone().expect(
+                                        "observer graph-only expansion should retain steps",
+                                    ),
+                                    status: record_status,
+                                    approximate_other_side_hit: false,
+                                    enqueued: false,
+                                });
+                            }
+                            if let Some(retention) = retained_exact_meets.as_mut() {
+                                retention.retain(&successor.matrix, path_depth);
+                                continue;
+                            }
                             layer.next_frontier_nodes = next_frontier.len();
                             telemetry.collisions_with_seen += layer.collisions_with_seen;
                             telemetry.collisions_with_other_frontier +=
@@ -4298,25 +4609,6 @@ fn search_graph_only_dyn_with_telemetry(
                                 &mut telemetry.move_family_telemetry,
                                 &layer_move_family_telemetry,
                             );
-                            if let Some(records) = layer_records.as_mut() {
-                                records.push(SearchEdgeRecord {
-                                    layer_index,
-                                    direction,
-                                    move_family: successor.family,
-                                    from_canonical: current_canon.clone(),
-                                    from_orig: current_orig.clone(),
-                                    to_canonical: successor.matrix.clone(),
-                                    to_orig: successor.orig_matrix.clone(),
-                                    from_depth: layer_depth,
-                                    to_depth: next_depth,
-                                    step: successor.step.clone().expect(
-                                        "observer graph-only expansion should retain steps",
-                                    ),
-                                    status: record_status,
-                                    approximate_other_side_hit: false,
-                                    enqueued: false,
-                                });
-                            }
                             if let Some(records) = layer_records.as_ref() {
                                 emit_layer(&mut observer, records);
                             }
@@ -4394,6 +4686,50 @@ fn search_graph_only_dyn_with_telemetry(
         }
         layer.move_family_telemetry = finalize_move_family_telemetry(layer_move_family_telemetry);
         telemetry.layers.push(layer);
+        if retained_exact_meets
+            .as_ref()
+            .is_some_and(ExactMeetRetention::has_retained)
+        {
+            telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+            let best_exact_meet = retained_exact_meets
+                .as_ref()
+                .and_then(ExactMeetRetention::first)
+                .expect("retained endpoint exact meet should exist before returning");
+            store_endpoint_exact_meets(
+                &mut telemetry,
+                retained_exact_meets
+                    .as_ref()
+                    .expect("retention should exist when retained exact meets are present"),
+                |canonical| {
+                    reconstruct_graph_only_bidirectional_dyn_path(
+                        a,
+                        b,
+                        canonical,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                        graph_only_settings,
+                    )
+                },
+                Clone::clone,
+            );
+            return finish_search_dyn(
+                observer,
+                request,
+                DynSseResult::Equivalent(reconstruct_graph_only_bidirectional_dyn_path(
+                    a,
+                    b,
+                    &best_exact_meet.canonical,
+                    &fwd_parent,
+                    &fwd_orig,
+                    &bwd_parent,
+                    &bwd_orig,
+                    graph_only_settings,
+                )),
+                telemetry,
+            );
+        }
 
         if timed_out {
             break;
@@ -4571,7 +4907,22 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         }
+    }
+
+    fn small_2x2_scan_space(max_entry: u32) -> Vec<SqMatrix<2>> {
+        let mut matrices = Vec::new();
+        for a00 in 0..=max_entry {
+            for a01 in 0..=max_entry {
+                for a10 in 0..=max_entry {
+                    for a11 in 0..=max_entry {
+                        matrices.push(SqMatrix::new([[a00, a01], [a10, a11]]));
+                    }
+                }
+            }
+        }
+        matrices
     }
 
     #[derive(Default)]
@@ -4600,6 +4951,89 @@ mod tests {
                         edges.iter().map(|edge| edge.to_orig.clone()).collect();
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_endpoint_multi_meet_surface_retains_multiple_exact_meets_when_available() {
+        let mut config = default_config();
+        config.max_lag = 4;
+        config.max_entry = 6;
+        config.endpoint_multi_meet_cap = Some(4);
+
+        let matrices = small_2x2_scan_space(2);
+        let mut found_case = None;
+
+        'outer: for source in &matrices {
+            for target in &matrices {
+                if source == target {
+                    continue;
+                }
+                let (result, telemetry) =
+                    search_sse_2x2_with_telemetry_and_observer(source, target, &config, None);
+                let Some(surface) = telemetry.endpoint_exact_meets else {
+                    continue;
+                };
+                if surface.retained.len() <= 1 {
+                    continue;
+                }
+                found_case = Some((source.clone(), target.clone(), result, surface));
+                break 'outer;
+            }
+        }
+
+        let Some((source, target, result, surface)) = found_case else {
+            panic!("expected bounded 2x2 scan to find a case with multiple retained exact meets");
+        };
+        eprintln!(
+            "bounded endpoint multi-meet case: {:?} -> {:?} ({} retained)",
+            source,
+            target,
+            surface.retained.len()
+        );
+
+        assert_eq!(surface.requested_cap, 4);
+        assert!(surface.retained.len() > 1);
+        assert!(surface
+            .retained
+            .windows(2)
+            .all(|window| window[0].path_lag <= window[1].path_lag));
+
+        let SseResult::Equivalent(primary_path) = result else {
+            panic!("expected equivalent result for retained multi-meet case");
+        };
+        assert_eq!(
+            primary_path.matrices.first(),
+            Some(&source),
+            "primary witness should start at the requested source"
+        );
+        assert_eq!(
+            primary_path.matrices.last(),
+            Some(&target),
+            "primary witness should end at the requested target"
+        );
+
+        for witness in &surface.retained {
+            assert!(
+                witness.path.steps.len() >= witness.path_lag,
+                "reconstructed witness may add permutation bridges but should not be shorter than the meet lag"
+            );
+            assert_eq!(
+                witness.path.matrices.first(),
+                Some(&DynMatrix::from_sq(&source)),
+                "retained witness should start at the requested source"
+            );
+            assert_eq!(
+                witness.path.matrices.last(),
+                Some(&DynMatrix::from_sq(&target)),
+                "retained witness should end at the requested target"
+            );
+            validate_sse_path_dyn(
+                &DynMatrix::from_sq(&source),
+                &DynMatrix::from_sq(&target),
+                &witness.path,
+            )
+            .expect("retained witness path should validate");
         }
     }
 
@@ -4659,6 +5093,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts,
@@ -4821,6 +5256,7 @@ mod tests {
             beam_width: Some(4),
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -4847,6 +5283,7 @@ mod tests {
             beam_width: Some(3),
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -4869,6 +5306,7 @@ mod tests {
             beam_width: Some(2),
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -4895,6 +5333,7 @@ mod tests {
             beam_width: Some(1),
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let result = search_sse_2x2(&a, &b, &config);
@@ -4921,6 +5360,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
         );
 
@@ -5025,6 +5465,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
@@ -5075,6 +5516,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
             stage: SearchStage::GuidedRefinement,
             guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
@@ -5127,6 +5569,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let guided = GuidedRefinementConfig {
             max_shortcut_lag: 1,
@@ -5196,6 +5639,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let guided = GuidedRefinementConfig {
             max_shortcut_lag: 2,
@@ -5261,6 +5705,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![full_path_artifact("legacy-guided", guide)],
@@ -5336,6 +5781,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![indirect, direct_duplicate, direct_forward],
@@ -5623,6 +6069,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
             stage: SearchStage::ShortcutSearch,
             guide_artifacts: vec![],
@@ -5776,6 +6223,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let shortcut_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
@@ -5808,6 +6256,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let base_proof = try_concrete_shift_shortcut_2x2(&a, &a, &config)
             .expect("identity pair should produce a bounded concrete-shift proof");
@@ -5903,6 +6352,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match result {
@@ -5925,6 +6375,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
@@ -5961,6 +6412,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
@@ -5990,6 +6442,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
@@ -6020,6 +6473,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
@@ -6050,6 +6504,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let (result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
@@ -6095,6 +6550,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
         assert!(!telemetry.invariant_filtered);
@@ -6687,6 +7143,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         for _ in 0..16 {
@@ -6710,6 +7167,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let mut observer = LayerEventProbe::default();
 
@@ -6735,6 +7193,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let mut observer = LayerEventProbe::default();
 
@@ -6758,6 +7217,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let calibration_pairs = vec![
             (
@@ -7084,6 +7544,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&m1, &m2, &config);
         assert!(
@@ -7105,6 +7566,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&m1, &m3, &config);
         assert!(
@@ -7138,6 +7600,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -7176,6 +7639,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -7203,6 +7667,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         assert!(
@@ -7246,6 +7711,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let result = search_sse_2x2(&a, &b, &config);
         match &result {
@@ -7297,6 +7763,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         let result = search_sse_2x2(&a, &b, &config);

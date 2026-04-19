@@ -258,6 +258,11 @@ pub struct SearchConfig {
     /// `None` preserves the existing unlimited deferred queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beam_bfs_handoff_deferred_cap: Option<usize>,
+    /// Optional cap on retained exact endpoint meets for the CLI multi-meet surface.
+    ///
+    /// `None` preserves the existing single-result early-return behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_multi_meet_cap: Option<usize>,
 }
 
 impl Default for SearchConfig {
@@ -271,6 +276,7 @@ impl Default for SearchConfig {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         }
     }
 }
@@ -484,6 +490,19 @@ pub struct SearchLayerTelemetry {
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EndpointExactMeetWitness {
+    pub path_lag: usize,
+    pub meeting_canonical: DynMatrix,
+    pub path: DynSsePath,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EndpointExactMeetSurface {
+    pub requested_cap: usize,
+    pub retained: Vec<EndpointExactMeetWitness>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShortcutSearchStopReason {
@@ -556,6 +575,8 @@ pub struct SearchTelemetry {
     pub shortcut_search: ShortcutSearchTelemetry,
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
     pub layers: Vec<SearchLayerTelemetry>,
+    #[serde(skip)]
+    pub endpoint_exact_meets: Option<EndpointExactMeetSurface>,
 }
 
 #[cfg(test)]
@@ -610,6 +631,7 @@ mod tests {
         assert_eq!(config.beam_width, None);
         assert_eq!(config.beam_bfs_handoff_depth, None);
         assert_eq!(config.beam_bfs_handoff_deferred_cap, None);
+        assert_eq!(config.endpoint_multi_meet_cap, None);
         assert_eq!(DEFAULT_BEAM_WIDTH, 64);
     }
 
@@ -624,6 +646,7 @@ mod tests {
         assert_eq!(config.max_entry, 4);
         assert_eq!(config.beam_bfs_handoff_depth, None);
         assert_eq!(config.beam_bfs_handoff_deferred_cap, None);
+        assert_eq!(config.endpoint_multi_meet_cap, None);
     }
 
     #[test]
@@ -637,6 +660,7 @@ mod tests {
             beam_width: Some(8),
             beam_bfs_handoff_depth: Some(6),
             beam_bfs_handoff_deferred_cap: Some(24),
+            endpoint_multi_meet_cap: Some(3),
         };
 
         let encoded = serde_json::to_value(&config).unwrap();
@@ -652,6 +676,12 @@ mod tests {
                 .get("beam_bfs_handoff_deferred_cap")
                 .and_then(serde_json::Value::as_u64),
             Some(24)
+        );
+        assert_eq!(
+            object
+                .get("endpoint_multi_meet_cap")
+                .and_then(serde_json::Value::as_u64),
+            Some(3)
         );
     }
 

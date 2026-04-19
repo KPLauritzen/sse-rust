@@ -12,9 +12,9 @@ use sse_core::search::{
 };
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
-    FrontierMode, GuideArtifactCompatibility, GuideArtifactProvenance, GuidedRefinementConfig,
-    MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult, SearchStage, SearchTelemetry,
-    ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
+    EndpointExactMeetSurface, FrontierMode, GuideArtifactCompatibility, GuideArtifactProvenance,
+    GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult,
+    SearchStage, SearchTelemetry, ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
 };
 
 #[derive(Debug)]
@@ -182,6 +182,8 @@ where
                                               inclusive beam depth before handing discoveries to BFS (default: 4)\n\
                        --beam-bfs-handoff-deferred-cap N\n\
                                               cap retained deferred overflow entries before BFS (default: unlimited; 0 drops all retained overflow)\n\
+                       --endpoint-multi-meet-cap N\n\
+                                              retain up to N admissible exact endpoint meets on the CLI output surface (endpoint-search + bfs only)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
                                               (shortcut-search runs iterative bounded refinement over a reusable guide pool; default: endpoint-search)\n\
                        --guide-artifacts PATH   read JSON guide artifact(s) from PATH (repeatable)\n\
@@ -242,6 +244,13 @@ where
             "--beam-bfs-handoff-deferred-cap" => {
                 config.beam_bfs_handoff_deferred_cap =
                     Some(next_parsed(&mut args, "--beam-bfs-handoff-deferred-cap")?);
+            }
+            "--endpoint-multi-meet-cap" => {
+                let cap: usize = next_parsed(&mut args, "--endpoint-multi-meet-cap")?;
+                if cap == 0 {
+                    return Err("--endpoint-multi-meet-cap must be at least 1".to_string());
+                }
+                config.endpoint_multi_meet_cap = Some(cap);
             }
             "--stage" => {
                 let value = args.next().ok_or("--stage requires a value")?;
@@ -340,6 +349,14 @@ where
     {
         return Err(
             "--beam-bfs-handoff-deferred-cap requires --frontier-mode beam-bfs-handoff".to_string(),
+        );
+    }
+    if config.endpoint_multi_meet_cap.is_some() && stage != SearchStage::EndpointSearch {
+        return Err("--endpoint-multi-meet-cap only supports --stage endpoint-search".to_string());
+    }
+    if config.endpoint_multi_meet_cap.is_some() && config.frontier_mode != FrontierMode::Bfs {
+        return Err(
+            "--endpoint-multi-meet-cap currently only supports --frontier-mode bfs".to_string(),
         );
     }
 
@@ -620,6 +637,23 @@ fn print_pretty(
         }
     }
 
+    if let Some(surface) = telemetry.endpoint_exact_meets.as_ref() {
+        println!();
+        println!(
+            "Retained endpoint exact meets: {} (cap {})",
+            surface.retained.len(),
+            surface.requested_cap
+        );
+        for (index, witness) in surface.retained.iter().enumerate() {
+            println!(
+                "  {}. lag {} via {}",
+                index + 1,
+                witness.path_lag,
+                format_dyn_matrix(&witness.meeting_canonical)
+            );
+        }
+    }
+
     if show_telemetry {
         print_telemetry(telemetry);
     }
@@ -851,11 +885,42 @@ fn build_json_value(
     if let Some(relation) = relation {
         obj["relation"] = serde_json::json!(relation);
     }
+    if let Some(surface) = telemetry.endpoint_exact_meets.as_ref() {
+        obj["endpoint_exact_meets"] = endpoint_exact_meets_json(surface);
+    }
     if show_telemetry {
         obj["telemetry"] = serde_json::to_value(telemetry).unwrap_or_default();
     }
 
     obj
+}
+
+fn endpoint_exact_meets_json(surface: &EndpointExactMeetSurface) -> serde_json::Value {
+    serde_json::json!({
+        "requested_cap": surface.requested_cap,
+        "retained": surface
+            .retained
+            .iter()
+            .map(|witness| serde_json::json!({
+                "path_lag": witness.path_lag,
+                "meeting_canonical": dyn_matrix_to_vecs(&witness.meeting_canonical),
+                "path": {
+                    "matrices": witness
+                        .path
+                        .matrices
+                        .iter()
+                        .map(dyn_matrix_to_vecs)
+                        .collect::<Vec<_>>(),
+                    "steps": witness
+                        .path
+                        .steps
+                        .iter()
+                        .map(step_json)
+                        .collect::<Vec<_>>(),
+                },
+            }))
+            .collect::<Vec<_>>(),
+    })
 }
 
 fn step_json(step: &sse_core::types::EsseStep) -> serde_json::Value {
@@ -892,8 +957,9 @@ mod tests {
     };
     use sse_core::matrix::{DynMatrix, SqMatrix};
     use sse_core::types::{
-        ConcreteShiftProof2x2, FrontierMode, GuideArtifact, GuideArtifactPayload, MoveFamilyPolicy,
-        SearchRunResult, SearchStage, SearchTelemetry,
+        ConcreteShiftProof2x2, DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness,
+        FrontierMode, GuideArtifact, GuideArtifactPayload, MoveFamilyPolicy, SearchRunResult,
+        SearchStage, SearchTelemetry,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -928,6 +994,53 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.write_guide_artifact.as_deref(), Some("guide.json"));
+    }
+
+    #[test]
+    fn parse_cli_accepts_endpoint_multi_meet_cap_for_endpoint_bfs() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "0,1,1,0".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "3".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(cli.config.endpoint_multi_meet_cap, Some(3));
+    }
+
+    #[test]
+    fn parse_cli_rejects_endpoint_multi_meet_cap_outside_endpoint_bfs() {
+        let stage_err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "0,1,1,0".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "2".to_string(),
+                "--stage".to_string(),
+                "shortcut-search".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+        assert!(stage_err.contains("--stage endpoint-search"));
+
+        let frontier_err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "0,1,1,0".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "2".to_string(),
+                "--frontier-mode".to_string(),
+                "beam".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+        assert!(frontier_err.contains("--frontier-mode bfs"));
     }
 
     #[test]
@@ -1019,6 +1132,49 @@ mod tests {
         assert_eq!(json["outcome"], "equivalent_by_concrete_shift");
         assert_eq!(json["reason"], "balanced concrete-shift witness");
         assert_eq!(json["relation"], "balanced");
+    }
+
+    #[test]
+    fn endpoint_multi_meet_json_surface_uses_cli_friendly_shapes() {
+        let a = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let b = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let mut telemetry = SearchTelemetry::default();
+        telemetry.endpoint_exact_meets = Some(EndpointExactMeetSurface {
+            requested_cap: 2,
+            retained: vec![EndpointExactMeetWitness {
+                path_lag: 1,
+                meeting_canonical: DynMatrix::new(2, 2, vec![1, 1, 1, 1]),
+                path: DynSsePath {
+                    matrices: vec![a.clone(), b.clone()],
+                    steps: vec![sse_core::types::EsseStep {
+                        u: a.clone(),
+                        v: b.clone(),
+                    }],
+                },
+            }],
+        });
+
+        let json = build_result_json(
+            &a,
+            &b,
+            SearchStage::EndpointSearch,
+            &SearchRunResult::Equivalent(DynSsePath {
+                matrices: vec![a.clone(), b.clone()],
+                steps: vec![],
+            }),
+            &telemetry,
+            false,
+        );
+
+        assert_eq!(json["endpoint_exact_meets"]["requested_cap"], 2);
+        assert_eq!(
+            json["endpoint_exact_meets"]["retained"][0]["meeting_canonical"],
+            serde_json::json!([[1, 1], [1, 1]])
+        );
+        assert_eq!(
+            json["endpoint_exact_meets"]["retained"][0]["path"]["matrices"][0],
+            serde_json::json!([[1, 0], [0, 1]])
+        );
     }
 
     #[test]

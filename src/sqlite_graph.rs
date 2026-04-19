@@ -682,6 +682,7 @@ mod tests {
                 beam_width: None,
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             };
 
             let (_result, _telemetry) =
@@ -742,6 +743,7 @@ mod tests {
             beam_width: Some(8),
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
         let beam_bfs_handoff = SearchConfig {
             max_lag: 4,
@@ -752,6 +754,7 @@ mod tests {
             beam_width: Some(8),
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         };
 
         assert_eq!(search_mode_label(&SearchConfig::default()), "mixed");

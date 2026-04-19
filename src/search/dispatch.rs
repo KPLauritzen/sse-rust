@@ -4,8 +4,8 @@ use crate::search_observer::{
     SearchStartRecord,
 };
 use crate::types::{
-    DynSseResult, GuidedRefinementConfig, SearchConfig, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
+    DynSseResult, FrontierMode, GuidedRefinementConfig, SearchConfig, SearchRequest,
+    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
 };
 
 use super::stages::{search_guided_refinement_with_observer, search_shortcut_search_with_observer};
@@ -23,11 +23,30 @@ pub(super) fn execute_search_request_and_observer(
     request: &SearchRequest,
     observer: Option<&mut dyn SearchObserver>,
 ) -> Result<(SearchRunResult, SearchTelemetry), String> {
+    validate_request(request)?;
     match request.stage {
         SearchStage::EndpointSearch => Ok(execute_endpoint_search_request(request, observer)),
         SearchStage::GuidedRefinement => search_guided_refinement_with_observer(request, observer),
         SearchStage::ShortcutSearch => search_shortcut_search_with_observer(request, observer),
     }
+}
+
+fn validate_request(request: &SearchRequest) -> Result<(), String> {
+    let Some(cap) = request.config.endpoint_multi_meet_cap else {
+        return Ok(());
+    };
+    if cap == 0 {
+        return Err("endpoint_multi_meet_cap must be at least 1 when requested".to_string());
+    }
+    if request.stage != SearchStage::EndpointSearch {
+        return Err("endpoint_multi_meet_cap only supports --stage endpoint-search".to_string());
+    }
+    if request.config.frontier_mode != FrontierMode::Bfs {
+        return Err(
+            "endpoint_multi_meet_cap currently only supports --frontier-mode bfs".to_string(),
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn endpoint_search_request(
