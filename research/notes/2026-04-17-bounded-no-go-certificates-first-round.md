@@ -42,8 +42,8 @@ So the certificate form in this note is:
 ## Probe 1: strict intermediate-dimension cap on `rectangular_positive_pair`
 
 This is the cleanest exact bounded-envelope result from the round because the
-repo already treats this pair as the durable example where dimension `3` helps
-but dimension `2` does not:
+repo treated this pair as the durable example where the dim-`2` envelope failed
+but the dim-`3` envelope succeeded:
 
 - source: `[[3,4],[3,4]]`
 - target: `[[4,4],[3,3]]`
@@ -120,6 +120,42 @@ So the first keepable bounded-envelope certificate from this round is:
   the known witness family necessarily passes through the excluded dimension.**
 
 This is mathematically clean and operationally durable.
+
+### 2026-04-19 update
+
+This probe's **dim-2** conclusion still holds on current `main`:
+
+- `[[3,4],[3,4]] -> [[4,4],[3,3]]` remains `unknown` under
+  `lag4 / max_intermediate_dim=2 / entry6`
+
+But the **positive-side interpretation above is now stale**.
+
+Rechecking the same pair on current `main` with
+`lag4 / max_intermediate_dim=3 / entry6` now yields a direct `1`-step witness:
+
+```text
+U = [[1,1],[1,1]]
+V = [[2,2],[1,2]]
+```
+
+with `A = UV` and `B = VU`.
+
+So this pair no longer supports the stronger explanatory claim that the current
+positive witness necessarily passes through a `2x3` rectangular intermediate or
+that "dimension `3` is what blocks the witness" on the positive side. What
+survives is narrower:
+
+- the dim-`2` bounded no-go certificate is still valid for this exact envelope;
+- the dim-`3` companion case is still a valid positive control under the wider
+  envelope;
+- but the pair is no longer the right durable example if we want a control that
+  still isolates "dim `2` fails, dim `3` succeeds for genuinely dim-`3`
+  reasons."
+
+Follow-up:
+
+- `sse-rust-mlv` was opened to find a replacement positive-control case that
+  still serves that function cleanly.
 
 ## Probe 2: tiny lag caps on the canonical `brix_ruiz_k3` pair
 
@@ -217,8 +253,9 @@ still too weak to certify `square_factorisation_3x3` emptiness exactly.
 ### Promising
 
 - exact intermediate-dimension certificates on pairs whose known witnesses
-  necessarily pass through one excluded dimension, as in the
-  `rectangular_positive_pair` dim-`2` vs dim-`3` split;
+  necessarily pass through one excluded dimension; `rectangular_positive_pair`
+  was the motivating example for this note, but it now needs a replacement
+  control case on the positive side;
 - explicit structured-family envelopes, especially the bounded diagonal
   refactorization slice from `ilu.1`, where family emptiness is equivalent to a
   tiny divisibility/admissible-diagonal test;

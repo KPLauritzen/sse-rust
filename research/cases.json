@@ -528,7 +528,7 @@
     },
     {
       "id": "rectangular_positive_pair",
-      "description": "Practical rectangular positive control for the bounded-envelope certificate: the current bounded search proves this pair once max_intermediate_dim=3 is allowed.",
+      "description": "Positive-side companion for the bounded-envelope certificate: under lag4 / entry6 with max_intermediate_dim=3, the current bounded search must prove this pair equivalent.",
       "a": [[3, 4], [3, 4]],
       "b": [[4, 4], [3, 3]],
       "config": {
