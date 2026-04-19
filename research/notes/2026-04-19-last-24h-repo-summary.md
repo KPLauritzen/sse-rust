@@ -64,11 +64,11 @@ ownership surface, not a live open backlog.
   witness classification (`2026-04-18-riedel-witness-classification-k4-k6.md`),
   a retained interior-step decomposition
   (`2026-04-18-riedel-k4-retained-step-decomposition.md`), and a full explicit
-  `k = 4` graph-only decomposition under a wider envelope
+  Riedel/Baker `k = 4` graph-only decomposition under a wider envelope
   (`2026-04-18-riedel-k4-full-graph-decomposition.md`).
 - That changes the current graph-only question materially. It is no longer
   "which theorem-backed slice might help someday?" The repo now knows:
-  - the retained lane is `k = 4, 6, 8, 10, 12, 14`;
+  - the retained Riedel/Baker lane is `k = 4, 6, 8, 10, 12, 14`;
   - `graph_only` is still `0/6` there;
   - `graph_plus_structured` and `mixed` both solve the retained lane; and
   - the low-rung mismatch is concrete: retained rectangular endpoint lifts plus
@@ -89,10 +89,10 @@ ownership surface, not a live open backlog.
 - Those are real main-search keeps, but the durable result is still negative on
   the retained benchmark lane: `graph_only` remains `0/6`.
 - The key new conclusion is therefore not "graph-only is fixed." It is that
-  after these promotions the smallest retained blocker is much clearer:
-  the `k = 4` interior `3x3 -> 3x3` bridge stays `unknown` at `max_entry = 4`
-  and flips to `equivalent` at `max_entry = 5` because the first admitted
-  intermediate matrix `M1` itself has max entry `5`
+  after these promotions the smallest retained blocker is much clearer: the
+  Riedel/Baker `k = 4` interior `3x3 -> 3x3` bridge stays `unknown` at
+  `max_entry = 4` and flips to `equivalent` at `max_entry = 5` because the
+  first admitted intermediate matrix `M1` itself has max entry `5`
   (`2026-04-18-riedel-k4-retained-interior-bridge-entry-threshold.md`).
 - So the current direction changed from "add missing graph-only theorem slices"
   to "treat the retained interior bridge and its admission threshold as the
@@ -136,7 +136,7 @@ ownership surface, not a live open backlog.
 - That did not change main search policy, but it did reinforce the repo's
   current exact-pruning method: family-local exact orbit reduction and bounded
   certificates remain real; coarse beam-direction retuning on the retained
-  `graph_plus_structured` Goal 3 lane did not.
+  Brix-Ruiz `k = 4` `graph_plus_structured` Goal 3 lane did not.
 
 ### 5. Runtime and analysis work stayed disciplined, and the backlog surface is now unusually empty
 
@@ -168,10 +168,10 @@ ownership surface, not a live open backlog.
   the `binary_sparse_rectangular_factorisation_4x3_to_3` orbit quotient and
   bounded local no-go tooling.
 - Evidence or diagnostics, not direction changes:
-  the direct wider-envelope `k = 4` graph-only decomposition artifact; the
-  retained `max_entry = 4` vs `5` bridge-threshold classification; dynamic
-  graph-only observer parity; docs entrypoint refresh; and the two
-  `endpoint_equivalent_fast` regression investigations.
+  the direct wider-envelope Riedel/Baker `k = 4` graph-only decomposition
+  artifact; the retained `max_entry = 4` vs `5` bridge-threshold
+  classification; dynamic graph-only observer parity; docs entrypoint refresh;
+  and the two `endpoint_equivalent_fast` regression investigations.
 - Explicitly rejected in this window:
   the retained `graph_plus_structured` dim-4 beam-direction retune and the
   graph-plus-structured duplicate-signature micro-optimization.
@@ -180,13 +180,14 @@ ownership surface, not a live open backlog.
 
 There is no open or ready bead that already owns the suggestions below.
 
-### 1. Reopen the retained `k = 4` interior bridge as its own bounded exact-obstruction task
+### 1. Reopen the retained Riedel/Baker `k = 4` interior bridge as its own bounded exact-obstruction task
 
 - Why it looks worthwhile:
   the Riedel ladder work eliminated the broader ambiguity. The retained
   endpoint lifts are now promoted, the retained same-dimension conjugation lift
   is promoted, and the remaining retained blocker is localized to one interior
   `3x3 -> 3x3` bridge with a concrete `max_entry = 4` vs `5` admission split.
+  This is separate from the still-open Brix-Ruiz `k = 4` Goal 3 benchmark.
 - Evidence behind that judgment:
   `2026-04-18-riedel-graph-only-rectangular-endpoint-promotion.md`,
   `2026-04-18-riedel-k4-retained-step-decomposition.md`, and
@@ -208,7 +209,8 @@ There is no open or ready bead that already owns the suggestions below.
   `2026-04-18-riedel-k4-full-graph-decomposition.md` is more than a sidecar
   curiosity. It proves a direct `graph_only` `k = 4` witness under the wider
   envelope `lag = 19`, `dim = 5`, `entry = 12`, which is the strongest
-  constructive graph-only evidence from the window.
+  constructive graph-only evidence from the window. That witness is on the
+  Riedel/Baker ladder, not on the open Brix-Ruiz Goal 3 endpoint.
 - Bounded next step:
   freeze that witness as one explicit reusable control in the harness or in a
   committed guide-backed replay surface, so later graph-only work can compare
@@ -234,7 +236,7 @@ There is no open or ready bead that already owns the suggestions below.
   `sse-rust-2uy.30` closed after landing the one seam; there is no current
   successor bead for the next family.
 
-### 4. Do not reopen the same Goal 3 beam-direction retune; if the dim-4 lane is revisited, start from a new hotspot signal
+### 4. Do not reopen the same open-Brix-Ruiz Goal 3 beam-direction retune; if the dim-4 lane is revisited, start from a new hotspot signal
 
 - Why this needs to be said explicitly:
   the strongest "underweighted Goal 3 follow-up" from the earlier survey was
@@ -257,14 +259,14 @@ There is no open or ready bead that already owns the suggestions below.
 - The day's major seams were owned and then closed:
   - `sse-rust-5yo` and `sse-rust-5yo.1` through `.5` covered the retained
     Riedel graph-gap lane, witness classification, sidecar decomposition, first
-    explicit `k = 4` graph-only decomposition, and bounded graph-only
-    promotions;
+    explicit Riedel/Baker `k = 4` graph-only decomposition, and bounded
+    graph-only promotions;
   - `sse-rust-2uy.3` covered the narrow positive-conjugacy main-search seam;
   - `sse-rust-2uy.29` closed as already satisfied by existing exact family
     gates;
   - `sse-rust-2uy.30` covered the next exact structured-family orbit seam;
-  - `sse-rust-2uy.31` covered and closed the retained dim-4 Goal 3 beam
-    retune as a no-op;
+  - `sse-rust-2uy.31` covered and closed the retained open-Brix-Ruiz `k = 4`
+    dim-4 Goal 3 beam retune as a no-op;
   - `sse-rust-2sp` covered graph-only observer layer-event parity;
   - `sse-rust-csl` covered the graph-only runtime round;
   - `sse-rust-cr9` and `sse-rust-d4x` covered the two bounded
@@ -275,8 +277,8 @@ There is no open or ready bead that already owns the suggestions below.
 
 ## Conclusion
 
-The biggest durable change in this window was not a new open-family witness. It
-was the repo turning the Riedel/Baker graph-only gap into a precise retained
+The biggest durable change in this window was not a new open Brix-Ruiz Goal 3
+witness. It was the repo turning the Riedel/Baker graph-only gap into a precise retained
 obstruction with committed benchmarks, explicit low-rung witness
 classification, and bounded graph-only promotions that still fail for concrete
 reasons.
@@ -287,9 +289,10 @@ The other enduring changes were narrower:
   root-layer hint;
 - graph-only got one more real runtime keep;
 - exact orbit/certificate work gained another strong local seam; and
-- several tempting Goal 3 or hotspot directions were explicitly ruled out.
+- several tempting open-Brix-Ruiz Goal 3 or hotspot directions were explicitly
+  ruled out.
 
 The backlog implication is unusually stark: there are no ready or open beads at
 all. So the next meaningful work should probably be reopened explicitly around
-the retained `k = 4` interior bridge first, not around another broad graph-only
-or Goal 3 widening pass.
+the retained Riedel/Baker `k = 4` interior bridge first, not around another
+broad graph-only or open-Brix-Ruiz Goal 3 widening pass.

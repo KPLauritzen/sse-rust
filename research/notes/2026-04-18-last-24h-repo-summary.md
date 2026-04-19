@@ -34,16 +34,17 @@ Primary sources:
 - That matters because the repo now has a shared language for:
   - the hard exact `k=3` graph-only control,
   - the cheap graph-only beam probe,
-  - the bounded graph-only `k=4` reach ramp,
+  - the bounded graph-only Brix-Ruiz `k=4` reach ramp,
   - the hard exact `k=3` graph-plus-structured control,
   - and the cheap graph-plus-structured beam probe.
 - This materially changed direction. Recent runtime work, campaign notes, and
   keep/revert decisions are now anchored to these retained surfaces instead of
   ad hoc one-off runs.
-- The current cheap Goal 3 measurement default is therefore clearer:
-  graph-only remains the reusable open-family control, while
-  graph-plus-structured is now a measured intermediate lane rather than a vague
-  mixed-search subset.
+- The current cheap Goal 3 measurement default is therefore clearer: on the
+  still-open Brix-Ruiz `k=4` benchmark, graph-only remains the reusable
+  control, while graph-plus-structured is now a measured intermediate lane
+  rather than a vague mixed-search subset. This is separate from the solved
+  Riedel/Baker `k=4` ladder work, which stays benchmark/control context here.
 
 ### 2. The explicit structured-family seam stopped being a narrow experiment and became a real main-search layer
 
@@ -75,8 +76,8 @@ Primary sources:
   - graph-only `5x5` canonical-permutation pruning (`136cf28`).
 - Those changes matter because they improved the retained baseline surfaces
   without changing witness lag or search counters. That gave the repo more room
-  to extend the graph-only `k=4` lag map and to treat graph-plus-structured
-  exact search as a repeatable performance control.
+  to extend the graph-only Brix-Ruiz `k=4` lag map and to treat
+  graph-plus-structured exact search as a repeatable performance control.
 - But the window was equally important for what it rejected:
   - compact graph-only "canonical-only" replay handles were ruled out as
     incompatible with exact edge replay and observer contracts;
@@ -143,9 +144,9 @@ Primary sources:
   retained controls; exact family-local gating over coarse quotient summaries;
   manifest-backed held-out ranking and generic Bowen-Franks parity.
 - Kept but still diagnostic:
-  the widened graph-only `k=4` lag map; graph-plus-structured `dim4` broad-beam
-  overlap growth; Riedel/Baker reach extension; bounded no-go certificates;
-  observer-emission probes.
+  the widened graph-only Brix-Ruiz `k=4` lag map; graph-plus-structured `dim4`
+  broad-beam overlap growth on the open Brix-Ruiz benchmark; Riedel/Baker reach
+  extension; bounded no-go certificates; observer-emission probes.
 - Explicitly not promoted:
   graph-proposal shortlist success beyond the original one seam; compact
   representative retention in graph-only BFS; quotient/support signatures as
@@ -183,8 +184,8 @@ It now has:
 - more durable held-out ranking/reporting surfaces,
 - and a stronger generic square reject path.
 
-What it did **not** get was a new Goal 2 or Goal 3 witness, or a proposal side
-channel ready to enter default search.
+What it did **not** get was a new Goal 2 witness or a new open Brix-Ruiz Goal 3
+witness, or a proposal side channel ready to enter default search.
 
 So the repo ends this day pointed toward a clearer bounded strategy:
 

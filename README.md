@@ -20,7 +20,8 @@ This project is currently optimizing for four concrete search goals:
 
 1. Find any path for `k = 3`. Solved.
 2. Find a new shortest path with lag `< 7` for `k = 3`, or find new paths with lag `= 7`.
-3. Find any path for `k = 4` or above.
+3. Find any path for the open Brix-Ruiz `k = 4` benchmark endpoint. If a note
+   discusses another `k >= 4` family instead, it should say so explicitly.
 4. Make the main solver endpoint-agnostic for square matrices up to dimension 4, possibly higher later.
 
 ## Problem At A Glance

@@ -123,9 +123,11 @@ Recommended bead action:
   1. frontier-local savings on hot structured enumerators
   2. exact bounded-exhaustion or no-go arguments modulo those same orbit keys
 
-### 3. Goal 3 follow-up should pivot to `graph_plus_structured` dim-4 profiling/ranking, not more generic `k=4` widening
+### 3. Goal 3 follow-up on the open Brix-Ruiz `k=4` benchmark should pivot to `graph_plus_structured` dim-4 profiling/ranking, not more generic `k=4` widening
 
 This is the strongest solver-facing avenue that looks underowned right now.
+Here "Goal 3" means the still-open Brix-Ruiz `k=4` endpoint, not the already
+solved Riedel/Baker `k=4` ladder under its documented retained/widened lanes.
 
 Why it still looks promising:
 
@@ -139,7 +141,7 @@ Why it still looks promising:
 - the same broad-beam note is also clear about what **not** to do:
   the first richer `dim5` surface is still a factorisation-volume cliff
 - this makes the next rational Goal 3 slice much narrower than "run another
-  big k=4 campaign"
+  big Brix-Ruiz `k=4` campaign"
 
 Why I think this is underweighted rather than already covered:
 

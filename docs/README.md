@@ -45,8 +45,8 @@ Use docs under `docs/` for durable orientation and reference notes.
   experimental record for Brix-Ruiz sidecar work.
 - [`rfcs/rfc-001-main-search-shortcut-integration.md`](rfcs/rfc-001-main-search-shortcut-integration.md)
   proposes promoting refinement and shortcutting into the main solver/CLI so
-  the hard `k = 3` and `k >= 4` search cases become first-class product
-  behavior rather than sidecar-only workflows.
+  the hard Brix-Ruiz `k = 3` and open Brix-Ruiz `k = 4` benchmark cases become
+  first-class product behavior rather than sidecar-only workflows.
 - [`rfcs/rfc-002-shortcut-search-stage.md`](rfcs/rfc-002-shortcut-search-stage.md)
   proposes the missing generic `shortcut_search` stage as an artifact-driven
   outer loop built on top of `guided_refinement`.

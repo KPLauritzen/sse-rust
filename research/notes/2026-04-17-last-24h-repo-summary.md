@@ -93,7 +93,7 @@ Primary sources:
   concrete bridges in the return path.
 - This is still mostly evidence work rather than a solver breakthrough: the
   day made the balanced reachability picture richer and less lossy, but it did
-  not produce a new Goal 2 or Goal 3 witness.
+  not produce a new Goal 2 or open-Brix-Ruiz Goal 3 witness.
 
 ### 5. The biggest search-side change was a broad explicit structured-family expansion
 
@@ -145,7 +145,8 @@ Primary sources:
 
 ## Conclusion
 
-The last day did not produce a new shortest `k=3` path or a new `k=4` witness.
+The last day did not produce a new shortest `k=3` path or a new witness on the
+open Brix-Ruiz `k=4` Goal 3 benchmark.
 Its biggest durable effects were:
 
 - a stricter keep/revert and measurement discipline,

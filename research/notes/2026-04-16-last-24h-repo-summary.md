@@ -40,7 +40,7 @@ Primary sources:
   matters because recent solver work added a real intermediate policy between
   graph-only and fully mixed search.
 
-### 2. The main search gained new bounded policy seams, but not a new Goal 2 or Goal 3 win
+### 2. The main search gained new bounded policy seams, but not a new Goal 2 or open-Brix-Ruiz Goal 3 win
 
 - `MoveFamilyPolicy::GraphPlusStructured` landed as a real intermediate preset
   (`a4235a6`). It keeps graph moves plus bounded structured families while
@@ -98,10 +98,10 @@ Primary sources:
   `benches/search.rs` on low-noise micro/throughput terrain while still giving
   the harness a lag-sensitive non-Brix literature ladder.
 - New research notes also clarified the current Goal 3 boundary. On the present
-  head, the `k=4` mixed-beam surface completes with `unknown` through `lag 8`
-  and times out at `lag 9` under the tested `beam64 + dim5 + entry10` release
-  configuration (`563e341`, `1f84b62`). This is useful boundary evidence, but
-  not a new witness.
+  head, the open Brix-Ruiz `k=4` mixed-beam surface completes with `unknown`
+  through `lag 8` and times out at `lag 9` under the tested
+  `beam64 + dim5 + entry10` release configuration (`563e341`, `1f84b62`). This
+  is useful boundary evidence, but not a new witness.
 
 ### 5. The literature/context refresh produced two concrete new directions, and one of them already landed
 
