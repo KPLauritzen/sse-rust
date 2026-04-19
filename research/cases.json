@@ -1082,6 +1082,72 @@
       }
     },
     {
+      "id": "riedel_k4_retained_interior_bridge_narrow_lane",
+      "description": "Retained Riedel/Baker control: the exact interior 3x3 -> 3x3 bridge stays blocked for plain graph-only endpoint_search on the narrow lane (`lag <= 3`, `dim <= 3`, `max_entry <= 4`).",
+      "required": true,
+      "a": [[1, 3, 1], [1, 3, 0], [2, 6, 4]],
+      "b": [[4, 4, 4], [1, 1, 1], [0, 1, 3]],
+      "config": {
+        "max_lag": 3,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["unknown"],
+      "target_outcome": "unknown",
+      "points": {
+        "equivalent": -1500,
+        "not_equivalent": -1500,
+        "unknown": 150,
+        "timeout": -2500,
+        "panic": -2500
+      },
+      "tags": ["correctness", "non-2x2", "graph-only", "retained-control", "riedel-baker", "narrow-lane", "evidence"],
+      "campaign": {
+        "id": "riedel_k4_retained_bridge_control",
+        "strategy": "endpoint_search_narrow_lane",
+        "schedule_order": 10
+      }
+    },
+    {
+      "id": "riedel_k4_retained_interior_bridge_guided_replay",
+      "description": "Retained Riedel/Baker control: the same interior 3x3 -> 3x3 obstruction is replayable on the existing guided_refinement surface when seeded with the committed max_entry=5 retained bridge guide artifact, without widening graph-only policy.",
+      "required": true,
+      "a": [[1, 3, 1], [1, 3, 0], [2, 6, 4]],
+      "b": [[4, 4, 4], [1, 1, 1], [0, 1, 3]],
+      "guide_artifact_paths": ["research/riedel_k4_retained_interior_bridge_entry5_threshold_guide_2026-04-18.json"],
+      "config": {
+        "max_lag": 3,
+        "max_intermediate_dim": 3,
+        "max_entry": 4,
+        "move_family_policy": "graph-only",
+        "stage": "guided_refinement",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 3,
+          "rounds": 1
+        }
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 170,
+        "not_equivalent": -1700,
+        "unknown": -1700,
+        "timeout": -2700,
+        "panic": -2700
+      },
+      "tags": ["correctness", "non-2x2", "graph-only", "guided-stage", "retained-control", "riedel-baker", "artifact-fixture", "narrow-lane"],
+      "campaign": {
+        "id": "riedel_k4_retained_bridge_control",
+        "strategy": "guided_refinement_artifact_replay",
+        "schedule_order": 20
+      }
+    },
+    {
       "id": "riedel_baker_k6",
       "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Riedel/Baker Example `riedelexample`, k=6 instance from the displayed family formula). Expected relation: Equivalent.",
       "required": false,
