@@ -1148,6 +1148,35 @@
       }
     },
     {
+      "id": "riedel_k4_graph_only_widened_endpoint_ceiling_control",
+      "description": "Retained Riedel/Baker widened control: the k=4 endpoint pair is equivalent for plain graph-only endpoint_search on the exact endpoint-ceiling surface (`lag <= 6`, `dim <= 3`, `max_entry <= 5`). Reuse the committed 2026-04-19 guide artifact instead of re-deriving the witness.",
+      "required": true,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 6,
+        "max_intermediate_dim": 3,
+        "max_entry": 5,
+        "move_family_policy": "graph-only"
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 160,
+        "not_equivalent": -1600,
+        "unknown": -1600,
+        "timeout": -2600,
+        "panic": -2600
+      },
+      "tags": ["correctness", "graph-only", "riedel-baker", "retained-control", "widened-control", "endpoint-ceiling", "artifact-backed"],
+      "campaign": {
+        "id": "riedel_k4_graph_only_widened_control",
+        "strategy": "endpoint_search_widened_entry_ceiling",
+        "schedule_order": 10
+      }
+    },
+    {
       "id": "riedel_baker_k6",
       "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Riedel/Baker Example `riedelexample`, k=6 instance from the displayed family formula). Expected relation: Equivalent.",
       "required": false,
