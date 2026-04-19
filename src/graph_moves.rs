@@ -597,26 +597,24 @@ pub fn enumerate_graph_move_successor_nodes(current: &DynMatrix, max_dim: usize)
     }
 
     if current.rows > 2 {
-        for witness in enumerate_out_amalgamations(current) {
-            candidates += 1;
-            *family_candidates.entry("out_amalgamation").or_default() += 1;
-            push_canonical_graph_successor_node(
-                "out_amalgamation",
-                witness.outsplit,
-                &mut seen,
-                &mut nodes,
-            );
-        }
-        for witness in enumerate_in_amalgamations(current) {
-            candidates += 1;
-            *family_candidates.entry("in_amalgamation").or_default() += 1;
-            push_canonical_graph_successor_node(
-                "in_amalgamation",
-                witness.outsplit,
-                &mut seen,
-                &mut nodes,
-            );
-        }
+        append_out_amalgamation_successor_nodes(
+            current,
+            "out_amalgamation",
+            false,
+            &mut candidates,
+            &mut family_candidates,
+            &mut seen,
+            &mut nodes,
+        );
+        append_out_amalgamation_successor_nodes(
+            &current.transpose(),
+            "in_amalgamation",
+            true,
+            &mut candidates,
+            &mut family_candidates,
+            &mut seen,
+            &mut nodes,
+        );
     }
 
     GraphMoveNodes {
@@ -793,6 +791,57 @@ fn append_representative_outsplit_successor_nodes(
                 push_canonical_graph_successor_node(family, outsplit.transpose(), seen, nodes);
             } else {
                 push_canonical_graph_successor_node(family, outsplit, seen, nodes);
+            }
+        }
+    }
+}
+
+fn append_out_amalgamation_successor_nodes(
+    c: &DynMatrix,
+    family: &'static str,
+    transpose_result: bool,
+    candidates: &mut usize,
+    family_candidates: &mut BTreeMap<&'static str, usize>,
+    seen: &mut HashSet<DynMatrix>,
+    nodes: &mut Vec<GraphMoveNode>,
+) {
+    debug_assert!(c.is_square());
+
+    let m = c.rows;
+    if m <= 1 {
+        return;
+    }
+
+    let n = m - 1;
+    for p in 0..m {
+        for q in (p + 1)..m {
+            let cols_equal = (0..m).all(|row| c.get(row, p) == c.get(row, q));
+            if !cols_equal {
+                continue;
+            }
+
+            *candidates += 1;
+            *family_candidates.entry(family).or_default() += 1;
+
+            let mut data = Vec::with_capacity(n * n);
+            for new_row in 0..n {
+                let old_row = if new_row < q { new_row } else { new_row + 1 };
+                let merges_q_into_p = new_row == p;
+                for new_col in 0..n {
+                    let old_col = if new_col < q { new_col } else { new_col + 1 };
+                    let mut value = c.get(old_row, old_col);
+                    if merges_q_into_p {
+                        value += c.get(q, old_col);
+                    }
+                    data.push(value);
+                }
+            }
+
+            let amalgamation = DynMatrix::new(n, n, data);
+            if transpose_result {
+                push_canonical_graph_successor_node(family, amalgamation.transpose(), seen, nodes);
+            } else {
+                push_canonical_graph_successor_node(family, amalgamation, seen, nodes);
             }
         }
     }
@@ -1723,6 +1772,41 @@ mod tests {
         assert!(witnesses
             .into_iter()
             .any(|witness| witness.family == successor.family));
+    }
+
+    #[test]
+    fn test_graph_move_successor_nodes_match_stepful_targets_on_amalgamation_surface() {
+        let a = SqMatrix::new([[1, 3], [2, 1]]);
+        let current = enumerate_same_future_insplits_2x2_to_3x3(&a)[0]
+            .outsplit
+            .clone();
+
+        let mut stepful = enumerate_graph_move_successors(&current, 4)
+            .nodes
+            .into_iter()
+            .map(|successor| {
+                (
+                    successor.family,
+                    successor.matrix.clone(),
+                    successor.orig_matrix.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut node_only = enumerate_graph_move_successor_nodes(&current, 4)
+            .nodes
+            .into_iter()
+            .map(|successor| {
+                (
+                    successor.family,
+                    successor.matrix.clone(),
+                    successor.orig_matrix.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        stepful.sort_unstable();
+        node_only.sort_unstable();
+        assert_eq!(node_only, stepful);
     }
 
     #[test]
