@@ -55,12 +55,18 @@ Local run artifacts:
 Reproduce:
 
 ```bash
+# Baseline: run on the parent commit before the family cut.
+git checkout d5433e5^
 cargo build --bin research_harness --features research-tools
 
 timeout -k 20s 190s target/debug/research_harness \
   --cases research/brix_ruiz_k4_graph_plus_structured_broad_beam_corpus_2026-04-17.json \
   --format json \
   > tmp/nw71_baseline_brix_ruiz_k4_graph_plus_structured_broad_beam.json
+
+# After: return to commit d5433e5 with the family cut applied.
+git checkout d5433e5
+cargo build --bin research_harness --features research-tools
 
 timeout -k 20s 190s target/debug/research_harness \
   --cases research/brix_ruiz_k4_graph_plus_structured_broad_beam_corpus_2026-04-17.json \
