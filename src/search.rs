@@ -189,12 +189,6 @@ pub(super) fn validate_endpoint_multi_meet_config(config: &SearchConfig) -> Resu
     Ok(())
 }
 
-fn assert_valid_endpoint_multi_meet_config(config: &SearchConfig) {
-    if let Err(message) = validate_endpoint_multi_meet_config(config) {
-        panic!("{message}");
-    }
-}
-
 #[derive(Clone, Debug)]
 struct RetainedExactMeetCandidate<M> {
     canonical: M,
@@ -211,6 +205,9 @@ struct ExactMeetRetention<M> {
 
 impl<M: Clone> ExactMeetRetention<M> {
     fn from_config(config: &SearchConfig) -> Option<Self> {
+        if validate_endpoint_multi_meet_config(config).is_err() {
+            return None;
+        }
         config
             .endpoint_multi_meet_cap
             .filter(|cap| *cap > 0)
@@ -599,7 +596,6 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     mut observer: Option<&mut dyn SearchObserver>,
     deadline: Option<Instant>,
 ) -> (DynSseResult, SearchTelemetry) {
-    assert_valid_endpoint_multi_meet_config(config);
     let mut telemetry = SearchTelemetry::default();
     let request = endpoint_search_request(a, b, config);
 
@@ -1206,7 +1202,6 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     config: &SearchConfig,
     mut observer: Option<&mut dyn SearchObserver>,
 ) -> (SseResult<2>, SearchTelemetry) {
-    assert_valid_endpoint_multi_meet_config(config);
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
     let b_dyn = DynMatrix::from_sq(b);
