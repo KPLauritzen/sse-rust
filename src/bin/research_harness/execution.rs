@@ -117,6 +117,7 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
             beam_width: normalized_beam_width,
             beam_bfs_handoff_depth: normalized_beam_bfs_handoff_depth,
             beam_bfs_handoff_deferred_cap: normalized_beam_bfs_handoff_deferred_cap,
+            endpoint_multi_meet_cap: None,
         },
         stage: case.config.stage,
         guide_artifacts: resolved.guide_artifacts,
