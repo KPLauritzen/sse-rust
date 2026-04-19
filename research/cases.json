@@ -554,6 +554,33 @@
       }
     },
     {
+      "id": "riedel_baker_k4_dim2_bounded_no_go",
+      "description": "Dim-2 companion for the bounded dim split: under lag5 / entry4 with max_intermediate_dim=2, the bounded search must exhaust on the Riedel/Baker k=4 pair with unknown rather than proving a witness.",
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "config": {
+        "max_lag": 5,
+        "max_intermediate_dim": 2,
+        "max_entry": 4
+      },
+      "timeout_ms": 2000,
+      "allowed_outcomes": ["unknown"],
+      "target_outcome": "unknown",
+      "points": {
+        "equivalent": -2500,
+        "not_equivalent": -2500,
+        "unknown": 250,
+        "timeout": -3500,
+        "panic": -3500
+      },
+      "tags": ["correctness", "riedel-baker", "bounded-no-go-certificate", "positive-control"],
+      "campaign": {
+        "id": "baseline_corpus",
+        "strategy": "mixed_baseline",
+        "schedule_order": 78
+      }
+    },
+    {
       "id": "eilers_kiming_negative",
       "description": "Known non-SSE pair filtered out by invariants.",
       "a": [[14, 2], [1, 0]],

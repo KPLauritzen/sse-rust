@@ -87,17 +87,19 @@ Telemetry summary:
 
 ## Decision
 
-Keep one replacement positive-side control:
+Keep the replacement same-endpoint control pair:
 
+- `riedel_baker_k4_dim2_bounded_no_go`
 - `riedel_baker_k4_dim3_positive_control`
 
 and keep the old rectangular dim-`2` bounded no-go guard as-is.
 
-That means the durable regression surface is now a bounded two-case control
-slice rather than a same-endpoint comparison pair:
+So the durable regression surface now has:
 
-- the old rectangular case still guards the exact dim-`2` bounded no-go;
-- `riedel_baker_k4` now supplies the nontrivial dim-`3` positive-side control.
+- the old rectangular case as a standalone exact dim-`2` bounded no-go guard;
+- a new `riedel_baker_k4` same-endpoint dim split that directly asserts
+  `dim2 -> unknown` versus `dim3 -> equivalent`.
 
-This is the smallest bounded change that restores the intended regression value
-without broadening into a fresh control-family search.
+This is still a bounded change: one candidate family, one kept replacement
+control pair, and no wider hunt beyond the first viable literature-backed
+probe.

@@ -2596,6 +2596,7 @@ mod tests {
                 matches!(
                     case.id.as_str(),
                     "rectangular_positive_pair_dim2_bounded_no_go"
+                        | "riedel_baker_k4_dim2_bounded_no_go"
                         | "riedel_baker_k4_dim3_positive_control"
                 )
             })
@@ -2604,7 +2605,7 @@ mod tests {
 
         control_cases.sort_by_key(|case| case.id.clone());
 
-        assert_eq!(control_cases.len(), 2);
+        assert_eq!(control_cases.len(), 3);
         assert_eq!(
             control_cases
                 .iter()
@@ -2612,6 +2613,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "rectangular_positive_pair_dim2_bounded_no_go",
+                "riedel_baker_k4_dim2_bounded_no_go",
                 "riedel_baker_k4_dim3_positive_control",
             ]
         );
@@ -2622,10 +2624,15 @@ mod tests {
         assert_eq!(control_cases[0].target_outcome.as_deref(), Some("unknown"));
         assert_eq!(
             control_cases[1].allowed_outcomes,
+            vec!["unknown".to_string()]
+        );
+        assert_eq!(control_cases[1].target_outcome.as_deref(), Some("unknown"));
+        assert_eq!(
+            control_cases[2].allowed_outcomes,
             vec!["equivalent".to_string()]
         );
         assert_eq!(
-            control_cases[1].target_outcome.as_deref(),
+            control_cases[2].target_outcome.as_deref(),
             Some("equivalent")
         );
 
@@ -2634,6 +2641,7 @@ mod tests {
             .map(|case| {
                 let actual_outcome = match case.id.as_str() {
                     "rectangular_positive_pair_dim2_bounded_no_go" => "unknown",
+                    "riedel_baker_k4_dim2_bounded_no_go" => "unknown",
                     "riedel_baker_k4_dim3_positive_control" => "equivalent",
                     other => panic!("unexpected control case {other}"),
                 };
@@ -2642,19 +2650,37 @@ mod tests {
             .collect::<Vec<_>>();
         let comparisons = build_comparison_summaries(&cases);
 
-        assert!(comparisons.is_empty());
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(comparisons[0].variants.len(), 2);
+        assert_eq!(
+            comparisons[0]
+                .variants
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.case_id.as_str(),
+                        variant.config.max_intermediate_dim,
+                        variant.actual_outcome.as_str(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("riedel_baker_k4_dim2_bounded_no_go", 2, "unknown"),
+                ("riedel_baker_k4_dim3_positive_control", 3, "equivalent"),
+            ]
+        );
 
         let summary = HarnessSummary {
             schema_version: 5,
             cases_path: cases_path.display().to_string(),
             reused_history_sources: 0,
             fitness: FitnessSummary {
-                required_cases: 2,
-                passed_required_cases: 2,
+                required_cases: 3,
+                passed_required_cases: 3,
                 non_required_cases: 0,
-                target_hits: 2,
-                total_points: 500,
-                total_elapsed_ms: 2,
+                target_hits: 3,
+                total_points: 750,
+                total_elapsed_ms: 3,
                 current_witness_cases: 0,
                 current_witness_lag_total: 0,
                 current_lag_score: 0,
@@ -2663,7 +2689,7 @@ mod tests {
                 best_known_lag_score: 0,
                 best_known_improvements: 0,
                 generalized_cases: 0,
-                comparison_groups: 0,
+                comparison_groups: comparisons.len(),
                 campaign_groups: 0,
                 deepening_schedule_groups: 0,
                 strategy_groups: 0,
@@ -2681,6 +2707,7 @@ mod tests {
 
         let pretty = format_pretty_summary(&summary);
         assert!(pretty.contains("rectangular_positive_pair_dim2_bounded_no_go"));
+        assert!(pretty.contains("riedel_baker_k4_dim2_bounded_no_go"));
         assert!(pretty.contains("riedel_baker_k4_dim3_positive_control"));
         assert!(pretty.contains("outcome=unknown"));
         assert!(pretty.contains("outcome=equivalent"));
@@ -2689,6 +2716,7 @@ mod tests {
         assert!(pretty.contains(
             "description: Exact bounded-envelope guard on the old rectangular dim-split pair"
         ));
+        assert!(pretty.contains("description: Dim-2 companion for the bounded dim split"));
         assert!(pretty
             .contains("description: Replacement positive-side control for the bounded dim split"));
     }
