@@ -911,6 +911,42 @@
       }
     },
     {
+      "id": "brix_ruiz_k3_non_baker_exact_endpoint_lag7_guided_replay",
+      "description": "Durable exact-endpoint control: replay only the committed 2026-04-19 non-Baker lag-7 witness on the hard Brix-Ruiz k=3 pair. This keeps the alternate exact-endpoint family distinct from the normalized Baker-family guide pool while avoiding a fresh multi-meet search round.",
+      "required": true,
+      "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
+      "guide_artifact_paths": ["research/guide_artifacts/k3_exact_endpoint_multi_meet_replay_lag7_2026-04-19.json"],
+      "config": {
+        "max_lag": 7,
+        "max_intermediate_dim": 4,
+        "max_entry": 5,
+        "move_family_policy": "mixed",
+        "stage": "guided_refinement",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 2,
+          "rounds": 1
+        }
+      },
+      "timeout_ms": 1000,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 170,
+        "not_equivalent": -1700,
+        "unknown": -1700,
+        "timeout": -2700,
+        "panic": -2700
+      },
+      "tags": ["correctness", "brix-ruiz", "hard-positive", "guided-stage", "artifact-fixture", "non-baker", "exact-endpoint", "retained-control"],
+      "campaign": {
+        "id": "brix_ruiz_k3_non_baker_exact_endpoint_control",
+        "strategy": "guided_refinement_artifact_replay",
+        "schedule_order": 12
+      }
+    },
+    {
       "id": "brix_ruiz_k3_shortcut_quotient_retained_pool_probe",
       "description": "Benchmark-style staged-search comparison: shortcut search over the quotient-retained k=3 guide pool under the same bounded lag-7 plateau configuration.",
       "required": false,
