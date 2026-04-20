@@ -1817,10 +1817,69 @@ mod tests {
 
         let result = run_case(&case, Path::new("research/cases.json"));
         assert_eq!(result.actual_outcome, "panic");
+        assert_eq!(
+            result.result_model.resolution_kind,
+            ResultResolutionKind::Panic
+        );
+        assert_eq!(result.result_model.witness_lag, None);
         assert!(result
             .reason
             .as_deref()
             .is_some_and(|reason| { reason.contains("expected witness signature mismatch") }));
+    }
+
+    #[test]
+    fn run_case_rejects_concrete_shift_when_witness_signature_is_pinned() {
+        let case = ResearchCase {
+            id: "concrete-shift-signature-mismatch".to_string(),
+            description: "concrete-shift result should fail pinned witness controls".to_string(),
+            a: vec![vec![0, 1], vec![1, 2]],
+            b: vec![vec![1, 1], vec![2, 1]],
+            endpoint_fixture: None,
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![],
+            expected_witness_signature: Some("2x2:0,1,1,2 -> 2x2:1,1,2,1".to_string()),
+            required: true,
+            config: JsonSearchConfig {
+                max_lag: 1,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
+                beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                stage: SearchStage::EndpointSearch,
+                guided_refinement: GuidedRefinementConfig::default(),
+                shortcut_search: ShortcutSearchConfig::default(),
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+            measurement: None,
+            deepening: None,
+        };
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "panic");
+        assert_eq!(
+            result.result_model.resolution_kind,
+            ResultResolutionKind::Panic
+        );
+        assert_eq!(result.result_model.witness_lag, None);
+        assert!(result
+            .reason
+            .as_deref()
+            .is_some_and(|reason| { reason.contains("requires a full path replay") }));
     }
 
     #[test]

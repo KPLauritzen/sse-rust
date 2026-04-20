@@ -163,15 +163,15 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
                     id: case.id.clone(),
                     actual_outcome: "panic".to_string(),
                     elapsed_ms: started.elapsed().as_millis(),
-                    steps: Some(path.steps.len()),
+                    steps: None,
                     reason: Some(reason),
                     result_model: result_model(
                         solver_path_for_dims(a.rows, b.rows),
                         a.rows,
                         b.rows,
-                        ResultResolutionKind::InvalidPath,
-                        Some(path.steps.len()),
-                        Some(path.matrices.len()),
+                        ResultResolutionKind::Panic,
+                        None,
+                        None,
                         &telemetry,
                     ),
                     telemetry,
@@ -195,23 +195,48 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
                 telemetry,
             },
         },
-        SearchRunResult::EquivalentByConcreteShift(proof) => WorkerCaseResult {
-            id: case.id.clone(),
-            actual_outcome: "equivalent".to_string(),
-            elapsed_ms: started.elapsed().as_millis(),
-            steps: None,
-            reason: Some(proof.description()),
-            result_model: result_model(
-                solver_path_for_dims(a.rows, b.rows),
-                a.rows,
-                b.rows,
-                ResultResolutionKind::ConcreteShiftWitness,
-                Some(proof.witness.shift.lag as usize),
-                None,
-                &telemetry,
-            ),
-            telemetry,
-        },
+        SearchRunResult::EquivalentByConcreteShift(proof) => {
+            if case.expected_witness_signature.is_some() {
+                WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "panic".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: None,
+                    reason: Some(
+                        "expected witness signature requires a full path replay, but solver returned a concrete-shift witness"
+                            .to_string(),
+                    ),
+                    result_model: result_model(
+                        solver_path_for_dims(a.rows, b.rows),
+                        a.rows,
+                        b.rows,
+                        ResultResolutionKind::Panic,
+                        None,
+                        None,
+                        &telemetry,
+                    ),
+                    telemetry,
+                }
+            } else {
+                WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "equivalent".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: None,
+                    reason: Some(proof.description()),
+                    result_model: result_model(
+                        solver_path_for_dims(a.rows, b.rows),
+                        a.rows,
+                        b.rows,
+                        ResultResolutionKind::ConcreteShiftWitness,
+                        Some(proof.witness.shift.lag as usize),
+                        None,
+                        &telemetry,
+                    ),
+                    telemetry,
+                }
+            }
+        }
         SearchRunResult::NotEquivalent(reason) => WorkerCaseResult {
             id: case.id.clone(),
             actual_outcome: "not_equivalent".to_string(),
