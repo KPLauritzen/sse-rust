@@ -24,10 +24,15 @@ on the existing hard endpoint fixture:
 
 The harness case runs `guided_refinement` with only that one artifact loaded and
 with a deliberately tiny refinement budget (`max_shortcut_lag = 1`, `max_gap =
-2`, `rounds = 1`). On this surface the artifact is first validated directly as a
-full SSE path on the requested endpoints; the stage only replaces it if it finds
-a strictly shorter replay. That keeps this slice as a direct witness-validation
-control instead of a broader replay/search probe.
+2`, `rounds = 1`). The case also pins the full expected witness matrix
+signature in `research/cases.json`.
+
+On this surface the artifact is first validated directly as a full SSE path on
+the requested endpoints; the stage only replaces it if it finds a strictly
+shorter replay. The harness then compares the returned path against the pinned
+non-Baker signature and fails the case on any mismatch. That keeps this slice
+as a direct witness-validation control instead of a broader replay/search
+probe.
 
 ## Why this is the right bounded control
 
@@ -37,6 +42,8 @@ Keep:
   directly on the hard exact endpoints;
 - the committed `2026-04-19` exact-endpoint replay artifact as the sole witness
   input; and
+- one pinned witness signature so the control fails if replay ever collapses to
+  Baker or to any other different lag-7 path; and
 - the existing `research_harness` control layer instead of introducing new
   replay-specific plumbing.
 
@@ -92,6 +99,7 @@ Observed on current head:
 - outcome `equivalent`
 - the case accepts exactly one guide artifact, the committed non-Baker lag-7
   replay witness
+- the returned path matches the pinned non-Baker witness signature exactly
 - the control stays on the hard exact endpoints and validates that witness
   without a fresh multi-meet search round
 

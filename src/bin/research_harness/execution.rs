@@ -5,9 +5,11 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use sse_core::matrix::DynMatrix;
 use sse_core::search::{execute_search_request, validate_sse_path_dyn};
 use sse_core::types::{
-    FrontierMode, SearchConfig, SearchRequest, SearchRunResult, SearchTelemetry, DEFAULT_BEAM_WIDTH,
+    DynSsePath, FrontierMode, SearchConfig, SearchRequest, SearchRunResult, SearchTelemetry,
+    DEFAULT_BEAM_WIDTH,
 };
 
 use super::{
@@ -140,21 +142,40 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
 
     match result {
         SearchRunResult::Equivalent(path) => match validate_sse_path_dyn(&a, &b, &path) {
-            Ok(()) => WorkerCaseResult {
-                id: case.id.clone(),
-                actual_outcome: "equivalent".to_string(),
-                elapsed_ms: started.elapsed().as_millis(),
-                steps: Some(path.steps.len()),
-                reason: None,
-                result_model: equivalent_result_model(
-                    solver_path_for_dims(a.rows, b.rows),
-                    a.rows,
-                    b.rows,
-                    &telemetry,
-                    path.steps.len(),
-                    path.matrices.len(),
-                ),
-                telemetry,
+            Ok(()) => match validate_expected_witness_signature(case, &path) {
+                Ok(()) => WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "equivalent".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: Some(path.steps.len()),
+                    reason: None,
+                    result_model: equivalent_result_model(
+                        solver_path_for_dims(a.rows, b.rows),
+                        a.rows,
+                        b.rows,
+                        &telemetry,
+                        path.steps.len(),
+                        path.matrices.len(),
+                    ),
+                    telemetry,
+                },
+                Err(reason) => WorkerCaseResult {
+                    id: case.id.clone(),
+                    actual_outcome: "panic".to_string(),
+                    elapsed_ms: started.elapsed().as_millis(),
+                    steps: Some(path.steps.len()),
+                    reason: Some(reason),
+                    result_model: result_model(
+                        solver_path_for_dims(a.rows, b.rows),
+                        a.rows,
+                        b.rows,
+                        ResultResolutionKind::InvalidPath,
+                        Some(path.steps.len()),
+                        Some(path.matrices.len()),
+                        &telemetry,
+                    ),
+                    telemetry,
+                },
             },
             Err(reason) => WorkerCaseResult {
                 id: case.id.clone(),
@@ -223,6 +244,40 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
             telemetry,
         },
     }
+}
+
+fn validate_expected_witness_signature(
+    case: &ResearchCase,
+    path: &DynSsePath,
+) -> Result<(), String> {
+    let Some(expected) = case.expected_witness_signature.as_deref() else {
+        return Ok(());
+    };
+    let actual = witness_matrix_signature(path);
+    if actual == expected {
+        return Ok(());
+    }
+    Err(format!(
+        "expected witness signature mismatch\nexpected: {expected}\nactual: {actual}"
+    ))
+}
+
+fn witness_matrix_signature(path: &DynSsePath) -> String {
+    path.matrices
+        .iter()
+        .map(matrix_signature)
+        .collect::<Vec<_>>()
+        .join(" -> ")
+}
+
+fn matrix_signature(matrix: &DynMatrix) -> String {
+    let data = matrix
+        .data
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{}x{}:{data}", matrix.rows, matrix.cols)
 }
 
 pub(crate) fn execute_case_for_harness<F>(

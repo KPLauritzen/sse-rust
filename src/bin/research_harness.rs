@@ -77,6 +77,8 @@ struct ResearchCase {
     seeded_guide_ids: Vec<String>,
     #[serde(default)]
     guide_artifact_paths: Vec<String>,
+    #[serde(default)]
+    expected_witness_signature: Option<String>,
     #[serde(default = "default_case_required")]
     required: bool,
     config: JsonSearchConfig,
@@ -108,6 +110,8 @@ struct RawResearchCase {
     seeded_guide_ids: Vec<String>,
     #[serde(default)]
     guide_artifact_paths: Vec<String>,
+    #[serde(default)]
+    expected_witness_signature: Option<String>,
     #[serde(default = "default_case_required")]
     required: bool,
     config: JsonSearchConfig,
@@ -764,6 +768,7 @@ impl RawResearchCase {
             endpoint_fixture: self.endpoint_fixture,
             seeded_guide_ids: self.seeded_guide_ids,
             guide_artifact_paths: self.guide_artifact_paths,
+            expected_witness_signature: self.expected_witness_signature,
             required: self.required,
             config: self.config,
             timeout_ms: self.timeout_ms,
@@ -1337,6 +1342,7 @@ mod tests {
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
+            expected_witness_signature: None,
             config: JsonSearchConfig {
                 max_lag: 1,
                 max_intermediate_dim: 3,
@@ -1390,6 +1396,7 @@ mod tests {
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
+            expected_witness_signature: None,
             config: JsonSearchConfig {
                 max_lag: 1,
                 max_intermediate_dim: 3,
@@ -1446,6 +1453,7 @@ mod tests {
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
+            expected_witness_signature: None,
             required: true,
             config: JsonSearchConfig {
                 max_lag: 1,
@@ -1494,6 +1502,7 @@ mod tests {
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
+            expected_witness_signature: None,
             required: true,
             config: JsonSearchConfig {
                 max_lag: 1,
@@ -1577,6 +1586,7 @@ mod tests {
             endpoint_fixture: Some(format!("{}#guided", fixture_path.display())),
             seeded_guide_ids: vec!["two-hop".to_string()],
             guide_artifact_paths: vec![],
+            expected_witness_signature: None,
             config: JsonSearchConfig {
                 max_lag: 2,
                 max_intermediate_dim: 3,
@@ -1636,6 +1646,10 @@ mod tests {
             guide_artifact_paths: vec![
                 "research/guide_artifacts/generic_guided_permutation_3x3.json".to_string(),
             ],
+            expected_witness_signature: Some(
+                "3x3:1,0,1,2,1,0,0,1,2 -> 3x3:2,1,0,0,1,2,1,0,1 -> 3x3:2,0,1,1,1,0,0,2,1"
+                    .to_string(),
+            ),
             config: JsonSearchConfig {
                 max_lag: 2,
                 max_intermediate_dim: 3,
@@ -1693,6 +1707,7 @@ mod tests {
             guide_artifact_paths: vec![
                 "research/guide_artifacts/generic_shortcut_permutation_3x3_pool.json".to_string(),
             ],
+            expected_witness_signature: None,
             config: JsonSearchConfig {
                 max_lag: 2,
                 max_intermediate_dim: 3,
@@ -1744,6 +1759,68 @@ mod tests {
             result.telemetry.shortcut_search.initial_working_set_guides,
             2
         );
+    }
+
+    #[test]
+    fn run_case_reports_expected_witness_signature_mismatch() {
+        let case = ResearchCase {
+            id: "guided-artifact-signature-mismatch".to_string(),
+            description: "guided 3x3 artifact case with mismatched signature".to_string(),
+            a: vec![],
+            b: vec![],
+            endpoint_fixture: Some(
+                "research/fixtures/generic_guides.json#guided_permutation_3x3".to_string(),
+            ),
+            seeded_guide_ids: vec![],
+            guide_artifact_paths: vec![
+                "research/guide_artifacts/generic_guided_permutation_3x3.json".to_string(),
+            ],
+            expected_witness_signature: Some(
+                "3x3:1,0,1,2,1,0,0,1,2 -> 3x3:2,1,0,0,1,2,1,0,1 -> 3x3:1,2,0,1,1,0,0,2,1"
+                    .to_string(),
+            ),
+            config: JsonSearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 2,
+                frontier_mode: FrontierMode::Bfs,
+                beam_width: None,
+                beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                stage: SearchStage::GuidedRefinement,
+                guided_refinement: GuidedRefinementConfig {
+                    max_shortcut_lag: 1,
+                    min_gap: 2,
+                    max_gap: Some(2),
+                    rounds: 1,
+                    segment_timeout_secs: None,
+                },
+                shortcut_search: ShortcutSearchConfig::default(),
+            },
+            timeout_ms: 1_000,
+            allowed_outcomes: vec!["equivalent".to_string()],
+            target_outcome: Some("equivalent".to_string()),
+            required: true,
+            points: OutcomePoints {
+                equivalent: 1,
+                not_equivalent: 0,
+                unknown: 0,
+                timeout: 0,
+                panic: 0,
+            },
+            tags: vec![],
+            campaign: None,
+            measurement: None,
+            deepening: None,
+        };
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "panic");
+        assert!(result
+            .reason
+            .as_deref()
+            .is_some_and(|reason| { reason.contains("expected witness signature mismatch") }));
     }
 
     #[test]
@@ -2014,6 +2091,7 @@ mod tests {
             endpoint_fixture: None,
             seeded_guide_ids: vec![],
             guide_artifact_paths: vec![],
+            expected_witness_signature: None,
             required: false,
             config: JsonSearchConfig {
                 max_lag: 1,

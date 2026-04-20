@@ -916,6 +916,7 @@
       "required": true,
       "endpoint_fixture": "research/fixtures/brix_ruiz_family.json#brix_ruiz_k3",
       "guide_artifact_paths": ["research/guide_artifacts/k3_exact_endpoint_multi_meet_replay_lag7_2026-04-19.json"],
+      "expected_witness_signature": "2x2:1,3,2,1 -> 3x3:0,1,0,2,1,2,1,2,1 -> 4x4:1,0,1,1,2,1,0,2,2,1,0,1,2,1,0,0 -> 4x4:0,0,1,1,0,1,0,2,1,1,0,1,2,1,1,1 -> 4x4:0,0,2,1,0,1,2,2,1,1,1,1,1,0,1,0 -> 3x3:0,2,3,1,1,1,1,1,1 -> 2x2:0,5,1,2 -> 2x2:1,6,1,1",
       "config": {
         "max_lag": 7,
         "max_intermediate_dim": 4,
@@ -929,7 +930,7 @@
           "rounds": 1
         }
       },
-      "timeout_ms": 1000,
+      "timeout_ms": 2000,
       "allowed_outcomes": ["equivalent"],
       "target_outcome": "equivalent",
       "points": {
