@@ -1204,6 +1204,43 @@
       }
     },
     {
+      "id": "riedel_k4_graph_only_full_decomposition_guided_replay",
+      "description": "Retained Riedel/Baker wider-envelope solved control: replay the committed 2026-04-18 full graph-only decomposition guide on the exact bounded existence envelope (`lag <= 19`, `dim <= 5`, `max_entry <= 12`) so later workers can cite known wider graph-only existence without reconstructing the sidecar witness.",
+      "required": true,
+      "a": [[4, 2], [1, 4]],
+      "b": [[3, 1], [1, 5]],
+      "guide_artifact_paths": ["research/riedel_k4_graph_only_full_decomposition_guide_2026-04-18.json"],
+      "config": {
+        "max_lag": 19,
+        "max_intermediate_dim": 5,
+        "max_entry": 12,
+        "move_family_policy": "graph-only",
+        "stage": "guided_refinement",
+        "guided_refinement": {
+          "max_shortcut_lag": 1,
+          "min_gap": 2,
+          "max_gap": 15,
+          "rounds": 1
+        }
+      },
+      "timeout_ms": 2500,
+      "allowed_outcomes": ["equivalent"],
+      "target_outcome": "equivalent",
+      "points": {
+        "equivalent": 170,
+        "not_equivalent": -1700,
+        "unknown": -1700,
+        "timeout": -2700,
+        "panic": -2700
+      },
+      "tags": ["correctness", "graph-only", "guided-stage", "riedel-baker", "retained-control", "artifact-fixture", "wider-envelope", "solved-control"],
+      "campaign": {
+        "id": "riedel_k4_graph_only_wider_envelope_control",
+        "strategy": "guided_refinement_artifact_replay",
+        "schedule_order": 20
+      }
+    },
+    {
       "id": "riedel_baker_k6",
       "description": "Literature-backed non-Brix-Ruiz positive from research/notes/2026-04-15-non-brix-ruiz-sse-pairs.md (Riedel/Baker Example `riedelexample`, k=6 instance from the displayed family formula). Expected relation: Equivalent.",
       "required": false,

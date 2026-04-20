@@ -926,6 +926,19 @@
   `research/ranking_signal_family_benchmark_v1.json`. Details are in
   `research/notes/2026-04-17-mixed-heldout-layer-contrast-refresh.md`.
 
+- `working tree` Froze one durable wider-envelope Riedel/Baker `k=4`
+  graph-only existence control as a single harness replay case.
+  Kept. Added
+  `riedel_k4_graph_only_full_decomposition_guided_replay` to
+  `research/cases.json`, seeded from the committed
+  `research/riedel_k4_graph_only_full_decomposition_guide_2026-04-18.json`
+  artifact on the original bounded existence envelope
+  (`lag <= 19`, `dim <= 5`, `max_entry <= 12`), and documented the slice in
+  `research/notes/2026-04-20-riedel-k4-full-graph-only-guided-replay-control.md`.
+  This keeps one solved-control replay for later retained-obstruction vs known
+  wider-existence comparisons without reframing the result as open Brix-Ruiz
+  Goal 3 progress.
+
 - `working tree` Broadened the positive-conjugacy local seed probe from a
   source-only same-dimension family to a bounded exact endpoint-local family.
   Kept as evidence. `src/bin/probe_positive_conjugacy_seeds.rs` now scores
