@@ -137,7 +137,11 @@ timeout -k 20s 120s cargo test -p sse-core --lib \
   -- --test-threads=1
 
 timeout -k 20s 120s cargo test -p sse-core --lib \
-  test_selected_family_labels_for_4x4_keep_specific_before_generic \
+  test_mixed_policy_exposes_single_row_amalgamation_4x4_to_3x3_witness \
+  -- --test-threads=1
+
+timeout -k 20s 120s cargo test -p sse-core --lib \
+  test_mixed_policy_exposes_single_column_amalgamation_4x4_to_3x3_witness \
   -- --test-threads=1
 
 timeout -k 20s 120s cargo test -p sse-core --lib \

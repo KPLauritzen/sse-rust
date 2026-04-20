@@ -4895,7 +4895,7 @@ mod tests {
     }
 
     #[test]
-    fn test_graph_plus_structured_policy_exposes_single_row_amalgamation_4x4_to_3x3_witness() {
+    fn test_mixed_policy_exposes_single_row_amalgamation_4x4_to_3x3_witness() {
         let current = DynMatrix::new(4, 4, vec![1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 2, 0, 0, 1, 1]);
         let mut families = BTreeSet::new();
 
@@ -4903,7 +4903,7 @@ mod tests {
             &current,
             4,
             3,
-            MoveFamilyPolicy::GraphPlusStructured,
+            MoveFamilyPolicy::Mixed,
             |family, _, _| {
                 families.insert(family);
             },
@@ -4913,7 +4913,7 @@ mod tests {
     }
 
     #[test]
-    fn test_graph_plus_structured_policy_exposes_single_column_amalgamation_4x4_to_3x3_witness() {
+    fn test_mixed_policy_exposes_single_column_amalgamation_4x4_to_3x3_witness() {
         let current = DynMatrix::new(4, 4, vec![1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 2, 1]);
         let mut families = BTreeSet::new();
 
@@ -4921,7 +4921,7 @@ mod tests {
             &current,
             4,
             3,
-            MoveFamilyPolicy::GraphPlusStructured,
+            MoveFamilyPolicy::Mixed,
             |family, _, _| {
                 families.insert(family);
             },

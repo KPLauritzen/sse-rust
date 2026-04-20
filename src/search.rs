@@ -7046,6 +7046,8 @@ mod tests {
             },
         );
 
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(!stats.move_family_telemetry.is_empty());
         assert!(!expansions
             .iter()
             .any(|expansion| expansion.move_family == "single_row_amalgamation_4x4_to_3x3"));
@@ -7073,6 +7075,8 @@ mod tests {
             },
         );
 
+        assert!(stats.factorisations_enumerated > 0);
+        assert!(!stats.move_family_telemetry.is_empty());
         assert!(!expansions
             .iter()
             .any(|expansion| expansion.move_family == "single_column_amalgamation_4x4_to_3x3"));
