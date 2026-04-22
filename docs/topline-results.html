@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Top-line Strong Shift Equivalence Results</title>
+  <style>
+    :root {
+      --bg: #f7f4ec;
+      --paper: #fffdf8;
+      --ink: #1f1d18;
+      --muted: #5e574a;
+      --rule: #d8cfbc;
+      --accent: #6a3e12;
+      --code-bg: #f2eee3;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #efe7d5 0%, var(--bg) 18%, #f4f1e8 100%);
+      color: var(--ink);
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    article {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      box-shadow: 0 18px 48px rgba(76, 58, 31, 0.10);
+      padding: 40px 40px 48px;
+    }
+
+    h1, h2 {
+      line-height: 1.15;
+      font-weight: 600;
+      margin: 0 0 16px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 3rem);
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--rule);
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      margin: 24px 0 12px;
+      color: var(--accent);
+    }
+
+    p, ul {
+      margin: 0 0 14px;
+    }
+
+    ul {
+      padding-left: 22px;
+    }
+
+    .lede {
+      font-size: 1.08rem;
+      color: var(--muted);
+      max-width: 54rem;
+    }
+
+    .claim {
+      margin-top: 26px;
+    }
+
+    .claim h2 {
+      color: var(--accent);
+    }
+
+    .label {
+      font-variant: small-caps;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-bottom: 10px;
+    }
+
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.94rem;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--rule);
+      overflow-x: auto;
+      padding: 14px 16px;
+      margin: 12px 0 16px;
+    }
+
+    .sources {
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <header>
+        <div class="label">Research Summary</div>
+        <h1>Top-line Strong Shift Equivalence Results</h1>
+        <p class="lede">
+          The basic question is whether two nonnegative integer matrices define conjugate
+          shifts of finite type, and, more concretely, whether they are connected by a
+          short chain of elementary strong shift equivalences. The cases below focus on
+          explicit positive examples that have become central in the recent literature:
+          the <code>A_k, B_k</code> <code>2×2</code> family highlighted by Brix and Ruiz, the explicit
+          lag-<code>7</code> witness recorded by Baker and reproduced in Lind and Marcus,
+          and the large-lag family emphasized by Boyle and Schmieding.
+        </p>
+      </header>
+
+      <section class="claim">
+        <h2>There are several explicit lag-7 witnesses for the <code>k = 3</code> member of the <code>A_k, B_k</code> family</h2>
+        <p>
+          For the <code>k = 3</code> member of the
+          <code>A_k = [[1,k],[k-1,1]]</code>,
+          <code>B_k = [[1,(k-1)k],[1,1]]</code> family, one can exhibit several
+          distinct explicit lag-<code>7</code> strong shift equivalences on the exact
+          endpoints <code>[[1,3],[2,1]]</code> and <code>[[1,6],[1,1]]</code>. In particular,
+          the computed lag-<code>7</code> witnesses include paths whose first nontrivial
+          matrices differ from the classical Baker witness recorded in
+          <em>Lind and Marcus</em>, Example 7.3.12. The four explicit paths are listed in the
+          Appendix.
+        </p>
+        <p class="sources">
+          Sources:
+          <a href="https://arxiv.org/abs/2504.09889">Brix-Ruiz (2025), Example 3.8</a>,
+          Lind-Marcus (2021), Example 7.3.12,
+          and Baker (1983),
+          with further details in
+          <a href="https://github.com/KPLauritzen/sse-rust/blob/main/research/notes/2026-04-20-k3-non-baker-exact-endpoint-lag7-guided-replay-control.md">2026-04-20-k3-non-baker-exact-endpoint-lag7-guided-replay-control.md</a>.
+        </p>
+        <pre><code>cargo run --quiet --bin search -- \
+  1,3,2,1 1,6,1,1 \
+  --stage endpoint-search \
+  --frontier-mode bfs \
+  --move-policy graph-plus-structured \
+  --max-lag 8 \
+  --max-intermediate-dim 4 \
+  --max-entry 5 \
+  --endpoint-multi-meet-cap 12 \
+  --json</code></pre>
+        <p class="note">
+          On current <code>main</code>, this returns <code>4</code> exact-endpoint witness paths,
+          each with <code>path_lag = 7</code>.
+        </p>
+      </section>
+
+      <section class="claim">
+        <h2>These lag-7 endpoint witnesses remain distinct after the strongest path-identification test currently implemented here</h2>
+        <p>
+          The distinct lag-<code>7</code> endpoint witnesses are not merely relabelings of the
+          Baker path. The comparison used here is intentionally stronger than simply checking
+          the raw matrix lists: first each intermediate matrix is replaced by a canonical
+          representative up to permutation of vertices, and then short local substitutions
+          are allowed inside a path. Concretely, the program permits:
+        </p>
+        <ul>
+          <li>a triangle collapse, replacing a two-step subpath <code>A → B → C</code> by the direct step <code>A → C</code> when that direct step already appears elsewhere in the witness corpus;</li>
+          <li>a commuting-square normalization, choosing one preferred representative among two different two-step subpaths with the same endpoints.</li>
+        </ul>
+        <p>
+          This “path quotient” is not a standard literature notion; it is a conservative
+          internal test for whether two explicit computed witnesses should be regarded as the
+          same after the simplest endpoint-preserving local simplifications now available in
+          the code. Under this test, the four exact-endpoint lag-<code>7</code> witnesses still
+          represent four separate classes. When the Baker witness is added to the same
+          comparison, the result is still five separate classes.
+        </p>
+        <p class="sources">
+          Sources:
+          analysis program
+          <a href="https://github.com/KPLauritzen/sse-rust/blob/main/src/bin/analyze_guide_pool_quotient.rs">analyze_guide_pool_quotient.rs</a>,
+          together with the implementation of this comparison in
+          <a href="https://github.com/KPLauritzen/sse-rust/blob/main/src/path_quotient.rs">path_quotient.rs</a>,
+          and the stored witness paths for the Baker witness and the four computed exact-endpoint lag-<code>7</code> paths.
+        </p>
+        <pre><code>cargo run --quiet --features research-tools \
+  --bin analyze_guide_pool_quotient -- \
+  --guide-artifacts research/guide_artifacts/k3_exact_endpoint_multi_meet_retained_pool_2026-04-19.json \
+  --json-out tmp/k3_exact_meet_retained_pool_quotient.json</code></pre>
+        <p class="note">
+          On current <code>main</code>, this reports <code>source=4</code>,
+          <code>retained=4</code>, <code>removed_by_dedup=0</code>,
+          <code>collision_groups=0</code>. Adding the Baker witness to the same pool yields
+          five classes, not one.
+        </p>
+      </section>
+
+      <section class="claim">
+        <h2>The main endpoint-search solver finds a graph-move-only witness for the same <code>k = 3</code> pair</h2>
+        <p>
+          The same endpoint pair also admits a witness using only graph presentation moves,
+          namely state splittings and state amalgamations. With the current main solver,
+          a direct endpoint search at dimension bound <code>5</code> and entry bound <code>6</code>
+          finds such a witness automatically.
+        </p>
+        <p>
+          Here a <em>state split</em> is a Williams graph move that replaces one vertex by a
+          small family of vertices carrying a partition of its incoming or outgoing edges,
+          while a <em>state amalgamation</em> is the inverse merge. These are the classical
+          graph-presentation moves underlying strong shift equivalence for edge shifts.
+        </p>
+        <p>
+          With exact-meet retention enabled at the same bounds, the solver exposes two
+          distinct graph-move-only exact-endpoint witnesses; these also remain distinct under
+          the same path-identification test used above. Both paths are listed in the Appendix.
+        </p>
+        <p class="sources">
+          Sources:
+          Williams (1973),
+          together with the hard positive family in
+          <a href="https://arxiv.org/abs/2504.09889">Brix-Ruiz (2025), Example 3.8</a>.
+        </p>
+        <pre><code>cargo run --quiet --bin search -- \
+  1,3,2,1 1,6,1,1 \
+  --max-lag 22 \
+  --max-intermediate-dim 5 \
+  --max-entry 6 \
+  --move-policy graph-only \
+  --json</code></pre>
+        <p class="note">
+          On current <code>main</code>, this returns <code>outcome = equivalent</code> with a
+          graph-move witness of lag <code>17</code>.
+        </p>
+      </section>
+
+      <section class="claim">
+        <h2>A size-2 example from Riedel’s bad-lag family is solved directly at <code>k = 14</code></h2>
+        <p>
+          Consider the family
+          <code>A_k = [[k,2],[1,k]]</code> and <code>B_k = [[k-1,1],[1,k+1]]</code>,
+          discussed by Boyle and Schmieding as a source of large-lag examples. For the case
+          <code>k = 14</code>, the endpoint pair
+          <code>[[14,2],[1,14]]</code> and <code>[[13,1],[1,15]]</code> is solved directly by bounded
+          search.
+        </p>
+        <p>
+          The successful search uses the classical graph moves together with explicit
+          elementary nonnegative matrix factorizations. In the computations recorded here,
+          the even cases <code>k = 4, 6, 8, 10, 12, 14</code> all behave similarly, but the
+          command below already reproduces the hardest of those examples.
+        </p>
+        <p class="sources">
+          Sources:
+          <a href="https://arxiv.org/abs/2006.01051">Boyle-Schmieding (2023), Riedel example</a>,
+          with the full table for <code>k = 4, 6, 8, 10, 12, 14</code> recorded in
+          <a href="https://github.com/KPLauritzen/sse-rust/blob/main/research/notes/2026-04-18-riedel-gap-benchmark-lane.md">2026-04-18-riedel-gap-benchmark-lane.md</a>.
+        </p>
+        <pre><code>cargo run --quiet --bin search -- \
+  14,2,1,14 13,1,1,15 \
+  --max-lag 14 \
+  --max-intermediate-dim 3 \
+  --max-entry 14 \
+  --move-policy graph-plus-structured \
+  --json</code></pre>
+        <p class="note">
+          On current <code>main</code>, this returns <code>outcome = equivalent</code> with a
+          witness of <code>15</code> matrices.
+        </p>
+      </section>
+
+      <section>
+        <h2>References</h2>
+        <ul>
+          <li>R. F. Williams, <em>Classification of subshifts of finite type</em>, Annals of Mathematics, 1973.</li>
+          <li>K. Baker, <em>Strong shift equivalence of non-negative integer 2×2 matrices</em>, Ergodic Theory and Dynamical Systems, 1983.</li>
+          <li>Douglas Lind and Brian Marcus, <em>An Introduction to Symbolic Dynamics and Coding</em>, 2021 edition.</li>
+          <li><a href="https://arxiv.org/abs/2504.09889">Kevin Brix and Efren Ruiz, 2025 preprint</a>.</li>
+          <li><a href="https://arxiv.org/abs/2006.01051">Mike Boyle and Markus Schmieding, 2023 preprint</a>.</li>
+          <li><a href="https://homepages.loria.fr/EJeandel/research/conjugacy.html">Emmanuel Jeandel, conjugacy examples page</a>.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Appendix</h2>
+        <p>The four explicit lag-<code>7</code> witness paths below all run from <code>[[1,3],[2,1]]</code> to <code>[[1,6],[1,1]]</code>.</p>
+
+        <h3>Path 1</h3>
+        <pre><code>[[1,3],[2,1]]
+-> [[0,1,0],[2,1,2],[1,2,1]]
+-> [[1,0,1,1],[2,1,0,2],[2,1,0,1],[2,1,0,0]]
+-> [[0,0,1,1],[0,1,0,2],[1,1,0,1],[2,1,1,1]]
+-> [[0,0,1,1],[2,2,1,1],[1,1,0,0],[2,1,1,0]]
+-> [[0,1,1,0],[2,0,1,1],[1,0,0,1],[2,1,1,2]]
+-> [[0,1,1],[3,0,3],[2,0,2]]
+-> [[0,5],[1,2]]
+-> [[1,6],[1,1]]</code></pre>
+
+        <h3>Path 2</h3>
+        <pre><code>[[1,3],[2,1]]
+-> [[0,1,0],[2,1,2],[1,2,1]]
+-> [[1,0,1,1],[2,1,0,2],[2,1,0,1],[2,1,0,0]]
+-> [[0,0,1,1],[0,1,0,2],[1,1,0,1],[2,1,1,1]]
+-> [[0,0,2,1],[0,1,2,2],[1,1,1,1],[1,0,1,0]]
+-> [[1,1,1,1],[2,1,0,2],[2,0,0,1],[1,0,1,0]]
+-> [[0,2,3],[1,1,1],[1,1,1]]
+-> [[1,2,4],[1,0,1],[1,0,1]]
+-> [[1,6],[1,1]]</code></pre>
+
+        <h3>Path 3</h3>
+        <pre><code>[[1,3],[2,1]]
+-> [[1,1,2],[2,0,1],[2,0,1]]
+-> [[1,1,0,1],[2,0,1,1],[2,2,1,2],[0,0,1,0]]
+-> [[1,1,0,1],[2,1,1,1],[0,2,0,1],[0,1,1,0]]
+-> [[2,1,0,1],[1,0,1,0],[2,2,0,1],[1,1,1,0]]
+-> [[2,1,0,1],[1,0,1,1],[2,1,0,2],[1,0,1,0]]
+-> [[0,0,1],[1,2,2],[1,2,0]]
+-> [[0,1],[5,2]]
+-> [[1,6],[1,1]]</code></pre>
+
+        <h3>Path 4</h3>
+        <pre><code>[[1,3],[2,1]]
+-> [[1,1,2],[2,0,1],[2,0,1]]
+-> [[1,1,0,1],[2,0,1,1],[2,2,1,2],[0,0,1,0]]
+-> [[1,1,0,1],[2,1,1,1],[0,2,0,1],[0,1,1,0]]
+-> [[1,0,0,1],[2,0,1,1],[0,1,0,1],[2,1,2,1]]
+-> [[0,1,0,1],[1,0,2,1],[0,0,1,1],[2,1,2,1]]
+-> [[1,2,1],[1,0,1],[1,3,1]]
+-> [[0,2,0],[1,1,1],[1,4,1]]
+-> [[1,6],[1,1]]</code></pre>
+
+        <h3>Graph-Only Path 1</h3>
+        <pre><code>[[1,3],[2,1]]
+-> [[0,2,0],[2,1,2],[1,1,1]]
+-> [[0,1,0,1],[2,0,2,1],[1,0,1,1],[2,0,2,1]]
+-> [[0,1,0,1,1],[1,0,1,0,0],[1,0,1,1,0],[2,0,2,1,0],[1,0,1,1,0]]
+-> [[0,1,1,1],[1,0,1,0],[1,0,1,1],[2,0,2,1]]
+-> [[0,1,1,1,1],[1,0,1,0,1],[0,0,0,1,0],[2,0,2,1,2],[1,0,1,0,1]]
+-> [[0,2,1,1],[1,1,1,0],[0,0,0,1],[2,2,2,1]]
+-> [[0,2,1,1,1],[1,1,1,0,0],[0,0,0,1,1],[0,2,1,1,1],[2,0,1,0,0]]
+-> [[1,2,1,1],[1,1,1,0],[1,0,0,1],[2,0,1,0]]
+-> [[0,0,1,1],[1,1,0,1],[1,0,0,2],[1,2,1,1]]
+-> [[0,0,1,1,0],[1,1,0,0,1],[1,0,0,1,1],[1,2,1,0,1],[1,2,1,0,1]]
+-> [[1,2,2,1],[1,1,0,0],[1,0,0,1],[1,2,1,0]]
+-> [[0,1,2,2,1],[0,1,2,2,1],[1,0,1,0,0],[0,1,0,0,1],[1,0,2,1,0]]
+-> [[0,1,2,2],[1,1,4,3],[1,0,1,0],[0,1,0,0]]
+-> [[0,0,0,2,2],[0,0,1,0,0],[1,1,1,4,3],[1,1,0,1,0],[0,0,1,0,0]]
+-> [[0,2,0,2],[0,0,1,0],[1,4,1,4],[1,1,0,1]]
+-> [[0,2,0],[1,1,1],[1,4,1]]
+-> [[1,6],[1,1]]</code></pre>
+
+        <h3>Graph-Only Path 2</h3>
+        <pre><code>[[1,3],[2,1]]
+-> [[0,1,0],[2,1,2],[1,2,1]]
+-> [[0,1,0,1],[0,0,1,0],[1,2,1,2],[2,1,1,1]]
+-> [[0,1,0,1,1],[0,0,1,0,0],[1,2,1,2,2],[0,0,1,0,0],[2,1,0,1,1]]
+-> [[0,2,0,1],[0,0,1,0],[1,4,1,2],[2,2,0,1]]
+-> [[0,0,0,1,2],[0,0,1,0,0],[1,1,1,2,3],[2,2,0,1,0],[0,0,1,0,0]]
+-> [[0,1,1,2],[1,1,2,3],[2,0,1,0],[0,1,0,0]]
+-> [[0,1,1,2,1],[0,1,1,2,1],[2,0,1,0,0],[0,1,0,0,1],[1,0,1,1,0]]
+-> [[1,1,2,1],[2,1,0,0],[1,0,0,1],[1,1,1,0]]
+-> [[0,1,1,1],[0,1,0,2],[1,0,0,1],[1,1,2,1]]
+-> [[0,1,1,1,1],[0,1,0,2,2],[1,0,0,1,1],[1,0,1,0,0],[0,1,1,1,1]]
+-> [[1,1,1,1],[2,1,0,2],[2,0,0,1],[1,0,1,0]]
+-> [[0,0,1,0,1],[1,1,0,1,0],[2,2,1,0,2],[2,2,0,0,1],[1,1,0,1,0]]
+-> [[0,1,1,0],[1,1,0,1],[2,4,1,0],[2,3,0,0]]
+-> [[0,0,1,1,0],[0,0,1,1,0],[1,0,1,0,1],[0,2,4,1,0],[0,2,3,0,0]]
+-> [[0,2,4,1],[0,0,1,1],[1,0,1,0],[0,2,4,1]]
+-> [[1,2,4],[1,0,1],[1,0,1]]
+-> [[1,6],[1,1]]</code></pre>
+
+        <h3>Riedel Family Path at <code>k = 14</code></h3>
+        <pre><code>[[14,2],[1,14]]
+-> [[1,13,1],[1,13,0],[2,26,14]]
+-> [[1,12,1],[1,13,0],[3,25,14]]
+-> [[1,11,1],[1,13,0],[4,24,14]]
+-> [[1,10,1],[1,13,0],[5,23,14]]
+-> [[1,9,1],[1,13,0],[6,22,14]]
+-> [[1,8,1],[1,13,0],[7,21,14]]
+-> [[1,7,1],[1,13,0],[8,20,14]]
+-> [[14,8,20],[1,1,7],[0,1,13]]
+-> [[14,9,19],[1,1,6],[0,1,13]]
+-> [[14,10,18],[1,1,5],[0,1,13]]
+-> [[14,11,17],[1,1,4],[0,1,13]]
+-> [[14,12,16],[1,1,3],[0,1,13]]
+-> [[14,13,15],[1,1,2],[0,1,13]]
+-> [[14,14,14],[1,1,1],[0,1,13]]
+-> [[13,1],[1,15]]</code></pre>
+      </section>
+    </article>
+  </main>
+</body>
+</html>
