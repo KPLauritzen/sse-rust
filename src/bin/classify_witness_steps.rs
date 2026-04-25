@@ -13,8 +13,9 @@ use sse_core::types::{GuideArtifactPayload, MoveFamilyPolicy, SearchConfig};
 enum StepClassification {
     AlreadyGraphCoded,
     DiagonalRefactorizationLike,
+    StructuredFactorizationMatch,
     NeedsLongerSplitAmalgamationExpansion,
-    NotRepresentedByCurrentOneStepGraphMoveFamilies,
+    NotRepresentedByCurrentStructuredFamilies,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,6 +28,7 @@ struct Report {
 #[derive(Clone, Copy, Debug, Serialize)]
 struct FactorisationMatchConfig {
     max_entry: Option<u32>,
+    match_up_to_permutation: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -123,7 +125,10 @@ struct Cli {
 
 fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     let mut guide_paths = Vec::new();
-    let mut factorisation_match = FactorisationMatchConfig { max_entry: None };
+    let mut factorisation_match = FactorisationMatchConfig {
+        max_entry: None,
+        match_up_to_permutation: false,
+    };
     let mut graph_probe = GraphProbeConfig {
         max_lag: 3,
         max_intermediate_dim: 4,
@@ -150,6 +155,9 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                 factorisation_match.max_entry =
                     Some(parse_u32_arg(&mut args, "--factorisation-max-entry")?);
             }
+            "--match-up-to-permutation" => {
+                factorisation_match.match_up_to_permutation = true;
+            }
             "--graph-probe-max-entry" => {
                 graph_probe.max_entry = Some(parse_u32_arg(&mut args, "--graph-probe-max-entry")?);
             }
@@ -157,7 +165,8 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                 return Err(
                     "Usage: classify_witness_steps --guide-artifact PATH [--guide-artifact PATH ...]\
 \n       [--factorisation-max-entry N] [--graph-probe-max-lag N]\
-\n       [--graph-probe-max-intermediate-dim N] [--graph-probe-max-entry N]"
+\n       [--graph-probe-max-intermediate-dim N] [--graph-probe-max-entry N]\
+\n       [--match-up-to-permutation]"
                         .to_string(),
                 );
             }
@@ -224,6 +233,7 @@ fn classify_step(
     let graph_plus_structured_families = matching_factorisation_families(
         from_matrix,
         to_matrix,
+        factorisation_match,
         factorisation_max_intermediate_dim,
         factorisation_max_entry,
         MoveFamilyPolicy::GraphPlusStructured,
@@ -231,6 +241,7 @@ fn classify_step(
     let mixed_families = matching_factorisation_families(
         from_matrix,
         to_matrix,
+        factorisation_match,
         factorisation_max_intermediate_dim,
         factorisation_max_entry,
         MoveFamilyPolicy::Mixed,
@@ -245,18 +256,21 @@ fn classify_step(
     let diagonal_like = graph_plus_structured_families
         .iter()
         .any(|family| family.starts_with("diagonal_refactorization_"));
+    let has_structured_match = !graph_plus_structured_families.is_empty();
     let longer_graph_expansion = graph_probe_result
         .as_ref()
         .is_some_and(|probe| probe.lag > 1);
 
     let classification = if exact_graph_family.is_some() {
         StepClassification::AlreadyGraphCoded
-    } else if longer_graph_expansion {
-        StepClassification::NeedsLongerSplitAmalgamationExpansion
     } else if diagonal_like {
         StepClassification::DiagonalRefactorizationLike
+    } else if has_structured_match {
+        StepClassification::StructuredFactorizationMatch
+    } else if longer_graph_expansion {
+        StepClassification::NeedsLongerSplitAmalgamationExpansion
     } else {
-        StepClassification::NotRepresentedByCurrentOneStepGraphMoveFamilies
+        StepClassification::NotRepresentedByCurrentStructuredFamilies
     };
 
     let mut reasoning = Vec::new();
@@ -265,8 +279,9 @@ fn classify_step(
     }
     if !graph_plus_structured_families.is_empty() {
         reasoning.push(format!(
-            "graph_plus_structured matching families (factorisation max_entry={}): {}",
+            "graph_plus_structured matching families (factorisation max_entry={}, up_to_permutation={}): {}",
             factorisation_max_entry,
+            factorisation_match.match_up_to_permutation,
             graph_plus_structured_families.join(", ")
         ));
     }
@@ -330,6 +345,7 @@ fn factorisation_match_max_entry(
 fn matching_factorisation_families(
     from_matrix: &DynMatrix,
     to_matrix: &DynMatrix,
+    factorisation_match: FactorisationMatchConfig,
     max_intermediate_dim: usize,
     max_entry: u32,
     move_family_policy: MoveFamilyPolicy,
@@ -342,20 +358,84 @@ fn matching_factorisation_families(
     }
 
     let mut families = Vec::new();
-    visit_factorisations_with_family_for_policy(
-        from_matrix,
-        max_intermediate_dim,
-        max_entry,
-        move_family_policy,
-        |family, u, v| {
-            if u.mul(&v) == from_matrix.clone() && v.mul(&u) == to_matrix.clone() {
-                families.push(family.to_string());
-            }
-        },
-    );
+    let target_canon = factorisation_match
+        .match_up_to_permutation
+        .then(|| to_matrix.canonical_perm());
+    for representative in factorisation_representatives(from_matrix, factorisation_match) {
+        visit_factorisations_with_family_for_policy(
+            &representative,
+            max_intermediate_dim,
+            max_entry,
+            move_family_policy,
+            |family, u, v| {
+                let target = v.mul(&u);
+                let matches = if let Some(target_canon) = &target_canon {
+                    target.canonical_perm() == *target_canon
+                } else {
+                    u.mul(&v) == *from_matrix && target == *to_matrix
+                };
+                if matches {
+                    families.push(family.to_string());
+                }
+            },
+        );
+    }
     families.sort();
     families.dedup();
     Ok(families)
+}
+
+fn factorisation_representatives(
+    matrix: &DynMatrix,
+    factorisation_match: FactorisationMatchConfig,
+) -> Vec<DynMatrix> {
+    if factorisation_match.match_up_to_permutation {
+        permutation_representatives(matrix)
+    } else {
+        vec![matrix.clone()]
+    }
+}
+
+fn permutation_representatives(matrix: &DynMatrix) -> Vec<DynMatrix> {
+    let n = matrix.rows;
+    let mut representatives = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut perm: Vec<usize> = (0..n).collect();
+
+    loop {
+        let representative = matrix.conjugate_by_perm(&perm);
+        if seen.insert(representative.clone()) {
+            representatives.push(representative);
+        }
+        if !next_permutation(&mut perm) {
+            break;
+        }
+    }
+
+    representatives
+}
+
+fn next_permutation(perm: &mut [usize]) -> bool {
+    let n = perm.len();
+    if n <= 1 {
+        return false;
+    }
+
+    let mut i = n - 1;
+    while i > 0 && perm[i - 1] >= perm[i] {
+        i -= 1;
+    }
+    if i == 0 {
+        return false;
+    }
+
+    let mut j = n - 1;
+    while perm[j] <= perm[i - 1] {
+        j -= 1;
+    }
+    perm.swap(i - 1, j);
+    perm[i..].reverse();
+    true
 }
 
 fn probe_graph_only_expansion(
@@ -376,6 +456,7 @@ fn probe_graph_only_expansion(
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         },
     );
     match result {
