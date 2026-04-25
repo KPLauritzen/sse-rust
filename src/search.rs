@@ -6317,6 +6317,39 @@ mod tests {
     }
 
     #[test]
+    fn test_same_future_past_diversity_beam_records_dynamic_layer_samples() {
+        let source = DynMatrix::new(3, 3, vec![1, 3, 1, 1, 3, 0, 2, 6, 4]);
+        let target = DynMatrix::new(3, 3, vec![1, 2, 1, 1, 3, 0, 3, 5, 4]);
+        let config = SearchConfig {
+            max_lag: 2,
+            max_intermediate_dim: 3,
+            max_entry: 12,
+            frontier_mode: FrontierMode::SameFuturePastDiversityBeam,
+            move_family_policy: MoveFamilyPolicy::GraphOnly,
+            beam_width: Some(4),
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
+        };
+
+        let (_result, telemetry) = search_sse_with_telemetry_dyn(&source, &target, &config);
+        let samples = &telemetry.same_future_past_diversity.layer_samples;
+
+        assert!(!samples.is_empty());
+        assert_eq!(samples.len(), telemetry.layers.len());
+        for (sample, layer) in samples.iter().zip(&telemetry.layers) {
+            assert_eq!(sample.layer_index, layer.layer_index);
+            assert_eq!(Some(sample.direction), layer.direction);
+            assert!(sample.frontier_nodes >= sample.unique_buckets);
+            assert!(sample.unique_buckets >= sample.saturated_buckets);
+            assert!(sample.max_bucket_size >= 1);
+        }
+        assert!(samples
+            .windows(2)
+            .all(|window| window[0].layer_index < window[1].layer_index));
+    }
+
+    #[test]
     fn test_concrete_shift_profile_beam_uses_beam_frontier() {
         let a = SqMatrix::new([[1, 1], [2, 5]]);
         let b = SqMatrix::new([[1, 2], [1, 5]]);
