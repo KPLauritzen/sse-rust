@@ -509,6 +509,8 @@ fn parse_control_guide_spec(value: &str) -> Result<ControlGuideSpec, String> {
     let (class, path) = value
         .split_once('=')
         .ok_or("--endpoint-witness-control-guide expects CLASS=PATH[#ARTIFACT_ID]")?;
+    let class = class.trim();
+    let path = path.trim();
     if class.is_empty() {
         return Err("--endpoint-witness-control-guide class must not be empty".to_string());
     }
@@ -516,11 +518,15 @@ fn parse_control_guide_spec(value: &str) -> Result<ControlGuideSpec, String> {
         return Err("--endpoint-witness-control-guide path must not be empty".to_string());
     }
     let (path, artifact_id) = match path.rsplit_once('#') {
-        Some((path, artifact_id)) if !artifact_id.is_empty() => {
-            (path.to_string(), Some(artifact_id.to_string()))
-        }
+        Some((path, artifact_id)) if !artifact_id.trim().is_empty() => (
+            path.trim().to_string(),
+            Some(artifact_id.trim().to_string()),
+        ),
         _ => (path.to_string(), None),
     };
+    if path.is_empty() {
+        return Err("--endpoint-witness-control-guide path must not be empty".to_string());
+    }
     Ok(ControlGuideSpec {
         class: class.to_string(),
         path,
@@ -824,8 +830,9 @@ fn write_endpoint_witness_guide_artifacts(
         }
         let path_hash = stable_path_hash(&witness.path);
         let artifact_id = format!(
-            "endpoint-exact-meet-rank-{rank}-lag-{}-path-{}",
+            "endpoint-exact-meet-rank-{rank}-meet-lag-{}-reconstructed-lag-{}-path-{}",
             witness.path_lag,
+            witness.path.steps.len(),
             path_hash.trim_start_matches("fnv1a64:")
         );
         let mut artifact =
@@ -1480,6 +1487,24 @@ mod tests {
         );
         assert_eq!(cli.endpoint_witness_guide_dir.as_deref(), Some("guides"));
         assert_eq!(cli.endpoint_witness_guide_ranks, Some(vec![1, 2]));
+    }
+
+    #[test]
+    fn parse_cli_rejects_empty_endpoint_witness_control_path() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "1".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=#control".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("path must not be empty"));
     }
 
     #[test]
