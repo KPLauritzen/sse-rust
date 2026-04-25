@@ -239,6 +239,7 @@ struct StrategyReport {
     admitted_count: usize,
     equivalent_count: usize,
     approximate_hit_count: usize,
+    proposals_with_approx_hit_count: usize,
     max_frontier_nodes_expanded: usize,
     max_total_visited_nodes: usize,
     total_elapsed_ms: u64,
@@ -361,6 +362,7 @@ fn evaluate_strategy(
     let mut admitted_count = 0usize;
     let mut equivalent_count = 0usize;
     let mut approximate_hit_count = 0usize;
+    let mut proposals_with_approx_hit_count = 0usize;
     let mut max_frontier_nodes_expanded = 0usize;
     let mut max_total_visited_nodes = 0usize;
     let mut total_elapsed_ms = 0u64;
@@ -372,7 +374,8 @@ fn evaluate_strategy(
             .or_insert_with(|| run_probe(&proposal.matrix, target, search_config));
         admitted_count += usize::from(probe.admitted);
         equivalent_count += usize::from(probe.outcome == "equivalent");
-        approximate_hit_count += usize::from(probe.approximate_hits > 0);
+        approximate_hit_count += probe.approximate_hits;
+        proposals_with_approx_hit_count += usize::from(probe.approximate_hits > 0);
         max_frontier_nodes_expanded =
             max_frontier_nodes_expanded.max(probe.frontier_nodes_expanded);
         max_total_visited_nodes = max_total_visited_nodes.max(probe.total_visited_nodes);
@@ -402,6 +405,7 @@ fn evaluate_strategy(
         admitted_count,
         equivalent_count,
         approximate_hit_count,
+        proposals_with_approx_hit_count,
         max_frontier_nodes_expanded,
         max_total_visited_nodes,
         total_elapsed_ms,
@@ -446,8 +450,10 @@ fn decide_keep_or_reject(
     blind_strategy: &StrategyReport,
     higher_power_strategy: &StrategyReport,
 ) -> String {
-    if higher_power_strategy.approximate_hit_count > blind_strategy.approximate_hit_count
-        || higher_power_strategy.equivalent_count > blind_strategy.equivalent_count
+    if higher_power_strategy.equivalent_count > blind_strategy.equivalent_count
+        || (higher_power_strategy.equivalent_count == blind_strategy.equivalent_count
+            && higher_power_strategy.approximate_hit_count > blind_strategy.approximate_hit_count
+            && higher_power_strategy.admitted_count >= blind_strategy.admitted_count)
         || (higher_power_strategy.approximate_hit_count == blind_strategy.approximate_hit_count
             && higher_power_strategy.equivalent_count == blind_strategy.equivalent_count
             && higher_power_strategy.admitted_count >= blind_strategy.admitted_count
@@ -521,6 +527,7 @@ mod tests {
             admitted_count: 6,
             equivalent_count: 0,
             approximate_hit_count: 0,
+            proposals_with_approx_hit_count: 0,
             max_frontier_nodes_expanded: 6,
             max_total_visited_nodes: 846,
             total_elapsed_ms: 78,
@@ -532,6 +539,40 @@ mod tests {
             admitted_count: 5,
             equivalent_count: 0,
             approximate_hit_count: 0,
+            proposals_with_approx_hit_count: 0,
+            max_frontier_nodes_expanded: 5,
+            max_total_visited_nodes: 800,
+            total_elapsed_ms: 70,
+            proposals: Vec::new(),
+        };
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "reject for now on this scout surface"
+        );
+    }
+
+    #[test]
+    fn keep_decision_rejects_approximate_hit_gain_with_fewer_equivalents() {
+        let blind = StrategyReport {
+            strategy: StrategyKind::BlindCoarseGap,
+            shortlist_size: 6,
+            admitted_count: 6,
+            equivalent_count: 1,
+            approximate_hit_count: 0,
+            proposals_with_approx_hit_count: 0,
+            max_frontier_nodes_expanded: 6,
+            max_total_visited_nodes: 846,
+            total_elapsed_ms: 78,
+            proposals: Vec::new(),
+        };
+        let higher_power = StrategyReport {
+            strategy: StrategyKind::HigherPowerGap,
+            shortlist_size: 6,
+            admitted_count: 6,
+            equivalent_count: 0,
+            approximate_hit_count: 2,
+            proposals_with_approx_hit_count: 1,
             max_frontier_nodes_expanded: 5,
             max_total_visited_nodes: 800,
             total_elapsed_ms: 70,
