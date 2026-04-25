@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use crate::concrete_shift::{
+    concrete_shift_profile_2x2, ConcreteShiftProfileConfig2x2, ConcreteShiftProfileStatus2x2,
+};
 use crate::graph_moves::partition_refined_same_future_past_gap_total;
 use crate::matrix::DynMatrix;
 
@@ -259,6 +262,46 @@ pub fn score_node(node: &DynMatrix, target: &DynMatrix) -> f64 {
     score_node_with_weights(node, target, DEFAULT_BEAM_SCORE_WEIGHTS)
 }
 
+pub fn score_node_with_concrete_shift_profile(node: &DynMatrix, target: &DynMatrix) -> f64 {
+    let base = score_node(node, target);
+    let Some(profile_score) = concrete_shift_profile_score(node, target) else {
+        return base;
+    };
+    base + profile_score
+}
+
+fn concrete_shift_profile_score(node: &DynMatrix, target: &DynMatrix) -> Option<f64> {
+    let node = node.to_sq::<2>()?;
+    let target = target.to_sq::<2>()?;
+    let profile =
+        concrete_shift_profile_2x2(&node, &target, &ConcreteShiftProfileConfig2x2::default());
+    Some(concrete_shift_profile_status_score(
+        profile.status,
+        profile.limit_reached,
+        profile.shift_witnesses,
+        profile.concrete_witness_lag,
+        profile.max_lag,
+    ))
+}
+
+fn concrete_shift_profile_status_score(
+    status: ConcreteShiftProfileStatus2x2,
+    limit_reached: bool,
+    shift_witnesses: usize,
+    concrete_witness_lag: Option<u32>,
+    max_lag: u32,
+) -> f64 {
+    let lag = concrete_witness_lag.unwrap_or(max_lag + 1) as f64;
+    let shift_signal = shift_witnesses.min(8) as f64;
+    match status {
+        ConcreteShiftProfileStatus2x2::Equivalent => -96.0 + lag,
+        ConcreteShiftProfileStatus2x2::ShiftWitnessOnly if limit_reached => -4.0 - shift_signal,
+        ConcreteShiftProfileStatus2x2::ShiftWitnessOnly => -16.0 - shift_signal,
+        ConcreteShiftProfileStatus2x2::SearchLimitReached => 12.0,
+        ConcreteShiftProfileStatus2x2::Exhausted => 32.0,
+    }
+}
+
 fn score_node_with_weights(node: &DynMatrix, target: &DynMatrix, weights: ScoreWeights) -> f64 {
     let dim_gap = node.rows.abs_diff(target.rows) as f64;
     let row_col_types = (row_type_count(node) + col_type_count(node)) as f64;
@@ -445,9 +488,11 @@ fn sorted_l1_u8(left: &[u8], right: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_score_specs, rank_target, score_node, score_node_with_weights,
-        signature_distance, BEAM_DIMENSION_STRICT_SCORE_WEIGHTS, DEFAULT_BEAM_SCORE_NAME,
+        candidate_score_specs, concrete_shift_profile_status_score, rank_target, score_node,
+        score_node_with_concrete_shift_profile, score_node_with_weights, signature_distance,
+        BEAM_DIMENSION_STRICT_SCORE_WEIGHTS, DEFAULT_BEAM_SCORE_NAME,
     };
+    use crate::concrete_shift::ConcreteShiftProfileStatus2x2;
     use crate::matrix::DynMatrix;
 
     #[test]
@@ -505,6 +550,46 @@ mod tests {
         let near_miss = DynMatrix::new(4, 4, vec![0, 1, 0, 1, 1, 0, 2, 1, 0, 1, 1, 1, 1, 1, 1, 0]);
 
         assert!(score_node(&target, &target) < score_node(&near_miss, &target));
+    }
+
+    #[test]
+    fn concrete_shift_profile_score_prefers_low_lag_profile_hit() {
+        let target = DynMatrix::new(2, 2, vec![1, 1, 1, 0]);
+        let profile_hit = DynMatrix::new(2, 2, vec![1, 1, 1, 0]);
+        let profile_miss = DynMatrix::new(2, 2, vec![3, 0, 0, 0]);
+
+        assert!(
+            score_node_with_concrete_shift_profile(&profile_hit, &target)
+                < score_node_with_concrete_shift_profile(&profile_miss, &target)
+        );
+    }
+
+    #[test]
+    fn concrete_shift_profile_status_score_keeps_limited_shift_signal() {
+        let limited_shift = concrete_shift_profile_status_score(
+            ConcreteShiftProfileStatus2x2::ShiftWitnessOnly,
+            true,
+            3,
+            None,
+            1,
+        );
+        let pure_limit = concrete_shift_profile_status_score(
+            ConcreteShiftProfileStatus2x2::SearchLimitReached,
+            true,
+            0,
+            None,
+            1,
+        );
+        let exhausted = concrete_shift_profile_status_score(
+            ConcreteShiftProfileStatus2x2::Exhausted,
+            false,
+            0,
+            None,
+            1,
+        );
+
+        assert!(limited_shift < pure_limit);
+        assert!(pure_limit < exhausted);
     }
 
     #[test]

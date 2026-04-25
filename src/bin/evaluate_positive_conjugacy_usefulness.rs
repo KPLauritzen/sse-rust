@@ -559,6 +559,10 @@ fn print_profiles(profiles: &[SearchProfile]) {
         let frontier = match profile.config.frontier_mode {
             FrontierMode::Bfs => "bfs".to_string(),
             FrontierMode::Beam => format!("beam({})", profile.config.beam_width.unwrap_or(0)),
+            FrontierMode::ConcreteShiftProfileBeam => format!(
+                "concrete-shift-profile-beam({})",
+                profile.config.beam_width.unwrap_or(0)
+            ),
             FrontierMode::BeamBfsHandoff => {
                 format!(
                     "beam-bfs-handoff({})",

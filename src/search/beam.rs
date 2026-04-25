@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 use ahash::AHashSet as HashSet;
 
 use crate::matrix::DynMatrix;
-use crate::path_scoring::score_node;
+use crate::path_scoring::{score_node, score_node_with_concrete_shift_profile};
 use crate::types::SearchConfig;
 
 use super::frontier::{choose_next_layer, FrontierLayerChoiceInputs, FrontierOverlapSignal};
@@ -164,6 +164,12 @@ pub(super) struct StratifiedBeamRefillFrontier {
 }
 
 pub(super) const DEFAULT_BEAM_BFS_HANDOFF_DEPTH: usize = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum BeamScoringMode {
+    Default,
+    ConcreteShiftProfile,
+}
 
 pub(super) fn effective_beam_bfs_handoff_depth(config: &SearchConfig) -> usize {
     config
@@ -609,10 +615,17 @@ fn beam_candidate_score(
     matrix: &DynMatrix,
     other_signatures: &HashSet<ApproxSignature>,
     target: &DynMatrix,
+    scoring_mode: BeamScoringMode,
 ) -> (i64, bool) {
     let signature = approx_signature(matrix);
     let approximate_hit = other_signatures.contains(&signature);
-    let score = (score_node(matrix, target) * 4.0).round() as i64;
+    let raw_score = match scoring_mode {
+        BeamScoringMode::Default => score_node(matrix, target),
+        BeamScoringMode::ConcreteShiftProfile => {
+            score_node_with_concrete_shift_profile(matrix, target)
+        }
+    };
+    let score = (raw_score * 4.0).round() as i64;
     (score, approximate_hit)
 }
 
@@ -622,8 +635,10 @@ fn build_beam_frontier_entry(
     other_signatures: &HashSet<ApproxSignature>,
     target: &DynMatrix,
     serial: &mut usize,
+    scoring_mode: BeamScoringMode,
 ) -> BeamFrontierEntry {
-    let (score, approximate_hit) = beam_candidate_score(canonical, other_signatures, target);
+    let (score, approximate_hit) =
+        beam_candidate_score(canonical, other_signatures, target, scoring_mode);
     let entry = BeamFrontierEntry {
         canonical: canonical.clone(),
         depth,
@@ -635,13 +650,14 @@ fn build_beam_frontier_entry(
     entry
 }
 
-pub(super) fn push_beam_frontier_entry(
+pub(super) fn push_beam_frontier_entry_with_scoring(
     frontier: &mut BeamFrontier,
     canonical: &DynMatrix,
     depth: usize,
     other_signatures: &HashSet<ApproxSignature>,
     target: &DynMatrix,
     serial: &mut usize,
+    scoring_mode: BeamScoringMode,
 ) {
     let _ = frontier.push(build_beam_frontier_entry(
         canonical,
@@ -649,6 +665,7 @@ pub(super) fn push_beam_frontier_entry(
         other_signatures,
         target,
         serial,
+        scoring_mode,
     ));
 }
 
@@ -661,7 +678,14 @@ pub(super) fn push_beam_bfs_handoff_entry(
     serial: &mut usize,
     use_beam_phase: bool,
 ) {
-    let entry = build_beam_frontier_entry(canonical, depth, other_signatures, target, serial);
+    let entry = build_beam_frontier_entry(
+        canonical,
+        depth,
+        other_signatures,
+        target,
+        serial,
+        BeamScoringMode::Default,
+    );
     if use_beam_phase {
         frontier.push_beam(entry);
     } else {
@@ -683,6 +707,7 @@ pub(super) fn push_stratified_beam_refill_entry(
         other_signatures,
         target,
         serial,
+        BeamScoringMode::Default,
     ))
 }
 

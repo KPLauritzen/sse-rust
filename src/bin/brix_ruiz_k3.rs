@@ -225,6 +225,9 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
     match value {
         "bfs" => FrontierMode::Bfs,
         "beam" => FrontierMode::Beam,
+        "concrete-shift-profile-beam" | "concrete_shift_profile_beam" => {
+            FrontierMode::ConcreteShiftProfileBeam
+        }
         "beam-bfs-handoff" | "beam_bfs_handoff" => FrontierMode::BeamBfsHandoff,
         "stratified-beam-refill" | "stratified_beam_refill" => {
             FrontierMode::StratifiedBeamRefill

@@ -47,10 +47,10 @@ mod stages;
 use self::beam::{
     choose_next_beam_bfs_handoff_direction, choose_next_beam_direction,
     choose_next_stratified_beam_refill_direction, effective_beam_bfs_handoff_depth,
-    push_beam_bfs_handoff_entry, push_beam_frontier_entry, push_stratified_beam_refill_entry,
-    record_best_beam_bfs_handoff_exact_meet, should_use_beam_bfs_handoff_phase,
-    BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier, BeamFrontier, StratifiedBeamRefillFrontier,
-    StratifiedBeamRefillReason,
+    push_beam_bfs_handoff_entry, push_beam_frontier_entry_with_scoring,
+    push_stratified_beam_refill_entry, record_best_beam_bfs_handoff_exact_meet,
+    should_use_beam_bfs_handoff_phase, BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier,
+    BeamFrontier, BeamScoringMode, StratifiedBeamRefillFrontier, StratifiedBeamRefillReason,
 };
 use self::dispatch::{
     emit_layer, emit_roots, emit_started, endpoint_search_request, finish_search_2x2,
@@ -811,6 +811,19 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 &request,
                 deadline,
                 config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::Default,
+            );
+        }
+        FrontierMode::ConcreteShiftProfileBeam => {
+            return search_beam_dyn_with_telemetry(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                deadline,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::ConcreteShiftProfile,
             );
         }
         FrontierMode::BeamBfsHandoff => {
@@ -1469,6 +1482,18 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 observer,
                 &request,
                 config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::Default,
+            );
+        }
+        FrontierMode::ConcreteShiftProfileBeam => {
+            return search_beam_2x2_with_telemetry_and_observer(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::ConcreteShiftProfile,
             );
         }
         FrontierMode::BeamBfsHandoff => {
@@ -2474,6 +2499,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
     mut observer: Option<&mut dyn SearchObserver>,
     request: &SearchRequest,
     beam_width: usize,
+    scoring_mode: BeamScoringMode,
 ) -> (SseResult<2>, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_dyn = DynMatrix::from_sq(a);
@@ -2503,21 +2529,23 @@ fn search_beam_2x2_with_telemetry_and_observer(
     let mut serial = 0usize;
     let mut fwd_frontier = BeamFrontier::new(beam_width);
     let mut bwd_frontier = BeamFrontier::new(beam_width);
-    push_beam_frontier_entry(
+    push_beam_frontier_entry_with_scoring(
         &mut fwd_frontier,
         &a_canon,
         0,
         &bwd_signatures,
         &b_canon,
         &mut serial,
+        scoring_mode,
     );
-    push_beam_frontier_entry(
+    push_beam_frontier_entry_with_scoring(
         &mut bwd_frontier,
         &b_canon,
         0,
         &fwd_signatures,
         &a_canon,
         &mut serial,
+        scoring_mode,
     );
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
@@ -2778,13 +2806,14 @@ fn search_beam_2x2_with_telemetry_and_observer(
                 .discovered_nodes += 1;
 
             if enqueued {
-                push_beam_frontier_entry(
+                push_beam_frontier_entry_with_scoring(
                     frontier,
                     &expansion.next_canon,
                     next_depth,
                     other_signatures,
                     target,
                     &mut serial,
+                    scoring_mode,
                 );
                 enqueued_nodes += 1;
             }
@@ -3327,6 +3356,7 @@ fn search_beam_dyn_with_telemetry(
     request: &SearchRequest,
     deadline: Option<Instant>,
     beam_width: usize,
+    scoring_mode: BeamScoringMode,
 ) -> (DynSseResult, SearchTelemetry) {
     let mut telemetry = SearchTelemetry::default();
     let a_canon = a.canonical_perm();
@@ -3354,21 +3384,23 @@ fn search_beam_dyn_with_telemetry(
     let mut serial = 0usize;
     let mut fwd_frontier = BeamFrontier::new(beam_width);
     let mut bwd_frontier = BeamFrontier::new(beam_width);
-    push_beam_frontier_entry(
+    push_beam_frontier_entry_with_scoring(
         &mut fwd_frontier,
         &a_canon,
         0,
         &bwd_signatures,
         &b_canon,
         &mut serial,
+        scoring_mode,
     );
-    push_beam_frontier_entry(
+    push_beam_frontier_entry_with_scoring(
         &mut bwd_frontier,
         &b_canon,
         0,
         &fwd_signatures,
         &a_canon,
         &mut serial,
+        scoring_mode,
     );
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
@@ -3636,13 +3668,14 @@ fn search_beam_dyn_with_telemetry(
                 .discovered_nodes += 1;
 
             if enqueued {
-                push_beam_frontier_entry(
+                push_beam_frontier_entry_with_scoring(
                     frontier,
                     &expansion.next_canon,
                     next_depth,
                     other_signatures,
                     target,
                     &mut serial,
+                    scoring_mode,
                 );
                 enqueued_nodes += 1;
             }
@@ -6090,6 +6123,29 @@ mod tests {
         }
         assert!(telemetry.frontier_nodes_expanded >= 1);
         assert!(telemetry.max_frontier_size <= 4);
+    }
+
+    #[test]
+    fn test_concrete_shift_profile_beam_uses_beam_frontier() {
+        let a = SqMatrix::new([[1, 1], [2, 5]]);
+        let b = SqMatrix::new([[1, 2], [1, 5]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+            frontier_mode: FrontierMode::ConcreteShiftProfileBeam,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: Some(1),
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
+        };
+
+        let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
+
+        assert!(telemetry.invalid_config.is_none());
+        assert!(telemetry.frontier_nodes_expanded >= 1);
+        assert!(telemetry.max_frontier_size <= 1);
     }
 
     #[test]

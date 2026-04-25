@@ -128,6 +128,52 @@ pub enum ConcreteShiftSearchResult2x2 {
     SearchLimitReached,
 }
 
+/// Configuration for a cheap bounded profile used as search-ranking side data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConcreteShiftProfileConfig2x2 {
+    pub relation: ConcreteShiftRelation2x2,
+    pub max_lag: u32,
+    pub max_entry: u32,
+    pub max_witnesses: usize,
+}
+
+impl Default for ConcreteShiftProfileConfig2x2 {
+    fn default() -> Self {
+        Self {
+            relation: ConcreteShiftRelation2x2::Aligned,
+            max_lag: 1,
+            max_entry: 1,
+            max_witnesses: 32,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConcreteShiftProfileStatus2x2 {
+    Equivalent,
+    ShiftWitnessOnly,
+    Exhausted,
+    SearchLimitReached,
+}
+
+/// Coarse low-lag concrete-shift profile for one 2x2 matrix pair.
+///
+/// This profile is intentionally heuristic side data. `ShiftWitnessOnly` means
+/// bounded shift-equivalence witnesses existed, but the bounded concrete-shift
+/// witness search did not find a concrete witness. `limit_reached` records
+/// whether that search also hit its local witness limit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConcreteShiftProfile2x2 {
+    pub relation: ConcreteShiftRelation2x2,
+    pub max_lag: u32,
+    pub max_entry: u32,
+    pub max_witnesses: usize,
+    pub shift_witnesses: usize,
+    pub concrete_witness_lag: Option<u32>,
+    pub limit_reached: bool,
+    pub status: ConcreteShiftProfileStatus2x2,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct EdgeRecord {
     source: usize,
@@ -592,6 +638,22 @@ pub fn search_concrete_shift_equivalence_with_lag_2x2(
     relation: ConcreteShiftRelation2x2,
 ) -> ConcreteShiftSearchResult2x2 {
     let shift_witnesses = enumerate_shift_equivalence_with_lag_2x2(a, b, lag, max_entry);
+    search_concrete_shift_equivalence_for_witnesses_2x2(
+        a,
+        b,
+        shift_witnesses,
+        max_witnesses,
+        relation,
+    )
+}
+
+fn search_concrete_shift_equivalence_for_witnesses_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    shift_witnesses: Vec<ShiftEquivalenceWitness2x2>,
+    max_witnesses: usize,
+    relation: ConcreteShiftRelation2x2,
+) -> ConcreteShiftSearchResult2x2 {
     let mut checked = 0usize;
 
     for shift in shift_witnesses {
@@ -644,6 +706,61 @@ pub fn search_concrete_shift_equivalence_2x2(
         ConcreteShiftSearchResult2x2::SearchLimitReached
     } else {
         ConcreteShiftSearchResult2x2::Exhausted
+    }
+}
+
+pub fn concrete_shift_profile_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &ConcreteShiftProfileConfig2x2,
+) -> ConcreteShiftProfile2x2 {
+    let mut shift_witnesses = 0usize;
+    let mut any_limit = false;
+    for lag in 1..=config.max_lag {
+        let lag_shift_witnesses =
+            enumerate_shift_equivalence_with_lag_2x2(a, b, lag, config.max_entry);
+        shift_witnesses += lag_shift_witnesses.len();
+        match search_concrete_shift_equivalence_for_witnesses_2x2(
+            a,
+            b,
+            lag_shift_witnesses,
+            config.max_witnesses,
+            config.relation,
+        ) {
+            ConcreteShiftSearchResult2x2::Equivalent(_) => {
+                return ConcreteShiftProfile2x2 {
+                    relation: config.relation,
+                    max_lag: config.max_lag,
+                    max_entry: config.max_entry,
+                    max_witnesses: config.max_witnesses,
+                    shift_witnesses,
+                    concrete_witness_lag: Some(lag),
+                    limit_reached: any_limit,
+                    status: ConcreteShiftProfileStatus2x2::Equivalent,
+                };
+            }
+            ConcreteShiftSearchResult2x2::Exhausted => {}
+            ConcreteShiftSearchResult2x2::SearchLimitReached => any_limit = true,
+        }
+    }
+
+    let status = if shift_witnesses > 0 {
+        ConcreteShiftProfileStatus2x2::ShiftWitnessOnly
+    } else if any_limit {
+        ConcreteShiftProfileStatus2x2::SearchLimitReached
+    } else {
+        ConcreteShiftProfileStatus2x2::Exhausted
+    };
+
+    ConcreteShiftProfile2x2 {
+        relation: config.relation,
+        max_lag: config.max_lag,
+        max_entry: config.max_entry,
+        max_witnesses: config.max_witnesses,
+        shift_witnesses,
+        concrete_witness_lag: None,
+        limit_reached: any_limit,
+        status,
     }
 }
 
@@ -1663,6 +1780,69 @@ mod tests {
         let z = SqMatrix::new([[0, 0], [0, 0]]);
         let witness = find_shift_equivalence_2x2(&z, &z, 1, 0).expect("expected witness");
         assert!(verify_shift_equivalence_2x2(&z, &z, &witness).is_ok());
+    }
+
+    #[test]
+    fn test_concrete_shift_profile_records_low_lag_equivalent_hit() {
+        let a = SqMatrix::identity();
+        let profile = concrete_shift_profile_2x2(
+            &a,
+            &a,
+            &ConcreteShiftProfileConfig2x2 {
+                max_lag: 1,
+                max_entry: 1,
+                max_witnesses: 16,
+                ..ConcreteShiftProfileConfig2x2::default()
+            },
+        );
+
+        assert_eq!(profile.status, ConcreteShiftProfileStatus2x2::Equivalent);
+        assert_eq!(profile.concrete_witness_lag, Some(1));
+        assert!(!profile.limit_reached);
+        assert!(profile.shift_witnesses > 0);
+    }
+
+    #[test]
+    fn test_concrete_shift_profile_preserves_shift_signal_when_limit_reached() {
+        let a = SqMatrix::identity();
+        let profile = concrete_shift_profile_2x2(
+            &a,
+            &a,
+            &ConcreteShiftProfileConfig2x2 {
+                max_lag: 1,
+                max_entry: 1,
+                max_witnesses: 0,
+                ..ConcreteShiftProfileConfig2x2::default()
+            },
+        );
+
+        assert_eq!(
+            profile.status,
+            ConcreteShiftProfileStatus2x2::ShiftWitnessOnly
+        );
+        assert!(profile.limit_reached);
+        assert!(profile.shift_witnesses > 0);
+        assert_eq!(profile.concrete_witness_lag, None);
+    }
+
+    #[test]
+    fn test_concrete_shift_profile_records_exhausted_without_shift_witness() {
+        let a = SqMatrix::identity();
+        let b = SqMatrix::new([[0, 0], [0, 0]]);
+        let profile = concrete_shift_profile_2x2(
+            &a,
+            &b,
+            &ConcreteShiftProfileConfig2x2 {
+                max_lag: 1,
+                max_entry: 0,
+                max_witnesses: 16,
+                ..ConcreteShiftProfileConfig2x2::default()
+            },
+        );
+
+        assert_eq!(profile.status, ConcreteShiftProfileStatus2x2::Exhausted);
+        assert!(!profile.limit_reached);
+        assert_eq!(profile.shift_witnesses, 0);
     }
 
     #[test]

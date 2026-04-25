@@ -10,6 +10,7 @@ use crate::structured_surface::StructuredSurfaceDescriptor2x2;
 pub enum FrontierMode {
     Bfs,
     Beam,
+    ConcreteShiftProfileBeam,
     BeamBfsHandoff,
     StratifiedBeamRefill,
 }
@@ -36,7 +37,10 @@ impl FrontierMode {
     pub fn uses_beam_width(self) -> bool {
         matches!(
             self,
-            Self::Beam | Self::BeamBfsHandoff | Self::StratifiedBeamRefill
+            Self::Beam
+                | Self::ConcreteShiftProfileBeam
+                | Self::BeamBfsHandoff
+                | Self::StratifiedBeamRefill
         )
     }
 }
@@ -655,12 +659,18 @@ mod tests {
     fn test_frontier_mode_deserializes_bfs_and_beam() {
         let bfs: FrontierMode = serde_json::from_str("\"bfs\"").unwrap();
         let beam: FrontierMode = serde_json::from_str("\"beam\"").unwrap();
+        let concrete_shift_profile_beam: FrontierMode =
+            serde_json::from_str("\"concrete_shift_profile_beam\"").unwrap();
         let beam_bfs_handoff: FrontierMode = serde_json::from_str("\"beam_bfs_handoff\"").unwrap();
         let stratified_beam_refill: FrontierMode =
             serde_json::from_str("\"stratified_beam_refill\"").unwrap();
 
         assert_eq!(bfs, FrontierMode::Bfs);
         assert_eq!(beam, FrontierMode::Beam);
+        assert_eq!(
+            concrete_shift_profile_beam,
+            FrontierMode::ConcreteShiftProfileBeam
+        );
         assert_eq!(beam_bfs_handoff, FrontierMode::BeamBfsHandoff);
         assert_eq!(stratified_beam_refill, FrontierMode::StratifiedBeamRefill);
     }

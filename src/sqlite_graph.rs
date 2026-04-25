@@ -607,6 +607,7 @@ fn search_mode_label(config: &SearchConfig) -> &'static str {
     match config.frontier_mode {
         FrontierMode::Bfs => config.move_family_policy.snake_case_label(),
         FrontierMode::Beam => "beam",
+        FrontierMode::ConcreteShiftProfileBeam => "concrete_shift_profile_beam",
         FrontierMode::BeamBfsHandoff => "beam_bfs_handoff",
         FrontierMode::StratifiedBeamRefill => "stratified_beam_refill",
     }
@@ -616,6 +617,7 @@ fn frontier_mode_label(mode: FrontierMode) -> &'static str {
     match mode {
         FrontierMode::Bfs => "bfs",
         FrontierMode::Beam => "beam",
+        FrontierMode::ConcreteShiftProfileBeam => "concrete_shift_profile_beam",
         FrontierMode::BeamBfsHandoff => "beam_bfs_handoff",
         FrontierMode::StratifiedBeamRefill => "stratified_beam_refill",
     }
