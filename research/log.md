@@ -952,3 +952,11 @@
   bounded cases checked (`brix_k3`, `brix_k4`, `riedel_baker_k3`). Details are
   in
   `research/notes/2026-04-17-positive-conjugacy-local-seed-family-followup.md`.
+
+- `working tree` Added a report-only bounded concrete-shift proposal surface:
+  `src/bin/report_concrete_shift_proposals.rs` emits stable witness signatures,
+  compact `R/S` support summaries, fiber cardinalities, and bounded bridge
+  samples without exporting fake `full_path` artifacts. Saved control output in
+  `tmp/2026-04-25-concrete-shift-proposal-report.json` and documented keep vs
+  reject fields in
+  `research/notes/2026-04-25-concrete-shift-proposal-data.md`.

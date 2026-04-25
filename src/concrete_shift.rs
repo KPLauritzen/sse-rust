@@ -174,6 +174,93 @@ pub struct ConcreteShiftProfile2x2 {
     pub status: ConcreteShiftProfileStatus2x2,
 }
 
+/// Search bounds used to obtain a bounded concrete-shift witness surface.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftProposalBounds2x2 {
+    pub max_lag: u32,
+    pub max_entry: u32,
+    pub max_witnesses: usize,
+}
+
+/// Compact matrix support summary for report-only proposal surfaces.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct MatrixSupportSummary2x2 {
+    pub signature: String,
+    pub matrix: [[u32; 2]; 2],
+    pub nonzero_positions: Vec<[usize; 2]>,
+    pub row_sums: [u32; 2],
+    pub col_sums: [u32; 2],
+    pub entry_sum: u64,
+    pub max_entry: u32,
+}
+
+/// Per-map fiber cardinalities from a concrete-shift witness.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftFiberCardinalities2x2 {
+    pub sigma_g: [usize; 4],
+    pub sigma_h: [usize; 4],
+    pub omega_e: [usize; 4],
+    pub omega_f: [usize; 4],
+}
+
+/// Compact bridge-edge summary used by proposal-only report output.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftEdgeSummary2x2 {
+    pub source: usize,
+    pub target: usize,
+    pub label: usize,
+}
+
+/// Stable bounded path summary used for bridge samples.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftPathSummary2x2 {
+    pub source: usize,
+    pub target: usize,
+    pub edge_count: usize,
+    pub signature: String,
+}
+
+/// Small bridge-pair sample linking an `R/S` edge pair to a lag path.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftBridgePathSample2x2 {
+    pub r_edge: ConcreteShiftEdgeSummary2x2,
+    pub s_edge: ConcreteShiftEdgeSummary2x2,
+    pub mapped_path: ConcreteShiftPathSummary2x2,
+}
+
+/// Fiber-level summary of bridge pair counts with bounded samples.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftBridgeFiberSummary2x2 {
+    pub fiber: [usize; 2],
+    pub bridge_pair_count: usize,
+    pub path_count: usize,
+    pub samples: Vec<ConcreteShiftBridgePathSample2x2>,
+}
+
+/// Report-only bounded proposal data for a positive concrete-shift witness.
+///
+/// This surface intentionally excludes any replayable SSE path payload.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ConcreteShiftProposalData2x2 {
+    pub artifact_kind: &'static str,
+    pub replayable_as_full_path: bool,
+    pub relation: &'static str,
+    pub witness_label: &'static str,
+    pub lag: u32,
+    pub search_bounds: ConcreteShiftProposalBounds2x2,
+    pub witness_signature: String,
+    pub shift_signature: String,
+    pub source: MatrixSupportSummary2x2,
+    pub target: MatrixSupportSummary2x2,
+    pub bridge_r: MatrixSupportSummary2x2,
+    pub bridge_s: MatrixSupportSummary2x2,
+    pub source_lag_power: MatrixSupportSummary2x2,
+    pub target_lag_power: MatrixSupportSummary2x2,
+    pub fiber_cardinalities: ConcreteShiftFiberCardinalities2x2,
+    pub rs_to_a_path_fibers: Vec<ConcreteShiftBridgeFiberSummary2x2>,
+    pub sr_to_b_path_fibers: Vec<ConcreteShiftBridgeFiberSummary2x2>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct EdgeRecord {
     source: usize,
@@ -762,6 +849,58 @@ pub fn concrete_shift_profile_2x2(
         limit_reached: any_limit,
         status,
     }
+}
+
+/// Build bounded report-only proposal data from a concrete-shift witness.
+pub fn concrete_shift_proposal_data_2x2(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    relation: ConcreteShiftRelation2x2,
+    witness: &ConcreteShiftWitness2x2,
+    bounds: ConcreteShiftProposalBounds2x2,
+    sample_limit_per_fiber: usize,
+) -> Result<ConcreteShiftProposalData2x2, String> {
+    let ctx = ModuleContext::new(a, b, &witness.shift)?;
+    let lag = witness.shift.lag;
+    let shift_signature = format!(
+        "lag={lag}|R={}|S={}",
+        sq_matrix_signature(&witness.shift.r),
+        sq_matrix_signature(&witness.shift.s)
+    );
+    let witness_signature = stable_signature_hash(&format!(
+        "relation={}|{}|sigma_g={}|sigma_h={}|omega_e={}|omega_f={}",
+        relation.as_str(),
+        shift_signature,
+        bijection_signature(&witness.sigma_g),
+        bijection_signature(&witness.sigma_h),
+        bijection_signature(&witness.omega_e),
+        bijection_signature(&witness.omega_f),
+    ));
+
+    Ok(ConcreteShiftProposalData2x2 {
+        artifact_kind: "concrete_shift_proposal_data",
+        replayable_as_full_path: false,
+        relation: relation.as_str(),
+        witness_label: relation_label(relation),
+        lag,
+        search_bounds: bounds,
+        witness_signature,
+        shift_signature,
+        source: matrix_support_summary(a),
+        target: matrix_support_summary(b),
+        bridge_r: matrix_support_summary(&witness.shift.r),
+        bridge_s: matrix_support_summary(&witness.shift.s),
+        source_lag_power: matrix_support_summary(&a.pow(lag)),
+        target_lag_power: matrix_support_summary(&b.pow(lag)),
+        fiber_cardinalities: ConcreteShiftFiberCardinalities2x2 {
+            sigma_g: ctx.sigma_g_domain.lengths(),
+            sigma_h: ctx.sigma_h_domain.lengths(),
+            omega_e: ctx.omega_e_domain.lengths(),
+            omega_f: ctx.omega_f_domain.lengths(),
+        },
+        rs_to_a_path_fibers: bridge_fiber_summaries_from_rs(&ctx, witness, sample_limit_per_fiber),
+        sr_to_b_path_fibers: bridge_fiber_summaries_from_sr(&ctx, witness, sample_limit_per_fiber),
+    })
 }
 
 /// Search for a bounded 2x2 shift equivalence witness.
@@ -1376,6 +1515,169 @@ fn fiber_index(source: usize, target: usize) -> usize {
     source * 2 + target
 }
 
+fn relation_label(relation: ConcreteShiftRelation2x2) -> &'static str {
+    match relation {
+        ConcreteShiftRelation2x2::Aligned => "aligned concrete-shift witness",
+        ConcreteShiftRelation2x2::Balanced => "balanced concrete-shift witness",
+        ConcreteShiftRelation2x2::Compatible => "compatible concrete-shift witness",
+    }
+}
+
+fn matrix_support_summary(matrix: &SqMatrix<2>) -> MatrixSupportSummary2x2 {
+    let mut nonzero_positions = Vec::new();
+    let mut row_sums = [0u32; 2];
+    let mut col_sums = [0u32; 2];
+
+    for source in 0..2 {
+        for target in 0..2 {
+            let value = matrix.data[source][target];
+            row_sums[source] += value;
+            col_sums[target] += value;
+            if value > 0 {
+                nonzero_positions.push([source, target]);
+            }
+        }
+    }
+
+    MatrixSupportSummary2x2 {
+        signature: sq_matrix_signature(matrix),
+        matrix: matrix.data,
+        nonzero_positions,
+        row_sums,
+        col_sums,
+        entry_sum: matrix.entry_sum(),
+        max_entry: matrix.max_entry(),
+    }
+}
+
+fn sq_matrix_signature(matrix: &SqMatrix<2>) -> String {
+    format!(
+        "2x2:{},{},{},{}",
+        matrix.data[0][0], matrix.data[0][1], matrix.data[1][0], matrix.data[1][1]
+    )
+}
+
+fn bijection_signature(bijection: &FiberwiseBijection2x2) -> String {
+    bijection
+        .mapping
+        .iter()
+        .map(|fiber| {
+            fiber
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn edge_summary(edge: &EdgeRecord) -> ConcreteShiftEdgeSummary2x2 {
+    ConcreteShiftEdgeSummary2x2 {
+        source: edge.source,
+        target: edge.target,
+        label: edge.label,
+    }
+}
+
+fn path_summary(ctx_edges: &[EdgeRecord], path: &PathRecord) -> ConcreteShiftPathSummary2x2 {
+    let signature = path
+        .edges
+        .iter()
+        .map(|&edge_idx| {
+            let edge = &ctx_edges[edge_idx];
+            format!("{}>{}#{}", edge.source, edge.target, edge.label)
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    ConcreteShiftPathSummary2x2 {
+        source: path.source,
+        target: path.target,
+        edge_count: path.edges.len(),
+        signature,
+    }
+}
+
+fn bridge_fiber_summaries_from_rs(
+    ctx: &ModuleContext,
+    witness: &ConcreteShiftWitness2x2,
+    sample_limit_per_fiber: usize,
+) -> Vec<ConcreteShiftBridgeFiberSummary2x2> {
+    bridge_fiber_summaries(
+        &ctx.omega_e_domain.fibers,
+        &ctx.omega_e_codomain.fibers,
+        &witness.omega_e.mapping,
+        |(r_idx, s_idx), path_idx| ConcreteShiftBridgePathSample2x2 {
+            r_edge: edge_summary(&ctx.g_edges[*r_idx]),
+            s_edge: edge_summary(&ctx.h_edges[*s_idx]),
+            mapped_path: path_summary(&ctx.e_edges, &ctx.e_paths[path_idx]),
+        },
+        sample_limit_per_fiber,
+    )
+}
+
+fn bridge_fiber_summaries_from_sr(
+    ctx: &ModuleContext,
+    witness: &ConcreteShiftWitness2x2,
+    sample_limit_per_fiber: usize,
+) -> Vec<ConcreteShiftBridgeFiberSummary2x2> {
+    bridge_fiber_summaries(
+        &ctx.omega_f_domain.fibers,
+        &ctx.omega_f_codomain.fibers,
+        &witness.omega_f.mapping,
+        |(s_idx, r_idx), path_idx| ConcreteShiftBridgePathSample2x2 {
+            r_edge: edge_summary(&ctx.g_edges[*r_idx]),
+            s_edge: edge_summary(&ctx.h_edges[*s_idx]),
+            mapped_path: path_summary(&ctx.f_edges, &ctx.f_paths[path_idx]),
+        },
+        sample_limit_per_fiber,
+    )
+}
+
+fn bridge_fiber_summaries<T, F>(
+    domain_fibers: &[Vec<T>; 4],
+    codomain_fibers: &[Vec<usize>; 4],
+    mapping: &[Vec<usize>; 4],
+    mut build_sample: F,
+    sample_limit_per_fiber: usize,
+) -> Vec<ConcreteShiftBridgeFiberSummary2x2>
+where
+    F: FnMut(&T, usize) -> ConcreteShiftBridgePathSample2x2,
+{
+    let mut summaries = Vec::new();
+
+    for fiber in 0..4 {
+        let samples = domain_fibers[fiber]
+            .iter()
+            .enumerate()
+            .take(sample_limit_per_fiber)
+            .map(|(local_idx, domain_item)| {
+                let path_idx = codomain_fibers[fiber][mapping[fiber][local_idx]];
+                build_sample(domain_item, path_idx)
+            })
+            .collect();
+
+        summaries.push(ConcreteShiftBridgeFiberSummary2x2 {
+            fiber: [fiber / 2, fiber % 2],
+            bridge_pair_count: domain_fibers[fiber].len(),
+            path_count: codomain_fibers[fiber].len(),
+            samples,
+        });
+    }
+
+    summaries
+}
+
+fn stable_signature_hash(signature: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in signature.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
 fn enumerate_intertwiners_2x2(
     left: &SqMatrix<2>,
     right: &SqMatrix<2>,
@@ -1859,6 +2161,95 @@ mod tests {
         assert!(verify_aligned_module_shift_equivalence_2x2(&a, &a, &witness).is_ok());
         assert!(verify_balanced_concrete_shift_2x2(&a, &a, &witness).is_ok());
         assert!(verify_compatible_concrete_shift_2x2(&a, &a, &witness).is_ok());
+    }
+
+    #[test]
+    fn test_concrete_shift_proposal_data_marks_surface_as_non_replayable() {
+        let a = SqMatrix::identity();
+        let shift = ShiftEquivalenceWitness2x2 {
+            lag: 1,
+            r: SqMatrix::identity(),
+            s: SqMatrix::identity(),
+        };
+        let witness = canonical_module_shift_witness_2x2(&a, &a, shift).expect("expected witness");
+        let proposal = concrete_shift_proposal_data_2x2(
+            &a,
+            &a,
+            ConcreteShiftRelation2x2::Compatible,
+            &witness,
+            ConcreteShiftProposalBounds2x2 {
+                max_lag: 1,
+                max_entry: 1,
+                max_witnesses: 8,
+            },
+            2,
+        )
+        .expect("expected proposal data");
+
+        assert_eq!(proposal.artifact_kind, "concrete_shift_proposal_data");
+        assert!(!proposal.replayable_as_full_path);
+        assert_eq!(proposal.relation, "compatible");
+        assert_eq!(proposal.witness_label, "compatible concrete-shift witness");
+        assert_eq!(
+            proposal.shift_signature,
+            "lag=1|R=2x2:1,0,0,1|S=2x2:1,0,0,1"
+        );
+        assert!(proposal.witness_signature.starts_with("fnv1a64:"));
+        assert_eq!(proposal.source.nonzero_positions, vec![[0, 0], [1, 1]]);
+        assert_eq!(proposal.bridge_r.row_sums, [1, 1]);
+        assert_eq!(proposal.rs_to_a_path_fibers.len(), 4);
+        assert!(proposal
+            .rs_to_a_path_fibers
+            .iter()
+            .all(|fiber| fiber.samples.len() <= 2));
+    }
+
+    #[test]
+    fn test_concrete_shift_proposal_data_serializes_bridge_samples() {
+        let a = SqMatrix::new([[0, 1], [1, 2]]);
+        let b = SqMatrix::new([[1, 1], [2, 1]]);
+        let witness = match search_concrete_shift_equivalence_with_lag_2x2(
+            &a,
+            &b,
+            1,
+            6,
+            10_000,
+            ConcreteShiftRelation2x2::Aligned,
+        ) {
+            ConcreteShiftSearchResult2x2::Equivalent(witness) => witness,
+            other => panic!("expected bounded aligned witness, got {other:?}"),
+        };
+        let proposal = concrete_shift_proposal_data_2x2(
+            &a,
+            &b,
+            ConcreteShiftRelation2x2::Aligned,
+            &witness,
+            ConcreteShiftProposalBounds2x2 {
+                max_lag: 1,
+                max_entry: 6,
+                max_witnesses: 10_000,
+            },
+            1,
+        )
+        .expect("expected proposal data");
+        let json = serde_json::to_value(&proposal).expect("serialize proposal");
+
+        assert_eq!(json["relation"], "aligned");
+        assert_eq!(json["lag"], 1);
+        assert_eq!(json["search_bounds"]["max_entry"], 6);
+        assert_eq!(
+            json["rs_to_a_path_fibers"][1]["samples"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            json["rs_to_a_path_fibers"][1]["samples"][0]["mapped_path"]["signature"]
+                .as_str()
+                .unwrap()
+                .contains('>')
+        );
     }
 
     #[test]
