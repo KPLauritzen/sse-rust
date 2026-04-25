@@ -234,35 +234,35 @@ fn scan_zero_column_support_family(scan_max_entry: u32, sq3_cap: u32) {
 }
 
 fn scan_singular_grid_family(scan_max_entry: u32, sq3_cap: u32) {
-    let cases = (0..=scan_max_entry).flat_map(|a00| {
-        (0..=scan_max_entry).flat_map(move |a01| {
-            (0..=scan_max_entry).flat_map(move |a02| {
-                (0..=scan_max_entry).flat_map(move |a10| {
-                    (0..=scan_max_entry).flat_map(move |a11| {
-                        (0..=scan_max_entry).flat_map(move |a12| {
-                            (0..=scan_max_entry).flat_map(move |a20| {
-                                (0..=scan_max_entry).flat_map(move |a21| {
-                                    (0..=scan_max_entry).filter_map(move |a22| {
+    let mut cases = Vec::new();
+    for a00 in 0..=scan_max_entry {
+        for a01 in 0..=scan_max_entry {
+            for a02 in 0..=scan_max_entry {
+                for a10 in 0..=scan_max_entry {
+                    for a11 in 0..=scan_max_entry {
+                        for a12 in 0..=scan_max_entry {
+                            for a20 in 0..=scan_max_entry {
+                                for a21 in 0..=scan_max_entry {
+                                    for a22 in 0..=scan_max_entry {
                                         let matrix = DynMatrix::new(
                                             3,
                                             3,
                                             vec![a00, a01, a02, a10, a11, a12, a20, a21, a22],
                                         );
-                                        let det = determinant_3x3(&matrix);
-                                        if det == 0 && matrix.data.iter().any(|&value| value > 0) {
-                                            Some(matrix)
-                                        } else {
-                                            None
+                                        if determinant_3x3(&matrix) == 0
+                                            && matrix.data.iter().any(|&value| value > 0)
+                                        {
+                                            cases.push(matrix);
                                         }
-                                    })
-                                })
-                            })
-                        })
-                    })
-                })
-            })
-        })
-    });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     scan_family(
         "singular-grid scan",
         format!("all singular nonzero 3x3 matrices with entries in 0..={scan_max_entry}, sq3_cap={sq3_cap}"),
