@@ -9,7 +9,7 @@ use sse_core::matrix::DynMatrix;
 use sse_core::search::{execute_search_request, validate_sse_path_dyn};
 use sse_core::types::{
     DynSsePath, FrontierMode, SearchConfig, SearchRequest, SearchRunResult, SearchTelemetry,
-    DEFAULT_BEAM_WIDTH,
+    StructuredProofResult, DEFAULT_BEAM_WIDTH,
 };
 
 use super::{
@@ -195,52 +195,50 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
                 telemetry,
             },
         },
-        SearchRunResult::EquivalentByStructuredProof(proof) => {
-            let proof = proof.as_concrete_shift_2x2();
-            if case.expected_witness_signature.is_some() {
-                WorkerCaseResult {
-                    id: case.id.clone(),
-                    actual_outcome: "panic".to_string(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    steps: None,
-                    reason: Some(
-                        "expected witness signature requires a full path replay, but solver returned a concrete-shift witness"
-                            .to_string(),
-                    ),
-                    result_model: result_model(
-                        solver_path_for_dims(a.rows, b.rows),
-                        a.rows,
-                        b.rows,
-                        ResultResolutionKind::Panic,
-                        None,
-                        None,
-                        &telemetry,
-                    ),
-                    telemetry,
-                }
-            } else {
-                let proof = proof.expect(
-                    "structured proof boundary currently only carries concrete-shift proofs",
-                );
-                WorkerCaseResult {
-                    id: case.id.clone(),
-                    actual_outcome: "equivalent".to_string(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    steps: None,
-                    reason: Some(proof.description()),
-                    result_model: result_model(
-                        solver_path_for_dims(a.rows, b.rows),
-                        a.rows,
-                        b.rows,
-                        ResultResolutionKind::ConcreteShiftWitness,
-                        Some(proof.witness.shift.lag as usize),
-                        None,
-                        &telemetry,
-                    ),
-                    telemetry,
+        SearchRunResult::EquivalentByStructuredProof(proof) => match proof {
+            StructuredProofResult::ConcreteShift2x2(proof) => {
+                if case.expected_witness_signature.is_some() {
+                    WorkerCaseResult {
+                        id: case.id.clone(),
+                        actual_outcome: "panic".to_string(),
+                        elapsed_ms: started.elapsed().as_millis(),
+                        steps: None,
+                        reason: Some(
+                            "expected witness signature requires a full path replay, but solver returned a concrete-shift witness"
+                                .to_string(),
+                        ),
+                        result_model: result_model(
+                            solver_path_for_dims(a.rows, b.rows),
+                            a.rows,
+                            b.rows,
+                            ResultResolutionKind::Panic,
+                            None,
+                            None,
+                            &telemetry,
+                        ),
+                        telemetry,
+                    }
+                } else {
+                    WorkerCaseResult {
+                        id: case.id.clone(),
+                        actual_outcome: "equivalent".to_string(),
+                        elapsed_ms: started.elapsed().as_millis(),
+                        steps: None,
+                        reason: Some(proof.description()),
+                        result_model: result_model(
+                            solver_path_for_dims(a.rows, b.rows),
+                            a.rows,
+                            b.rows,
+                            ResultResolutionKind::ConcreteShiftWitness,
+                            Some(proof.witness.shift.lag as usize),
+                            None,
+                            &telemetry,
+                        ),
+                        telemetry,
+                    }
                 }
             }
-        }
+        },
         SearchRunResult::NotEquivalent(reason) => WorkerCaseResult {
             id: case.id.clone(),
             actual_outcome: "not_equivalent".to_string(),
