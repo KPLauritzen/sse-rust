@@ -450,6 +450,12 @@ fn decide_keep_or_reject(
     blind_strategy: &StrategyReport,
     higher_power_strategy: &StrategyReport,
 ) -> String {
+    let strict_budget_improvement = higher_power_strategy.admitted_count
+        > blind_strategy.admitted_count
+        || higher_power_strategy.max_frontier_nodes_expanded
+            < blind_strategy.max_frontier_nodes_expanded
+        || higher_power_strategy.max_total_visited_nodes < blind_strategy.max_total_visited_nodes;
+
     if higher_power_strategy.equivalent_count > blind_strategy.equivalent_count
         || (higher_power_strategy.equivalent_count == blind_strategy.equivalent_count
             && higher_power_strategy.approximate_hit_count > blind_strategy.approximate_hit_count
@@ -461,13 +467,7 @@ fn decide_keep_or_reject(
                 <= blind_strategy.max_frontier_nodes_expanded
             && higher_power_strategy.max_total_visited_nodes
                 <= blind_strategy.max_total_visited_nodes
-            && higher_power_strategy.total_elapsed_ms <= blind_strategy.total_elapsed_ms
-            && (higher_power_strategy.admitted_count > blind_strategy.admitted_count
-                || higher_power_strategy.max_frontier_nodes_expanded
-                    < blind_strategy.max_frontier_nodes_expanded
-                || higher_power_strategy.max_total_visited_nodes
-                    < blind_strategy.max_total_visited_nodes
-                || higher_power_strategy.total_elapsed_ms < blind_strategy.total_elapsed_ms))
+            && strict_budget_improvement)
     {
         "keep for larger retained-lane scout follow-up".to_string()
     } else {
@@ -488,6 +488,28 @@ fn summarize_result(result: &DynSseResult) -> (String, Option<String>, Option<us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn strategy_report(
+        admitted_count: usize,
+        equivalent_count: usize,
+        approximate_hit_count: usize,
+        max_frontier_nodes_expanded: usize,
+        max_total_visited_nodes: usize,
+        total_elapsed_ms: u64,
+    ) -> StrategyReport {
+        StrategyReport {
+            strategy: StrategyKind::BlindCoarseGap,
+            shortlist_size: 6,
+            admitted_count,
+            equivalent_count,
+            approximate_hit_count,
+            proposals_with_approx_hit_count: usize::from(approximate_hit_count > 0),
+            max_frontier_nodes_expanded,
+            max_total_visited_nodes,
+            total_elapsed_ms,
+            proposals: Vec::new(),
+        }
+    }
 
     #[test]
     fn higher_power_sort_prefers_smaller_power_gap() {
@@ -527,30 +549,9 @@ mod tests {
 
     #[test]
     fn keep_decision_rejects_lower_admission_tie_break() {
-        let blind = StrategyReport {
-            strategy: StrategyKind::BlindCoarseGap,
-            shortlist_size: 6,
-            admitted_count: 6,
-            equivalent_count: 0,
-            approximate_hit_count: 0,
-            proposals_with_approx_hit_count: 0,
-            max_frontier_nodes_expanded: 6,
-            max_total_visited_nodes: 846,
-            total_elapsed_ms: 78,
-            proposals: Vec::new(),
-        };
-        let higher_power = StrategyReport {
-            strategy: StrategyKind::HigherPowerGap,
-            shortlist_size: 6,
-            admitted_count: 5,
-            equivalent_count: 0,
-            approximate_hit_count: 0,
-            proposals_with_approx_hit_count: 0,
-            max_frontier_nodes_expanded: 5,
-            max_total_visited_nodes: 800,
-            total_elapsed_ms: 70,
-            proposals: Vec::new(),
-        };
+        let blind = strategy_report(6, 0, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(5, 0, 0, 5, 800, 70);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
 
         assert_eq!(
             decide_keep_or_reject(&blind, &higher_power),
@@ -560,30 +561,9 @@ mod tests {
 
     #[test]
     fn keep_decision_rejects_approximate_hit_gain_with_fewer_equivalents() {
-        let blind = StrategyReport {
-            strategy: StrategyKind::BlindCoarseGap,
-            shortlist_size: 6,
-            admitted_count: 6,
-            equivalent_count: 1,
-            approximate_hit_count: 0,
-            proposals_with_approx_hit_count: 0,
-            max_frontier_nodes_expanded: 6,
-            max_total_visited_nodes: 846,
-            total_elapsed_ms: 78,
-            proposals: Vec::new(),
-        };
-        let higher_power = StrategyReport {
-            strategy: StrategyKind::HigherPowerGap,
-            shortlist_size: 6,
-            admitted_count: 6,
-            equivalent_count: 0,
-            approximate_hit_count: 2,
-            proposals_with_approx_hit_count: 1,
-            max_frontier_nodes_expanded: 5,
-            max_total_visited_nodes: 800,
-            total_elapsed_ms: 70,
-            proposals: Vec::new(),
-        };
+        let blind = strategy_report(6, 1, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(6, 0, 2, 5, 800, 70);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
 
         assert_eq!(
             decide_keep_or_reject(&blind, &higher_power),
@@ -593,30 +573,59 @@ mod tests {
 
     #[test]
     fn keep_decision_rejects_exact_tie() {
-        let blind = StrategyReport {
-            strategy: StrategyKind::BlindCoarseGap,
-            shortlist_size: 6,
-            admitted_count: 6,
-            equivalent_count: 0,
-            approximate_hit_count: 0,
-            proposals_with_approx_hit_count: 0,
-            max_frontier_nodes_expanded: 6,
-            max_total_visited_nodes: 846,
-            total_elapsed_ms: 78,
-            proposals: Vec::new(),
-        };
-        let higher_power = StrategyReport {
-            strategy: StrategyKind::HigherPowerGap,
-            shortlist_size: 6,
-            admitted_count: 6,
-            equivalent_count: 0,
-            approximate_hit_count: 0,
-            proposals_with_approx_hit_count: 0,
-            max_frontier_nodes_expanded: 6,
-            max_total_visited_nodes: 846,
-            total_elapsed_ms: 78,
-            proposals: Vec::new(),
-        };
+        let blind = strategy_report(6, 0, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(6, 0, 0, 6, 846, 78);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "reject for now on this scout surface"
+        );
+    }
+
+    #[test]
+    fn keep_decision_accepts_more_equivalents() {
+        let blind = strategy_report(6, 0, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(6, 1, 0, 10, 1200, 150);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "keep for larger retained-lane scout follow-up"
+        );
+    }
+
+    #[test]
+    fn keep_decision_accepts_more_approximate_hits_with_tied_equivalents() {
+        let blind = strategy_report(6, 0, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(6, 2, 3, 10, 1200, 150);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
+        let mut blind = blind;
+        blind.equivalent_count = 2;
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "keep for larger retained-lane scout follow-up"
+        );
+    }
+
+    #[test]
+    fn keep_decision_accepts_strict_budget_improvement_without_elapsed_only_promotion() {
+        let blind = strategy_report(6, 0, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(6, 0, 0, 6, 845, 500);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "keep for larger retained-lane scout follow-up"
+        );
+    }
+
+    #[test]
+    fn keep_decision_rejects_elapsed_only_improvement() {
+        let blind = strategy_report(6, 0, 0, 6, 846, 78);
+        let mut higher_power = strategy_report(6, 0, 0, 6, 846, 70);
+        higher_power.strategy = StrategyKind::HigherPowerGap;
 
         assert_eq!(
             decide_keep_or_reject(&blind, &higher_power),
