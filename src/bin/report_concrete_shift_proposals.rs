@@ -22,6 +22,11 @@ struct Cli {
     bridge_sample_limit: usize,
 }
 
+enum CliAction {
+    Run(Cli),
+    Help,
+}
+
 #[derive(Debug, Serialize)]
 struct Report {
     schema_version: u32,
@@ -43,7 +48,13 @@ struct CaseReport {
 }
 
 fn main() -> Result<(), String> {
-    let cli = parse_cli(std::env::args().skip(1))?;
+    let cli = match parse_cli(std::env::args().skip(1))? {
+        CliAction::Run(cli) => cli,
+        CliAction::Help => {
+            println!("{}", usage());
+            return Ok(());
+        }
+    };
     let cases = load_cases(&cli.case_ids)?;
     let config = ConcreteShiftSearchConfig2x2 {
         relation: cli.relation,
@@ -73,7 +84,7 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
+fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
     let mut case_ids = Vec::new();
     let mut relation = ConcreteShiftRelation2x2::Aligned;
     let mut bounds = ConcreteShiftProposalBounds2x2 {
@@ -110,10 +121,7 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                 std::process::exit(0);
             }
             "--help" | "-h" => {
-                return Err("Usage: report_concrete_shift_proposals [--case CASE ...]\
-\n       [--relation aligned|balanced|compatible] [--max-lag N] [--max-entry N]\
-\n       [--max-witnesses N] [--bridge-sample-limit N] [--list-cases]"
-                    .to_string());
+                return Ok(CliAction::Help);
             }
             other => {
                 return Err(format!("unrecognized argument: {other}"));
@@ -131,12 +139,18 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
         return Err("--max-witnesses must be at least 1".to_string());
     }
 
-    Ok(Cli {
+    Ok(CliAction::Run(Cli {
         case_ids,
         relation,
         bounds,
         bridge_sample_limit,
-    })
+    }))
+}
+
+fn usage() -> &'static str {
+    "Usage: report_concrete_shift_proposals [--case CASE ...]\
+\n       [--relation aligned|balanced|compatible] [--max-lag N] [--max-entry N]\
+\n       [--max-witnesses N] [--bridge-sample-limit N] [--list-cases]"
 }
 
 fn parse_relation(value: &str) -> Result<ConcreteShiftRelation2x2, String> {
@@ -244,11 +258,13 @@ fn run_case(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_cli;
+    use super::{parse_cli, CliAction};
 
     #[test]
     fn parse_cli_defaults_to_nontrivial_control() {
-        let cli = parse_cli(Vec::<String>::new().into_iter()).unwrap();
+        let CliAction::Run(cli) = parse_cli(Vec::<String>::new().into_iter()).unwrap() else {
+            panic!("expected runnable cli");
+        };
         assert_eq!(cli.case_ids, vec!["lag_one_shortcut_control"]);
         assert_eq!(cli.bridge_sample_limit, 2);
         assert_eq!(cli.bounds.max_lag, 1);
@@ -256,7 +272,7 @@ mod tests {
 
     #[test]
     fn parse_cli_accepts_relation_and_bounds() {
-        let cli = parse_cli(
+        let CliAction::Run(cli) = parse_cli(
             vec![
                 "--case".to_string(),
                 "identity".to_string(),
@@ -273,7 +289,9 @@ mod tests {
             ]
             .into_iter(),
         )
-        .unwrap();
+        .unwrap() else {
+            panic!("expected runnable cli");
+        };
 
         assert_eq!(cli.case_ids, vec!["identity"]);
         assert_eq!(cli.relation.as_str(), "compatible");
@@ -281,5 +299,11 @@ mod tests {
         assert_eq!(cli.bounds.max_entry, 3);
         assert_eq!(cli.bounds.max_witnesses, 64);
         assert_eq!(cli.bridge_sample_limit, 1);
+    }
+
+    #[test]
+    fn parse_cli_treats_help_as_successful_action() {
+        let action = parse_cli(vec!["--help".to_string()].into_iter()).unwrap();
+        assert!(matches!(action, CliAction::Help));
     }
 }

@@ -16,7 +16,9 @@ bounded concrete-shift-positive control data with:
 - explicit non-path semantics (`artifact_kind = "concrete_shift_proposal_data"`
   and `replayable_as_full_path = false`);
 - relation validation plus bijection-shape validation before bridge sampling,
-  so malformed witnesses return `Err` instead of panicking or being mislabeled;
+  plus bound-consistency checks on reported `max_lag` / `max_entry`, so
+  malformed or misdescribed witnesses return `Err` instead of panicking or
+  being mislabeled;
 - relation, lag, search bounds, and a stable `fnv1a64` witness signature;
 - compact `R` / `S` matrix support summaries;
 - lag-power support summaries for `A^m` and `B^m`;

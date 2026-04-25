@@ -861,6 +861,19 @@ pub fn concrete_shift_proposal_data_2x2(
     sample_limit_per_fiber: usize,
 ) -> Result<ConcreteShiftProposalData2x2, String> {
     verify_concrete_shift_relation_2x2(a, b, witness, relation)?;
+    if witness.shift.lag > bounds.max_lag {
+        return Err(format!(
+            "witness lag {} exceeds reported max_lag {}",
+            witness.shift.lag, bounds.max_lag
+        ));
+    }
+    let witness_max_entry = witness.shift.r.max_entry().max(witness.shift.s.max_entry());
+    if witness_max_entry > bounds.max_entry {
+        return Err(format!(
+            "witness max entry {} exceeds reported max_entry {}",
+            witness_max_entry, bounds.max_entry
+        ));
+    }
     let ctx = ModuleContext::new(a, b, &witness.shift)?;
     let lag = witness.shift.lag;
     let shift_signature = format!(
@@ -2320,6 +2333,32 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("omega_e fiber 0 has wrong length"));
+    }
+
+    #[test]
+    fn test_concrete_shift_proposal_data_rejects_inconsistent_bounds() {
+        let a = SqMatrix::identity();
+        let shift = ShiftEquivalenceWitness2x2 {
+            lag: 1,
+            r: SqMatrix::identity(),
+            s: SqMatrix::identity(),
+        };
+        let witness = canonical_module_shift_witness_2x2(&a, &a, shift).expect("expected witness");
+        let err = concrete_shift_proposal_data_2x2(
+            &a,
+            &a,
+            ConcreteShiftRelation2x2::Compatible,
+            &witness,
+            ConcreteShiftProposalBounds2x2 {
+                max_lag: 0,
+                max_entry: 1,
+                max_witnesses: 8,
+            },
+            1,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("exceeds reported max_lag"));
     }
 
     #[test]
