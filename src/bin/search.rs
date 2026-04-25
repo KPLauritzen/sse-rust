@@ -482,6 +482,11 @@ where
             "--endpoint-witness-guide-ranks requires --endpoint-witness-guide-dir".to_string(),
         );
     }
+    if !endpoint_witness_control_guides.is_empty() && endpoint_witness_inventory.is_none() {
+        return Err(
+            "--endpoint-witness-control-guide requires --endpoint-witness-inventory".to_string(),
+        );
+    }
 
     Ok(Cli {
         a,
@@ -518,11 +523,17 @@ fn parse_control_guide_spec(value: &str) -> Result<ControlGuideSpec, String> {
         return Err("--endpoint-witness-control-guide path must not be empty".to_string());
     }
     let (path, artifact_id) = match path.rsplit_once('#') {
-        Some((path, artifact_id)) if !artifact_id.trim().is_empty() => (
+        Some((_path, artifact_id)) if artifact_id.trim().is_empty() => {
+            return Err(
+                "--endpoint-witness-control-guide artifact id after # must not be empty"
+                    .to_string(),
+            );
+        }
+        Some((path, artifact_id)) => (
             path.trim().to_string(),
             Some(artifact_id.trim().to_string()),
         ),
-        _ => (path.to_string(), None),
+        None => (path.to_string(), None),
     };
     if path.is_empty() {
         return Err("--endpoint-witness-control-guide path must not be empty".to_string());
@@ -1505,6 +1516,46 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("path must not be empty"));
+    }
+
+    #[test]
+    fn parse_cli_rejects_empty_endpoint_witness_control_artifact_id() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "1".to_string(),
+                "--endpoint-witness-inventory".to_string(),
+                "inventory.json".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=control.json#".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("artifact id after # must not be empty"));
+    }
+
+    #[test]
+    fn parse_cli_rejects_endpoint_witness_control_without_inventory() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "1".to_string(),
+                "--endpoint-witness-guide-dir".to_string(),
+                "guides".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=control.json".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("requires --endpoint-witness-inventory"));
     }
 
     #[test]
