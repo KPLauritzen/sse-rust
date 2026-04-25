@@ -2053,6 +2053,7 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
             telemetry,
         );
     }
+    telemetry.total_visited_nodes = 2;
 
     for layer_index in 0..config.max_lag {
         let next_fwd_depth = fwd_frontier
@@ -2258,7 +2259,6 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                     .saturating_sub(parents_with_progress.len());
                 telemetry.dead_end_nodes += dead_end_nodes;
                 telemetry.enqueued_nodes += enqueued_nodes;
-                telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
                 accumulate_move_family_telemetry(
                     &mut telemetry.move_family_telemetry,
                     &layer_move_family_telemetry,
@@ -2312,6 +2312,7 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                     telemetry,
                 );
             }
+            telemetry.total_visited_nodes += 1;
 
             if approximate_hit {
                 approximate_other_side_hits += 1;
@@ -2370,7 +2371,6 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
             .saturating_sub(parents_with_progress.len());
         telemetry.dead_end_nodes += dead_end_nodes;
         telemetry.enqueued_nodes += enqueued_nodes;
-        telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
         accumulate_move_family_telemetry(
             &mut telemetry.move_family_telemetry,
             &layer_move_family_telemetry,
