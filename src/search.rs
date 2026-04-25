@@ -8615,6 +8615,67 @@ mod tests {
     }
 
     #[test]
+    fn test_same_future_past_representative_selection_is_stable_under_reversed_input() {
+        let parent = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let graph_a = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 1, 1]);
+        let graph_b = DynMatrix::new(3, 3, vec![1, 0, 1, 1, 0, 1, 0, 1, 1]);
+        let factorised = DynMatrix::new(3, 3, vec![1, 1, 0, 0, 1, 1, 1, 0, 1]);
+        let graph_a_signature = same_future_past_signature(&graph_a);
+        let graph_b_signature = same_future_past_signature(&graph_b);
+        let dummy_step = EsseStep {
+            u: DynMatrix::new(1, 1, vec![1]),
+            v: DynMatrix::new(1, 1, vec![1]),
+        };
+        let expansions = vec![
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 0),
+                parent_canon: parent.clone(),
+                next_canon: graph_a.clone(),
+                next_orig: graph_a,
+                step: dummy_step.clone(),
+                move_family: "graph_a",
+                same_future_past_signature: graph_a_signature,
+            },
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 1),
+                parent_canon: parent.clone(),
+                next_canon: graph_b.clone(),
+                next_orig: graph_b,
+                step: dummy_step.clone(),
+                move_family: "graph_b",
+                same_future_past_signature: graph_b_signature,
+            },
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 2),
+                parent_canon: parent,
+                next_canon: factorised.clone(),
+                next_orig: factorised,
+                step: dummy_step,
+                move_family: "factorised",
+                same_future_past_signature: None,
+            },
+        ];
+
+        let reversed = expansions.into_iter().rev().collect();
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(reversed, true);
+
+        assert_eq!(same_future_past_collisions, 1);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(
+            deduped
+                .iter()
+                .map(|expansion| expansion.order_key)
+                .collect::<Vec<_>>(),
+            vec![
+                LayerExpansionOrderKey::new(0, 0),
+                LayerExpansionOrderKey::new(0, 2),
+            ]
+        );
+        assert_eq!(deduped[0].move_family, "graph_a");
+        assert_eq!(deduped[1].move_family, "factorised");
+    }
+
+    #[test]
     fn test_deduplicate_expansions_keeps_lowest_order_key_canonical_representative() {
         let parent_a = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
         let parent_b = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
@@ -8654,6 +8715,54 @@ mod tests {
         ];
 
         let (deduped, same_future_past_collisions) = deduplicate_expansions(expansions, false);
+
+        assert_eq!(same_future_past_collisions, 0);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].order_key, LayerExpansionOrderKey::new(0, 0));
+        assert_eq!(deduped[0].move_family, "first");
+    }
+
+    #[test]
+    fn test_deduplicate_expansions_keeps_lowest_order_key_under_reversed_input() {
+        let parent_a = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let parent_b = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let next = DynMatrix::new(2, 2, vec![2, 1, 1, 1]);
+        let dummy_step = EsseStep {
+            u: DynMatrix::new(1, 1, vec![1]),
+            v: DynMatrix::new(1, 1, vec![1]),
+        };
+        let expansions = vec![
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 0),
+                parent_canon: parent_a.clone(),
+                next_canon: next.clone(),
+                next_orig: next.clone(),
+                step: dummy_step.clone(),
+                move_family: "first",
+                same_future_past_signature: None,
+            },
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(0, 1),
+                parent_canon: parent_b,
+                next_canon: next.clone(),
+                next_orig: next.clone(),
+                step: dummy_step.clone(),
+                move_family: "second",
+                same_future_past_signature: None,
+            },
+            FrontierExpansion {
+                order_key: LayerExpansionOrderKey::new(1, 0),
+                parent_canon: parent_a,
+                next_canon: next.clone(),
+                next_orig: next,
+                step: dummy_step,
+                move_family: "third",
+                same_future_past_signature: None,
+            },
+        ];
+
+        let reversed = expansions.into_iter().rev().collect();
+        let (deduped, same_future_past_collisions) = deduplicate_expansions(reversed, false);
 
         assert_eq!(same_future_past_collisions, 0);
         assert_eq!(deduped.len(), 1);
