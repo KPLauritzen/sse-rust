@@ -323,21 +323,7 @@ fn evaluate_case(scout: &ScoutCase, cli: &Cli) -> Result<Report, String> {
         &mut probe_cache,
     );
 
-    let keep_decision = if higher_power_strategy.approximate_hit_count
-        > blind_strategy.approximate_hit_count
-        || higher_power_strategy.equivalent_count > blind_strategy.equivalent_count
-        || (higher_power_strategy.approximate_hit_count == blind_strategy.approximate_hit_count
-            && higher_power_strategy.equivalent_count == blind_strategy.equivalent_count
-            && higher_power_strategy.max_frontier_nodes_expanded
-                <= blind_strategy.max_frontier_nodes_expanded
-            && higher_power_strategy.max_total_visited_nodes
-                <= blind_strategy.max_total_visited_nodes
-            && higher_power_strategy.total_elapsed_ms <= blind_strategy.total_elapsed_ms)
-    {
-        "keep for larger retained-lane scout follow-up".to_string()
-    } else {
-        "reject for now on this scout surface".to_string()
-    };
+    let keep_decision = decide_keep_or_reject(&blind_strategy, &higher_power_strategy);
 
     Ok(Report {
         scout_case_id: scout.id,
@@ -456,6 +442,27 @@ fn run_probe(proposal: &DynMatrix, target: &DynMatrix, config: &SearchConfig) ->
     }
 }
 
+fn decide_keep_or_reject(
+    blind_strategy: &StrategyReport,
+    higher_power_strategy: &StrategyReport,
+) -> String {
+    if higher_power_strategy.approximate_hit_count > blind_strategy.approximate_hit_count
+        || higher_power_strategy.equivalent_count > blind_strategy.equivalent_count
+        || (higher_power_strategy.approximate_hit_count == blind_strategy.approximate_hit_count
+            && higher_power_strategy.equivalent_count == blind_strategy.equivalent_count
+            && higher_power_strategy.admitted_count >= blind_strategy.admitted_count
+            && higher_power_strategy.max_frontier_nodes_expanded
+                <= blind_strategy.max_frontier_nodes_expanded
+            && higher_power_strategy.max_total_visited_nodes
+                <= blind_strategy.max_total_visited_nodes
+            && higher_power_strategy.total_elapsed_ms <= blind_strategy.total_elapsed_ms)
+    {
+        "keep for larger retained-lane scout follow-up".to_string()
+    } else {
+        "reject for now on this scout surface".to_string()
+    }
+}
+
 fn summarize_result(result: &DynSseResult) -> (String, Option<String>, Option<usize>) {
     match result {
         DynSseResult::Equivalent(path) => ("equivalent".to_string(), None, Some(path.steps.len())),
@@ -504,5 +511,36 @@ mod tests {
         let scout = scout_case();
         assert_eq!(scout.current.rows, scout.current.cols);
         assert_eq!(scout.target.rows, scout.target.cols);
+    }
+
+    #[test]
+    fn keep_decision_rejects_lower_admission_tie_break() {
+        let blind = StrategyReport {
+            strategy: StrategyKind::BlindCoarseGap,
+            shortlist_size: 6,
+            admitted_count: 6,
+            equivalent_count: 0,
+            approximate_hit_count: 0,
+            max_frontier_nodes_expanded: 6,
+            max_total_visited_nodes: 846,
+            total_elapsed_ms: 78,
+            proposals: Vec::new(),
+        };
+        let higher_power = StrategyReport {
+            strategy: StrategyKind::HigherPowerGap,
+            shortlist_size: 6,
+            admitted_count: 5,
+            equivalent_count: 0,
+            approximate_hit_count: 0,
+            max_frontier_nodes_expanded: 5,
+            max_total_visited_nodes: 800,
+            total_elapsed_ms: 70,
+            proposals: Vec::new(),
+        };
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "reject for now on this scout surface"
+        );
     }
 }
