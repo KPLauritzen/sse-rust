@@ -7,6 +7,7 @@ use sse_core::matrix::DynMatrix;
 const DEFAULT_RANK: usize = 4;
 const DEFAULT_MAX_DELTA: u32 = 12;
 const MAX_DELTA_CAP: u32 = 64;
+const RETAINED_DIAGONAL_HOTSPOT_CLUSTER_RANKS: [usize; 2] = [4, 6];
 
 fn main() {
     if let Err(err) = run() {
@@ -27,14 +28,23 @@ fn run() -> Result<(), String> {
         .map_err(|err| format!("failed to read {}: {err}", cli.input.display()))?;
     let report: StuckStateReport =
         serde_json::from_str(&raw).map_err(|err| format!("failed to parse input JSON: {err}"))?;
-    let hit = report
-        .ranked_approximate_hits
-        .iter()
-        .find(|hit| hit.rank == cli.rank)
-        .ok_or_else(|| format!("rank {} not present in input report", cli.rank))?;
-    let analysis = analyze_hit(hit, cli.max_delta)?;
-    let json = serde_json::to_string_pretty(&analysis)
-        .map_err(|err| format!("failed to serialize analysis: {err}"))?;
+    let json = match cli.mode {
+        CliMode::SingleRank(rank) => {
+            let hit = report
+                .ranked_approximate_hits
+                .iter()
+                .find(|hit| hit.rank == rank)
+                .ok_or_else(|| format!("rank {rank} not present in input report"))?;
+            let analysis = analyze_hit(hit, cli.max_delta)?;
+            serde_json::to_string_pretty(&analysis)
+                .map_err(|err| format!("failed to serialize analysis: {err}"))?
+        }
+        CliMode::RetainedDiagonalHotspotCluster => {
+            let sweep = analyze_retained_diagonal_hotspot_cluster(&report, cli.max_delta);
+            serde_json::to_string_pretty(&sweep)
+                .map_err(|err| format!("failed to serialize sweep: {err}"))?
+        }
+    };
 
     if let Some(path) = cli.json_out {
         if let Some(parent) = path.parent() {
@@ -57,8 +67,14 @@ fn run() -> Result<(), String> {
 struct Cli {
     input: PathBuf,
     json_out: Option<PathBuf>,
-    rank: usize,
+    mode: CliMode,
     max_delta: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CliMode {
+    SingleRank(usize),
+    RetainedDiagonalHotspotCluster,
 }
 
 fn parse_cli<I>(mut args: I) -> Result<Cli, String>
@@ -68,6 +84,8 @@ where
     let mut input = None;
     let mut json_out = None;
     let mut rank = DEFAULT_RANK;
+    let mut rank_explicit = false;
+    let mut sweep_cluster = false;
     let mut max_delta = DEFAULT_MAX_DELTA;
 
     while let Some(arg) = args.next() {
@@ -86,6 +104,10 @@ where
                     .ok_or("--rank requires a value")?
                     .parse()
                     .map_err(|_| "invalid --rank".to_string())?;
+                rank_explicit = true;
+            }
+            "--sweep-retained-diagonal-hotspot-cluster" => {
+                sweep_cluster = true;
             }
             "--max-delta" => {
                 max_delta = args
@@ -105,6 +127,11 @@ where
     if rank == 0 {
         return Err("--rank must be at least 1".to_string());
     }
+    if sweep_cluster && rank_explicit {
+        return Err(
+            "--rank cannot be combined with --sweep-retained-diagonal-hotspot-cluster".to_string(),
+        );
+    }
     if max_delta == 0 {
         return Err("--max-delta must be at least 1".to_string());
     }
@@ -115,14 +142,18 @@ where
     Ok(Cli {
         input,
         json_out,
-        rank,
+        mode: if sweep_cluster {
+            CliMode::RetainedDiagonalHotspotCluster
+        } else {
+            CliMode::SingleRank(rank)
+        },
         max_delta,
     })
 }
 
 fn usage() -> String {
     format!(
-        "usage: diagnose_brix_ruiz_k4_active_block_switches --input PATH [--rank N] [--max-delta N <= {MAX_DELTA_CAP}] [--json-out PATH]"
+        "usage: diagnose_brix_ruiz_k4_active_block_switches --input PATH [--rank N | --sweep-retained-diagonal-hotspot-cluster] [--max-delta N <= {MAX_DELTA_CAP}] [--json-out PATH]"
     )
 }
 
@@ -163,10 +194,14 @@ struct SwitchAnalysis {
     best_canonical_distance: u64,
     exact_canonical_distance_improved: bool,
     exact_canonical_match_found: bool,
+    exact_canonical_matches: usize,
     total_proposals: usize,
     accepted_signature_preserving: usize,
     rejected_signature_changing: usize,
     improved_signature_preserving: usize,
+    best_improvement_magnitude: Option<i64>,
+    median_improvement_magnitude: Option<f64>,
+    exact_canonical_l1_improvement_magnitudes: Vec<i64>,
     best_proposals: Vec<SwitchProposal>,
     from_matrix: DynMatrix,
     to_matrix: DynMatrix,
@@ -202,6 +237,177 @@ enum SwitchOrientation {
     AddAntiDiagonal,
 }
 
+#[derive(Serialize)]
+struct SwitchSweepReport {
+    proposal: &'static str,
+    decision_scope: &'static str,
+    cluster_selection: ClusterSelection,
+    max_delta: u32,
+    retained_pairs_considered: usize,
+    skipped_pairs: Vec<SkippedPair>,
+    aggregate: SwitchAggregate,
+    per_rank: Vec<RankSweepResult>,
+}
+
+#[derive(Serialize)]
+struct ClusterSelection {
+    ranks: Vec<usize>,
+    move_family: &'static str,
+    active_block_shapes: Vec<&'static str>,
+    source: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+struct SkippedPair {
+    rank: usize,
+    reason: String,
+}
+
+#[derive(Clone, Serialize)]
+struct SwitchAggregate {
+    retained_pairs_considered: usize,
+    skipped_pairs: usize,
+    total_nonnegative_switches: usize,
+    signature_preserving_switches: usize,
+    signature_changing_switches: usize,
+    exact_canonical_l1_improvements: usize,
+    best_improvement_magnitude: Option<i64>,
+    median_improvement_magnitude: Option<f64>,
+    exact_canonical_matches: usize,
+}
+
+#[derive(Serialize)]
+struct RankSweepResult {
+    rank: usize,
+    status: &'static str,
+    skip_reason: Option<String>,
+    total_nonnegative_switches: usize,
+    signature_preserving_switches: usize,
+    signature_changing_switches: usize,
+    exact_canonical_l1_improvements: usize,
+    best_improvement_magnitude: Option<i64>,
+    median_improvement_magnitude: Option<f64>,
+    exact_canonical_matches: usize,
+    analysis: Option<SwitchAnalysis>,
+}
+
+fn analyze_retained_diagonal_hotspot_cluster(
+    report: &StuckStateReport,
+    max_delta: u32,
+) -> SwitchSweepReport {
+    let mut per_rank = Vec::new();
+    let mut skipped_pairs = Vec::new();
+    let mut aggregate = SwitchAggregate {
+        retained_pairs_considered: RETAINED_DIAGONAL_HOTSPOT_CLUSTER_RANKS.len(),
+        skipped_pairs: 0,
+        total_nonnegative_switches: 0,
+        signature_preserving_switches: 0,
+        signature_changing_switches: 0,
+        exact_canonical_l1_improvements: 0,
+        best_improvement_magnitude: None,
+        median_improvement_magnitude: None,
+        exact_canonical_matches: 0,
+    };
+    let mut aggregate_improvements = Vec::new();
+
+    for rank in RETAINED_DIAGONAL_HOTSPOT_CLUSTER_RANKS {
+        let Some(hit) = report
+            .ranked_approximate_hits
+            .iter()
+            .find(|hit| hit.rank == rank)
+        else {
+            let reason = "rank not present in input report".to_string();
+            skipped_pairs.push(SkippedPair {
+                rank,
+                reason: reason.clone(),
+            });
+            per_rank.push(RankSweepResult::skipped(rank, reason));
+            continue;
+        };
+
+        match analyze_hit(hit, max_delta) {
+            Ok(analysis) => {
+                aggregate.total_nonnegative_switches += analysis.total_proposals;
+                aggregate.signature_preserving_switches += analysis.accepted_signature_preserving;
+                aggregate.signature_changing_switches += analysis.rejected_signature_changing;
+                aggregate.exact_canonical_l1_improvements += analysis.improved_signature_preserving;
+                aggregate.exact_canonical_matches += analysis.exact_canonical_matches;
+                aggregate_improvements.extend(
+                    analysis
+                        .exact_canonical_l1_improvement_magnitudes
+                        .iter()
+                        .copied(),
+                );
+                aggregate.best_improvement_magnitude = max_option(
+                    aggregate.best_improvement_magnitude,
+                    analysis.best_improvement_magnitude,
+                );
+                per_rank.push(RankSweepResult::analyzed(analysis));
+            }
+            Err(reason) => {
+                skipped_pairs.push(SkippedPair {
+                    rank,
+                    reason: reason.clone(),
+                });
+                per_rank.push(RankSweepResult::skipped(rank, reason));
+            }
+        }
+    }
+
+    aggregate.skipped_pairs = skipped_pairs.len();
+    aggregate.median_improvement_magnitude = median_i64(&mut aggregate_improvements);
+
+    SwitchSweepReport {
+        proposal: "bounded_2x2_active_block_contingency_switch",
+        decision_scope: "diagnostic_only_not_an_sse_family",
+        cluster_selection: ClusterSelection {
+            ranks: RETAINED_DIAGONAL_HOTSPOT_CLUSTER_RANKS.to_vec(),
+            move_family: "diagonal_refactorization_4x4",
+            active_block_shapes: vec!["2x4", "4x2"],
+            source: "retained nw7.6 Brix-Ruiz k=4 graph_plus_structured stuck-state artifact",
+        },
+        max_delta,
+        retained_pairs_considered: RETAINED_DIAGONAL_HOTSPOT_CLUSTER_RANKS.len(),
+        skipped_pairs,
+        aggregate,
+        per_rank,
+    }
+}
+
+impl RankSweepResult {
+    fn analyzed(analysis: SwitchAnalysis) -> Self {
+        Self {
+            rank: analysis.rank,
+            status: "analyzed",
+            skip_reason: None,
+            total_nonnegative_switches: analysis.total_proposals,
+            signature_preserving_switches: analysis.accepted_signature_preserving,
+            signature_changing_switches: analysis.rejected_signature_changing,
+            exact_canonical_l1_improvements: analysis.improved_signature_preserving,
+            best_improvement_magnitude: analysis.best_improvement_magnitude,
+            median_improvement_magnitude: analysis.median_improvement_magnitude,
+            exact_canonical_matches: analysis.exact_canonical_matches,
+            analysis: Some(analysis),
+        }
+    }
+
+    fn skipped(rank: usize, reason: String) -> Self {
+        Self {
+            rank,
+            status: "skipped",
+            skip_reason: Some(reason),
+            total_nonnegative_switches: 0,
+            signature_preserving_switches: 0,
+            signature_changing_switches: 0,
+            exact_canonical_l1_improvements: 0,
+            best_improvement_magnitude: None,
+            median_improvement_magnitude: None,
+            exact_canonical_matches: 0,
+            analysis: None,
+        }
+    }
+}
+
 fn analyze_hit(hit: &ApproximateHit, max_delta: u32) -> Result<SwitchAnalysis, String> {
     if hit.move_family != "diagonal_refactorization_4x4" {
         return Err(format!(
@@ -219,9 +425,9 @@ fn analyze_hit(hit: &ApproximateHit, max_delta: u32) -> Result<SwitchAnalysis, S
 
     let active_rows = active_rows(&hit.to_matrix);
     let active_cols = active_cols(&hit.to_matrix);
-    if active_rows.len() != 2 || active_cols.len() != 4 {
+    if !is_supported_active_block_shape(active_rows.len(), active_cols.len()) {
         return Err(format!(
-            "rank {} active block is {}x{}, expected 2x4",
+            "rank {} active block is {}x{}, expected 2x4 or 4x2",
             hit.rank,
             active_rows.len(),
             active_cols.len()
@@ -272,13 +478,21 @@ fn analyze_hit(hit: &ApproximateHit, max_delta: u32) -> Result<SwitchAnalysis, S
         .filter(|proposal| proposal.signature_preserving)
         .cloned()
         .collect::<Vec<_>>();
+    let mut improvement_magnitudes = accepted_proposals
+        .iter()
+        .filter_map(|proposal| (proposal.improvement > 0).then_some(proposal.improvement))
+        .collect::<Vec<_>>();
+    let best_improvement_magnitude = improvement_magnitudes.iter().copied().max();
+    let median_improvement_magnitude = median_i64(&mut improvement_magnitudes);
     let best_canonical_distance = accepted_proposals
         .first()
         .map(|proposal| proposal.canonical_distance)
         .unwrap_or(base_distance);
-    let exact_canonical_match_found = accepted_proposals
+    let exact_canonical_matches = accepted_proposals
         .iter()
-        .any(|proposal| proposal.canonical_distance == 0);
+        .filter(|proposal| proposal.canonical_distance == 0)
+        .count();
+    let exact_canonical_match_found = exact_canonical_matches > 0;
 
     Ok(SwitchAnalysis {
         proposal: "bounded_2x2_active_block_contingency_switch",
@@ -301,15 +515,23 @@ fn analyze_hit(hit: &ApproximateHit, max_delta: u32) -> Result<SwitchAnalysis, S
         best_canonical_distance,
         exact_canonical_distance_improved: best_canonical_distance < base_distance,
         exact_canonical_match_found,
+        exact_canonical_matches,
         total_proposals,
         accepted_signature_preserving,
         rejected_signature_changing,
         improved_signature_preserving,
+        best_improvement_magnitude,
+        median_improvement_magnitude,
+        exact_canonical_l1_improvement_magnitudes: improvement_magnitudes,
         best_proposals: accepted_proposals.into_iter().take(8).collect(),
         from_matrix: hit.from_matrix.clone(),
         to_matrix: hit.to_matrix.clone(),
         counterpart_matrix: counterpart,
     })
+}
+
+fn is_supported_active_block_shape(active_rows: usize, active_cols: usize) -> bool {
+    matches!((active_rows, active_cols), (2, 4) | (4, 2))
 }
 
 fn validate_square_4x4(matrix: &DynMatrix, label: &str) -> Result<(), String> {
@@ -480,6 +702,27 @@ fn matrix_l1_distance(left: &DynMatrix, right: &DynMatrix) -> u64 {
         .sum()
 }
 
+fn max_option(left: Option<i64>, right: Option<i64>) -> Option<i64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn median_i64(values: &mut [i64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    let mid = values.len() / 2;
+    if values.len() % 2 == 1 {
+        Some(values[mid] as f64)
+    } else {
+        Some((values[mid - 1] as f64 + values[mid] as f64) / 2.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,6 +757,9 @@ mod tests {
         assert_eq!(analysis.improved_signature_preserving, 2);
         assert_eq!(analysis.base_canonical_distance, 22);
         assert_eq!(analysis.best_canonical_distance, 20);
+        assert_eq!(analysis.best_improvement_magnitude, Some(2));
+        assert_eq!(analysis.median_improvement_magnitude, Some(2.0));
+        assert_eq!(analysis.exact_canonical_matches, 0);
         assert!(!analysis.exact_canonical_match_found);
         assert!(analysis
             .best_proposals
@@ -576,5 +822,91 @@ mod tests {
         let err = parse_cli(args.into_iter()).expect_err("large cap should be rejected");
 
         assert!(err.contains("--max-delta must be at most"));
+    }
+
+    #[test]
+    fn cli_rejects_rank_with_cluster_sweep() {
+        let args = vec![
+            "--input".to_string(),
+            "tmp/input.json".to_string(),
+            "--rank".to_string(),
+            "4".to_string(),
+            "--sweep-retained-diagonal-hotspot-cluster".to_string(),
+        ];
+
+        let err = parse_cli(args.into_iter()).expect_err("ranked cluster sweep should be rejected");
+
+        assert!(err.contains("--rank cannot be combined"));
+    }
+
+    #[test]
+    fn cluster_sweep_analyzes_rank4_and_rank6_shapes() {
+        let report = StuckStateReport {
+            ranked_approximate_hits: vec![
+                ApproximateHit {
+                    rank: 4,
+                    layer_index: 75,
+                    direction: "forward".to_string(),
+                    move_family: "diagonal_refactorization_4x4".to_string(),
+                    from_depth: 35,
+                    to_depth: 36,
+                    counterpart_depth: Some(2),
+                    bridge_slack_at_lag40: Some(2),
+                    counterpart_l1: Some(22),
+                    from_matrix: DynMatrix::new(
+                        4,
+                        4,
+                        vec![1, 4, 1, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0],
+                    ),
+                    to_matrix: DynMatrix::new(
+                        4,
+                        4,
+                        vec![1, 4, 2, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0],
+                    ),
+                    counterpart_matrix: Some(DynMatrix::new(
+                        4,
+                        4,
+                        vec![1, 12, 0, 1, 1, 1, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+                    )),
+                },
+                ApproximateHit {
+                    rank: 6,
+                    layer_index: 58,
+                    direction: "backward".to_string(),
+                    move_family: "diagonal_refactorization_4x4".to_string(),
+                    from_depth: 30,
+                    to_depth: 31,
+                    counterpart_depth: Some(6),
+                    bridge_slack_at_lag40: Some(3),
+                    counterpart_l1: Some(14),
+                    from_matrix: DynMatrix::new(
+                        4,
+                        4,
+                        vec![0, 1, 3, 0, 0, 1, 1, 0, 0, 11, 0, 0, 0, 1, 2, 0],
+                    ),
+                    to_matrix: DynMatrix::new(
+                        4,
+                        4,
+                        vec![0, 2, 3, 0, 0, 2, 1, 0, 0, 11, 0, 0, 0, 2, 2, 0],
+                    ),
+                    counterpart_matrix: Some(DynMatrix::new(
+                        4,
+                        4,
+                        vec![0, 2, 1, 0, 0, 1, 4, 0, 0, 3, 1, 0, 0, 11, 0, 0],
+                    )),
+                },
+            ],
+        };
+
+        let sweep = analyze_retained_diagonal_hotspot_cluster(&report, DEFAULT_MAX_DELTA);
+
+        assert_eq!(sweep.retained_pairs_considered, 2);
+        assert!(sweep.skipped_pairs.is_empty());
+        assert_eq!(sweep.per_rank.len(), 2);
+        assert_eq!(sweep.per_rank[1].status, "analyzed");
+        assert!(
+            sweep.aggregate.total_nonnegative_switches
+                > sweep.per_rank[0].total_nonnegative_switches
+        );
     }
 }
