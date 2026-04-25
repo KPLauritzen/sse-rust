@@ -209,6 +209,7 @@ fn main() {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         },
     }];
     if include_mixed {
@@ -223,6 +224,7 @@ fn main() {
                 beam_width: Some(mixed_beam_width),
                 beam_bfs_handoff_depth: None,
                 beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
             },
         });
     }
@@ -560,6 +562,12 @@ fn print_profiles(profiles: &[SearchProfile]) {
             FrontierMode::BeamBfsHandoff => {
                 format!(
                     "beam-bfs-handoff({})",
+                    profile.config.beam_width.unwrap_or(0)
+                )
+            }
+            FrontierMode::StratifiedBeamRefill => {
+                format!(
+                    "stratified-beam-refill({})",
                     profile.config.beam_width.unwrap_or(0)
                 )
             }

@@ -4,8 +4,8 @@ use crate::search_observer::{
     SearchStartRecord,
 };
 use crate::types::{
-    DynSseResult, GuidedRefinementConfig, SearchConfig, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
+    DynSseResult, FrontierMode, GuidedRefinementConfig, SearchConfig, SearchRequest,
+    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
 };
 
 use super::stages::{search_guided_refinement_with_observer, search_shortcut_search_with_observer};
@@ -135,10 +135,20 @@ fn execute_endpoint_search_request(
 ) -> (SearchRunResult, SearchTelemetry) {
     let a_sq = request.source.to_sq::<2>();
     let b_sq = request.target.to_sq::<2>();
-    if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
-        let (result, telemetry) =
-            search_sse_2x2_with_telemetry_and_observer(a, b, &request.config, observer);
-        (result.into(), telemetry)
+    if request.config.frontier_mode != FrontierMode::StratifiedBeamRefill {
+        if let (Some(a), Some(b)) = (a_sq.as_ref(), b_sq.as_ref()) {
+            let (result, telemetry) =
+                search_sse_2x2_with_telemetry_and_observer(a, b, &request.config, observer);
+            (result.into(), telemetry)
+        } else {
+            let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
+                &request.source,
+                &request.target,
+                &request.config,
+                observer,
+            );
+            (result.into(), telemetry)
+        }
     } else {
         let (result, telemetry) = search_sse_with_telemetry_dyn_and_observer(
             &request.source,

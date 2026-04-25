@@ -11,6 +11,7 @@ pub enum FrontierMode {
     Bfs,
     Beam,
     BeamBfsHandoff,
+    StratifiedBeamRefill,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -33,7 +34,10 @@ impl Default for FrontierMode {
 
 impl FrontierMode {
     pub fn uses_beam_width(self) -> bool {
-        matches!(self, Self::Beam | Self::BeamBfsHandoff)
+        matches!(
+            self,
+            Self::Beam | Self::BeamBfsHandoff | Self::StratifiedBeamRefill
+        )
     }
 }
 
@@ -490,6 +494,35 @@ pub struct SearchLayerTelemetry {
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StratifiedBeamRefillTelemetry {
+    pub active_admissions: usize,
+    pub deferred_admissions: usize,
+    pub drops_by_bucket_cap: usize,
+    pub drops_by_global_cap: usize,
+    pub refill_count: usize,
+    pub refill_exhausted: usize,
+    pub refill_below_threshold: usize,
+    pub refill_admissions: usize,
+    pub final_active_frontier_nodes: usize,
+    pub final_deferred_frontier_nodes: usize,
+}
+
+impl StratifiedBeamRefillTelemetry {
+    pub fn is_empty(&self) -> bool {
+        self.active_admissions == 0
+            && self.deferred_admissions == 0
+            && self.drops_by_bucket_cap == 0
+            && self.drops_by_global_cap == 0
+            && self.refill_count == 0
+            && self.refill_exhausted == 0
+            && self.refill_below_threshold == 0
+            && self.refill_admissions == 0
+            && self.final_active_frontier_nodes == 0
+            && self.final_deferred_frontier_nodes == 0
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EndpointExactMeetWitness {
     pub path_lag: usize,
@@ -577,6 +610,11 @@ pub struct SearchTelemetry {
     pub shortcut_search: ShortcutSearchTelemetry,
     pub move_family_telemetry: BTreeMap<String, SearchMoveFamilyTelemetry>,
     pub layers: Vec<SearchLayerTelemetry>,
+    #[serde(
+        default,
+        skip_serializing_if = "StratifiedBeamRefillTelemetry::is_empty"
+    )]
+    pub stratified_beam_refill: StratifiedBeamRefillTelemetry,
     #[serde(skip)]
     pub endpoint_exact_meets: Option<EndpointExactMeetSurface>,
 }
@@ -618,10 +656,13 @@ mod tests {
         let bfs: FrontierMode = serde_json::from_str("\"bfs\"").unwrap();
         let beam: FrontierMode = serde_json::from_str("\"beam\"").unwrap();
         let beam_bfs_handoff: FrontierMode = serde_json::from_str("\"beam_bfs_handoff\"").unwrap();
+        let stratified_beam_refill: FrontierMode =
+            serde_json::from_str("\"stratified_beam_refill\"").unwrap();
 
         assert_eq!(bfs, FrontierMode::Bfs);
         assert_eq!(beam, FrontierMode::Beam);
         assert_eq!(beam_bfs_handoff, FrontierMode::BeamBfsHandoff);
+        assert_eq!(stratified_beam_refill, FrontierMode::StratifiedBeamRefill);
     }
 
     #[test]

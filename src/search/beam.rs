@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use ahash::AHashSet as HashSet;
 
@@ -111,10 +111,56 @@ pub(super) struct BeamBfsHandoffExactMeet {
     pub(super) path_depth: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct StratifiedBeamPushOutcome {
+    pub(super) active_admitted: bool,
+    pub(super) deferred_admitted: bool,
+    pub(super) drops_by_bucket_cap: usize,
+    pub(super) drops_by_global_cap: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum StratifiedBeamRefillReason {
+    Exhausted,
+    BelowThreshold,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct StratifiedBeamRefillOutcome {
+    pub(super) reason: Option<StratifiedBeamRefillReason>,
+    pub(super) admitted: usize,
+}
+
 #[derive(Clone, Debug)]
 struct DeferredBeamFrontierEntry {
     entry: BeamFrontierEntry,
     retained_overflow: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct StratifiedBucketKey {
+    approximate_hit_priority: u8,
+    depth: usize,
+}
+
+impl StratifiedBucketKey {
+    fn from_entry(entry: &BeamFrontierEntry) -> Self {
+        Self {
+            approximate_hit_priority: u8::from(!entry.approximate_hit),
+            depth: entry.depth,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct StratifiedBeamRefillFrontier {
+    active: BeamFrontier,
+    active_width: usize,
+    refill_threshold: usize,
+    per_bucket_cap: usize,
+    deferred_cap: usize,
+    deferred_len: usize,
+    deferred: BTreeMap<StratifiedBucketKey, VecDeque<BeamFrontierEntry>>,
 }
 
 pub(super) const DEFAULT_BEAM_BFS_HANDOFF_DEPTH: usize = 4;
@@ -245,6 +291,215 @@ impl BeamBfsHandoffFrontier {
     }
 }
 
+impl StratifiedBeamRefillFrontier {
+    pub(super) fn new(beam_width: usize, deferred_cap: Option<usize>) -> Self {
+        let active_width = beam_width.max(1);
+        let deferred_cap = deferred_cap.unwrap_or_else(|| active_width.saturating_mul(8).max(1));
+        Self {
+            active: BeamFrontier::new(active_width),
+            active_width,
+            refill_threshold: (active_width / 4).max(1),
+            per_bucket_cap: (active_width / 2).max(1),
+            deferred_cap,
+            deferred_len: 0,
+            deferred: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn push(&mut self, entry: BeamFrontierEntry) -> StratifiedBeamPushOutcome {
+        let entry_serial = entry.serial;
+        let overflow = self.active.push(entry);
+        let mut outcome = StratifiedBeamPushOutcome {
+            active_admitted: true,
+            ..StratifiedBeamPushOutcome::default()
+        };
+        if let Some(overflow) = overflow {
+            outcome.active_admitted = overflow.serial != entry_serial;
+            let defer_outcome = self.defer_entry(overflow);
+            outcome.deferred_admitted = defer_outcome.deferred_admitted;
+            outcome.drops_by_bucket_cap += defer_outcome.drops_by_bucket_cap;
+            outcome.drops_by_global_cap += defer_outcome.drops_by_global_cap;
+        }
+        outcome
+    }
+
+    fn defer_entry(&mut self, entry: BeamFrontierEntry) -> StratifiedBeamPushOutcome {
+        let entry_serial = entry.serial;
+        let key = StratifiedBucketKey::from_entry(&entry);
+        let bucket = self.deferred.entry(key).or_default();
+        bucket.push_back(entry);
+        bucket
+            .make_contiguous()
+            .sort_by(compare_beam_frontier_entries);
+        self.deferred_len += 1;
+
+        let mut outcome = StratifiedBeamPushOutcome {
+            deferred_admitted: true,
+            ..StratifiedBeamPushOutcome::default()
+        };
+        if bucket.len() > self.per_bucket_cap {
+            let removed = bucket
+                .pop_back()
+                .expect("over-cap bucket should contain a removable entry");
+            self.deferred_len -= 1;
+            outcome.drops_by_bucket_cap += 1;
+            if removed.serial == entry_serial {
+                outcome.deferred_admitted = false;
+            }
+        }
+        let (global_drops, entry_dropped) = self.enforce_deferred_global_cap(entry_serial);
+        outcome.drops_by_global_cap += global_drops;
+        if entry_dropped {
+            outcome.deferred_admitted = false;
+        }
+        outcome
+    }
+
+    fn enforce_deferred_global_cap(&mut self, watched_serial: usize) -> (usize, bool) {
+        let mut drops = 0usize;
+        let mut watched_dropped = false;
+        while self.deferred_len > self.deferred_cap {
+            let Some((&key, _)) = self.deferred.iter().next_back() else {
+                break;
+            };
+            let mut remove_bucket = false;
+            if let Some(bucket) = self.deferred.get_mut(&key) {
+                let removed = bucket
+                    .pop_back()
+                    .expect("over-cap deferred bucket should contain a removable entry");
+                self.deferred_len -= 1;
+                drops += 1;
+                if removed.serial == watched_serial {
+                    watched_dropped = true;
+                }
+                remove_bucket = bucket.is_empty();
+            }
+            if remove_bucket {
+                self.deferred.remove(&key);
+            }
+        }
+        (drops, watched_dropped)
+    }
+
+    pub(super) fn maybe_refill(&mut self) -> StratifiedBeamRefillOutcome {
+        let reason = if self.active.len() == 0 {
+            Some(StratifiedBeamRefillReason::Exhausted)
+        } else if self.active.len() < self.refill_threshold {
+            Some(StratifiedBeamRefillReason::BelowThreshold)
+        } else {
+            None
+        };
+        let Some(reason) = reason else {
+            return StratifiedBeamRefillOutcome::default();
+        };
+        if self.deferred_len == 0 {
+            return StratifiedBeamRefillOutcome::default();
+        }
+
+        let mut admitted = 0usize;
+        while self.active.len() < self.active_width && self.deferred_len > 0 {
+            let keys = self.deferred.keys().copied().collect::<Vec<_>>();
+            let mut made_progress = false;
+            for key in keys {
+                if self.active.len() >= self.active_width {
+                    break;
+                }
+                let mut remove_bucket = false;
+                if let Some(bucket) = self.deferred.get_mut(&key) {
+                    if !bucket.is_empty() {
+                        let entry = bucket
+                            .pop_front()
+                            .expect("non-empty bucket should have a front entry");
+                        let overflow = self.active.push(entry);
+                        debug_assert!(overflow.is_none());
+                        self.deferred_len -= 1;
+                        admitted += 1;
+                        made_progress = true;
+                    }
+                    remove_bucket = bucket.is_empty();
+                }
+                if remove_bucket {
+                    self.deferred.remove(&key);
+                }
+            }
+            if !made_progress {
+                break;
+            }
+        }
+
+        StratifiedBeamRefillOutcome {
+            reason: Some(reason),
+            admitted,
+        }
+    }
+
+    pub(super) fn pop_active_batch(&mut self) -> Vec<BeamFrontierEntry> {
+        self.active
+            .pop_batch_same_depth(self.active.expansion_batch_size())
+    }
+
+    fn peek_active(&self) -> Option<&BeamFrontierEntry> {
+        self.active.peek()
+    }
+
+    pub(super) fn refresh_approximate_hits(
+        &mut self,
+        other_signatures: &HashSet<ApproxSignature>,
+    ) -> usize {
+        self.active.refresh_approximate_hits(other_signatures);
+        let mut needs_rebuild = false;
+        for entries in self.deferred.values_mut() {
+            for entry in entries {
+                if !entry.approximate_hit
+                    && other_signatures.contains(&approx_signature(&entry.canonical))
+                {
+                    entry.approximate_hit = true;
+                    needs_rebuild = true;
+                }
+            }
+        }
+        if !needs_rebuild {
+            return 0;
+        }
+
+        let mut rebuilt = BTreeMap::<StratifiedBucketKey, VecDeque<BeamFrontierEntry>>::new();
+        for (_, entries) in std::mem::take(&mut self.deferred) {
+            for entry in entries {
+                rebuilt
+                    .entry(StratifiedBucketKey::from_entry(&entry))
+                    .or_default()
+                    .push_back(entry);
+            }
+        }
+        let mut drops_by_bucket_cap = 0usize;
+        for bucket in rebuilt.values_mut() {
+            bucket
+                .make_contiguous()
+                .sort_by(compare_beam_frontier_entries);
+            while bucket.len() > self.per_bucket_cap {
+                bucket.pop_back();
+                self.deferred_len -= 1;
+                drops_by_bucket_cap += 1;
+            }
+        }
+        rebuilt.retain(|_, bucket| !bucket.is_empty());
+        self.deferred = rebuilt;
+        drops_by_bucket_cap
+    }
+
+    pub(super) fn active_len(&self) -> usize {
+        self.active.len()
+    }
+
+    pub(super) fn deferred_len(&self) -> usize {
+        self.deferred_len
+    }
+
+    pub(super) fn pending_len(&self) -> usize {
+        self.active.len() + self.deferred_len
+    }
+}
+
 fn compare_beam_frontier_entries(left: &BeamFrontierEntry, right: &BeamFrontierEntry) -> Ordering {
     right
         .approximate_hit
@@ -307,6 +562,22 @@ pub(super) fn choose_next_beam_bfs_handoff_direction(
         bwd_overlap_signal: FrontierOverlapSignal::default(),
     })
     .map(|(expand_forward, _)| expand_forward)
+}
+
+pub(super) fn choose_next_stratified_beam_refill_direction(
+    fwd_frontier: &StratifiedBeamRefillFrontier,
+    bwd_frontier: &StratifiedBeamRefillFrontier,
+) -> Option<bool> {
+    match (fwd_frontier.peek_active(), bwd_frontier.peek_active()) {
+        (Some(fwd), Some(bwd)) => match compare_beam_frontier_entries(fwd, bwd) {
+            Ordering::Less => Some(true),
+            Ordering::Greater => Some(false),
+            Ordering::Equal => Some(fwd_frontier.pending_len() <= bwd_frontier.pending_len()),
+        },
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        (None, None) => None,
+    }
 }
 
 pub(super) fn should_use_beam_bfs_handoff_phase(
@@ -398,6 +669,23 @@ pub(super) fn push_beam_bfs_handoff_entry(
     }
 }
 
+pub(super) fn push_stratified_beam_refill_entry(
+    frontier: &mut StratifiedBeamRefillFrontier,
+    canonical: &DynMatrix,
+    depth: usize,
+    other_signatures: &HashSet<ApproxSignature>,
+    target: &DynMatrix,
+    serial: &mut usize,
+) -> StratifiedBeamPushOutcome {
+    frontier.push(build_beam_frontier_entry(
+        canonical,
+        depth,
+        other_signatures,
+        target,
+        serial,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,6 +761,80 @@ mod tests {
         let best = frontier.pop_best().unwrap();
         assert!(best.approximate_hit);
         assert_eq!(best.canonical, exact);
+    }
+
+    #[test]
+    fn test_stratified_beam_refill_defers_overflow_by_bucket_and_refills() {
+        let mut frontier = StratifiedBeamRefillFrontier::new(2, Some(8));
+        assert!(frontier.push(beam_entry(1, 1, 1, false, 0)).active_admitted);
+        assert!(frontier.push(beam_entry(2, 1, 2, false, 1)).active_admitted);
+        let outcome = frontier.push(beam_entry(3, 1, 3, false, 2));
+
+        assert!(!outcome.active_admitted);
+        assert!(outcome.deferred_admitted);
+        assert_eq!(frontier.active_len(), 2);
+        assert_eq!(frontier.deferred_len(), 1);
+
+        let batch = frontier.pop_active_batch();
+        assert_eq!(batch.len(), 2);
+        let refill = frontier.maybe_refill();
+        assert_eq!(refill.reason, Some(StratifiedBeamRefillReason::Exhausted));
+        assert_eq!(refill.admitted, 1);
+        assert_eq!(frontier.active_len(), 1);
+        assert_eq!(frontier.deferred_len(), 0);
+    }
+
+    #[test]
+    fn test_stratified_beam_refill_enforces_bucket_and_global_caps() {
+        let mut bucket_capped = StratifiedBeamRefillFrontier::new(2, Some(8));
+        for serial in 0..5 {
+            bucket_capped.push(beam_entry(serial as u32, 1, serial as i64, false, serial));
+        }
+        assert_eq!(bucket_capped.active_len(), 2);
+        assert_eq!(bucket_capped.deferred_len(), 1);
+
+        let mut global_capped = StratifiedBeamRefillFrontier::new(2, Some(1));
+        for serial in 0..5 {
+            global_capped.push(beam_entry(
+                serial as u32,
+                serial,
+                serial as i64,
+                serial == 4,
+                serial,
+            ));
+        }
+        assert_eq!(global_capped.deferred_len(), 1);
+        assert_eq!(global_capped.pending_len(), 3);
+    }
+
+    #[test]
+    fn test_stratified_beam_refill_honors_zero_deferred_cap() {
+        let mut frontier = StratifiedBeamRefillFrontier::new(1, Some(0));
+        frontier.push(beam_entry(1, 1, 1, false, 0));
+        let outcome = frontier.push(beam_entry(2, 1, 2, false, 1));
+
+        assert!(!outcome.active_admitted);
+        assert!(!outcome.deferred_admitted);
+        assert_eq!(outcome.drops_by_global_cap, 1);
+        assert_eq!(frontier.active_len(), 1);
+        assert_eq!(frontier.deferred_len(), 0);
+    }
+
+    #[test]
+    fn test_stratified_beam_refill_refresh_reapplies_bucket_cap() {
+        let mut frontier = StratifiedBeamRefillFrontier::new(2, Some(8));
+        let stale_approx = beam_entry(1, 1, 1, false, 1);
+        let already_approx = beam_entry(2, 1, 2, true, 2);
+        frontier.defer_entry(stale_approx.clone());
+        frontier.defer_entry(already_approx);
+        assert_eq!(frontier.deferred_len(), 2);
+
+        let mut other_signatures = HashSet::new();
+        other_signatures.insert(approx_signature(&stale_approx.canonical));
+        let drops = frontier.refresh_approximate_hits(&other_signatures);
+
+        assert_eq!(drops, 1);
+        assert_eq!(frontier.deferred_len(), 1);
     }
 
     #[test]

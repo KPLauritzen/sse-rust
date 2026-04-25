@@ -226,6 +226,9 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
         "bfs" => FrontierMode::Bfs,
         "beam" => FrontierMode::Beam,
         "beam-bfs-handoff" | "beam_bfs_handoff" => FrontierMode::BeamBfsHandoff,
+        "stratified-beam-refill" | "stratified_beam_refill" => {
+            FrontierMode::StratifiedBeamRefill
+        }
         _ => panic!("invalid --frontier-mode value: {value}"),
     }
 }

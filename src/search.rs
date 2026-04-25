@@ -24,7 +24,7 @@ use crate::invariants::{
 };
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchObserver, SearchRootRecord,
+    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver, SearchRootRecord,
 };
 use crate::types::{
     DynSsePath, DynSseResult, EndpointExactMeetSurface, EndpointExactMeetWitness, EsseStep,
@@ -46,9 +46,11 @@ mod stages;
 
 use self::beam::{
     choose_next_beam_bfs_handoff_direction, choose_next_beam_direction,
-    effective_beam_bfs_handoff_depth, push_beam_bfs_handoff_entry, push_beam_frontier_entry,
+    choose_next_stratified_beam_refill_direction, effective_beam_bfs_handoff_depth,
+    push_beam_bfs_handoff_entry, push_beam_frontier_entry, push_stratified_beam_refill_entry,
     record_best_beam_bfs_handoff_exact_meet, should_use_beam_bfs_handoff_phase,
-    BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier, BeamFrontier,
+    BeamBfsHandoffExactMeet, BeamBfsHandoffFrontier, BeamFrontier, StratifiedBeamRefillFrontier,
+    StratifiedBeamRefillReason,
 };
 use self::dispatch::{
     emit_layer, emit_roots, emit_started, endpoint_search_request, finish_search_2x2,
@@ -163,6 +165,52 @@ fn layer_timing(
         dedup_nanos: expansion_timing.dedup_nanos,
         merge_nanos,
         finalize_nanos,
+    }
+}
+
+fn record_stratified_refill(
+    telemetry: &mut SearchTelemetry,
+    outcome: self::beam::StratifiedBeamRefillOutcome,
+) {
+    let Some(reason) = outcome.reason else {
+        return;
+    };
+    telemetry.stratified_beam_refill.refill_count += 1;
+    telemetry.stratified_beam_refill.refill_admissions += outcome.admitted;
+    telemetry.stratified_beam_refill.active_admissions += outcome.admitted;
+    match reason {
+        StratifiedBeamRefillReason::Exhausted => {
+            telemetry.stratified_beam_refill.refill_exhausted += 1;
+        }
+        StratifiedBeamRefillReason::BelowThreshold => {
+            telemetry.stratified_beam_refill.refill_below_threshold += 1;
+        }
+    }
+}
+
+fn record_stratified_push(
+    telemetry: &mut SearchTelemetry,
+    outcome: self::beam::StratifiedBeamPushOutcome,
+) {
+    if outcome.active_admitted {
+        telemetry.stratified_beam_refill.active_admissions += 1;
+    }
+    if outcome.deferred_admitted {
+        telemetry.stratified_beam_refill.deferred_admissions += 1;
+    }
+    telemetry.stratified_beam_refill.drops_by_bucket_cap += outcome.drops_by_bucket_cap;
+    telemetry.stratified_beam_refill.drops_by_global_cap += outcome.drops_by_global_cap;
+}
+
+struct SuppressFinishedObserver<'a> {
+    inner: &'a mut dyn SearchObserver,
+}
+
+impl SearchObserver for SuppressFinishedObserver<'_> {
+    fn on_event(&mut self, event: &SearchEvent) {
+        if !matches!(event, SearchEvent::Finished(_)) {
+            self.inner.on_event(event);
+        }
     }
 }
 
@@ -776,6 +824,17 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
             );
         }
+        FrontierMode::StratifiedBeamRefill => {
+            return search_stratified_beam_refill_dyn_with_telemetry(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                deadline,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+            );
+        }
         FrontierMode::Bfs => {}
     }
 
@@ -1255,6 +1314,29 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     finish_search_dyn(observer, &request, DynSseResult::Unknown, telemetry)
 }
 
+fn dyn_result_to_2x2_result(result: DynSseResult) -> Result<SseResult<2>, &'static str> {
+    match result {
+        DynSseResult::Equivalent(path) => {
+            let Some(matrices) = path
+                .matrices
+                .iter()
+                .map(|matrix| matrix.to_sq::<2>())
+                .collect::<Option<Vec<_>>>()
+            else {
+                return Err(
+                    "dynamic stratified_beam_refill found a non-2x2 witness; use the dynamic search API",
+                );
+            };
+            Ok(SseResult::Equivalent(SsePath {
+                matrices,
+                steps: path.steps,
+            }))
+        }
+        DynSseResult::NotEquivalent(reason) => Ok(SseResult::NotEquivalent(reason)),
+        DynSseResult::Unknown => Ok(SseResult::Unknown),
+    }
+}
+
 /// Search for a strong shift equivalence path, optionally recording the visited graph.
 pub fn search_sse_2x2_with_telemetry_and_observer(
     a: &SqMatrix<2>,
@@ -1272,6 +1354,48 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
     if let Some(message) = invalid_endpoint_multi_meet_signal(config) {
         telemetry.invalid_config = Some(message);
         return finish_search_2x2(observer, &request, SseResult::Unknown, telemetry);
+    }
+
+    if config.frontier_mode == FrontierMode::StratifiedBeamRefill {
+        if config.max_intermediate_dim > 2 {
+            telemetry.invalid_config = Some(
+                "stratified_beam_refill with max_intermediate_dim > 2 requires the dynamic search API"
+                    .to_string(),
+            );
+            return finish_search_2x2(observer, &request, SseResult::Unknown, telemetry);
+        }
+        let (result, mut telemetry) = {
+            if let Some(observer) = observer.as_deref_mut() {
+                let mut observer = SuppressFinishedObserver { inner: observer };
+                search_stratified_beam_refill_dyn_with_telemetry(
+                    &a_dyn,
+                    &b_dyn,
+                    config,
+                    Some(&mut observer),
+                    &request,
+                    None,
+                    config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                )
+            } else {
+                search_stratified_beam_refill_dyn_with_telemetry(
+                    &a_dyn,
+                    &b_dyn,
+                    config,
+                    None,
+                    &request,
+                    None,
+                    config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                )
+            }
+        };
+        let result = match dyn_result_to_2x2_result(result) {
+            Ok(result) => result,
+            Err(message) => {
+                telemetry.invalid_config = Some(message.to_string());
+                SseResult::Unknown
+            }
+        };
+        return finish_search_2x2(observer, &request, result, telemetry);
     }
 
     emit_started(&mut observer, &request, &a_canon, &b_canon);
@@ -1358,6 +1482,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
             );
         }
         FrontierMode::Bfs => {}
+        FrontierMode::StratifiedBeamRefill => unreachable!("handled before emitting roots"),
     }
 
     // Forward direction (from A).
@@ -3596,6 +3721,453 @@ fn search_beam_dyn_with_telemetry(
     finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
 }
 
+fn search_stratified_beam_refill_dyn_with_telemetry(
+    a: &DynMatrix,
+    b: &DynMatrix,
+    config: &SearchConfig,
+    mut observer: Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    deadline: Option<Instant>,
+    beam_width: usize,
+) -> (DynSseResult, SearchTelemetry) {
+    let mut telemetry = SearchTelemetry::default();
+    let a_canon = a.canonical_perm();
+    let b_canon = b.canonical_perm();
+
+    let mut fwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
+    let mut fwd_depths: HashMap<DynMatrix, usize> = HashMap::new();
+    let mut fwd_orig: HashMap<DynMatrix, DynMatrix> = HashMap::new();
+    fwd_parent.insert(a_canon.clone(), None);
+    fwd_depths.insert(a_canon.clone(), 0);
+    fwd_orig.insert(a_canon.clone(), a.clone());
+
+    let mut bwd_parent: HashMap<DynMatrix, Option<(DynMatrix, EsseStep)>> = HashMap::new();
+    let mut bwd_depths: HashMap<DynMatrix, usize> = HashMap::new();
+    let mut bwd_orig: HashMap<DynMatrix, DynMatrix> = HashMap::new();
+    bwd_parent.insert(b_canon.clone(), None);
+    bwd_depths.insert(b_canon.clone(), 0);
+    bwd_orig.insert(b_canon.clone(), b.clone());
+
+    let mut fwd_signatures = HashSet::new();
+    let mut bwd_signatures = HashSet::new();
+    fwd_signatures.insert(approx_signature(&a_canon));
+    bwd_signatures.insert(approx_signature(&b_canon));
+
+    let mut serial = 0usize;
+    let mut fwd_frontier =
+        StratifiedBeamRefillFrontier::new(beam_width, config.beam_bfs_handoff_deferred_cap);
+    let mut bwd_frontier =
+        StratifiedBeamRefillFrontier::new(beam_width, config.beam_bfs_handoff_deferred_cap);
+    let outcome = push_stratified_beam_refill_entry(
+        &mut fwd_frontier,
+        &a_canon,
+        0,
+        &bwd_signatures,
+        &b_canon,
+        &mut serial,
+    );
+    record_stratified_push(&mut telemetry, outcome);
+    let outcome = push_stratified_beam_refill_entry(
+        &mut bwd_frontier,
+        &b_canon,
+        0,
+        &fwd_signatures,
+        &a_canon,
+        &mut serial,
+    );
+    record_stratified_push(&mut telemetry, outcome);
+    telemetry.max_frontier_size = 1;
+    telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+
+    emit_started(&mut observer, request, &a_canon, &b_canon);
+    emit_roots(
+        &mut observer,
+        &[
+            SearchRootRecord {
+                direction: SearchDirection::Forward,
+                canonical: a_canon.clone(),
+                orig: a.clone(),
+                depth: 0,
+            },
+            SearchRootRecord {
+                direction: SearchDirection::Backward,
+                canonical: b_canon.clone(),
+                orig: b.clone(),
+                depth: 0,
+            },
+        ],
+    );
+
+    let mut layer_index = 0usize;
+    loop {
+        telemetry.stratified_beam_refill.drops_by_bucket_cap +=
+            fwd_frontier.refresh_approximate_hits(&bwd_signatures);
+        telemetry.stratified_beam_refill.drops_by_bucket_cap +=
+            bwd_frontier.refresh_approximate_hits(&fwd_signatures);
+        let fwd_refill = fwd_frontier.maybe_refill();
+        record_stratified_refill(&mut telemetry, fwd_refill);
+        let bwd_refill = bwd_frontier.maybe_refill();
+        record_stratified_refill(&mut telemetry, bwd_refill);
+        let Some(expand_forward) =
+            choose_next_stratified_beam_refill_direction(&fwd_frontier, &bwd_frontier)
+        else {
+            break;
+        };
+        if deadline_reached(deadline) {
+            break;
+        }
+        let direction = if expand_forward {
+            SearchDirection::Forward
+        } else {
+            SearchDirection::Backward
+        };
+        telemetry.max_frontier_size = telemetry
+            .max_frontier_size
+            .max(fwd_frontier.pending_len().max(bwd_frontier.pending_len()));
+        let other_active_frontier_nodes = if expand_forward {
+            bwd_frontier.active_len()
+        } else {
+            fwd_frontier.active_len()
+        };
+        let other_deferred_frontier_nodes = if expand_forward {
+            bwd_frontier.deferred_len()
+        } else {
+            fwd_frontier.deferred_len()
+        };
+        let (frontier, parent, depths, orig, signatures, other_depths, other_signatures, target) =
+            if expand_forward {
+                (
+                    &mut fwd_frontier,
+                    &mut fwd_parent,
+                    &mut fwd_depths,
+                    &mut fwd_orig,
+                    &mut fwd_signatures,
+                    &bwd_depths as &HashMap<_, _>,
+                    &bwd_signatures as &HashSet<_>,
+                    &b_canon,
+                )
+            } else {
+                (
+                    &mut bwd_frontier,
+                    &mut bwd_parent,
+                    &mut bwd_depths,
+                    &mut bwd_orig,
+                    &mut bwd_signatures,
+                    &fwd_depths as &HashMap<_, _>,
+                    &fwd_signatures as &HashSet<_>,
+                    &a_canon,
+                )
+            };
+
+        let current_entries = frontier.pop_active_batch();
+        telemetry.stratified_beam_refill.final_active_frontier_nodes =
+            frontier.active_len() + other_active_frontier_nodes;
+        telemetry
+            .stratified_beam_refill
+            .final_deferred_frontier_nodes =
+            frontier.deferred_len() + other_deferred_frontier_nodes;
+        if current_entries.is_empty() {
+            continue;
+        }
+        let current_depth = current_entries[0].depth;
+        if current_depth >= config.max_lag {
+            continue;
+        }
+
+        let current_frontier = current_entries
+            .iter()
+            .map(|entry| entry.canonical.clone())
+            .collect::<Vec<_>>();
+        let layer_started = Instant::now();
+        let (expansions, expansion_stats, expansion_timing, timed_out) = expand_frontier_layer_dyn(
+            &current_frontier,
+            orig,
+            frontier_expansion_settings(config),
+            deadline,
+        );
+        telemetry.frontier_nodes_expanded += expansion_stats.frontier_nodes;
+        telemetry.factorisation_calls += expansion_stats.factorisation_calls;
+        telemetry.factorisations_enumerated += expansion_stats.factorisations_enumerated;
+        telemetry.candidates_generated += expansion_stats.candidates_generated;
+        telemetry.pruned_by_size += expansion_stats.pruned_by_size;
+        telemetry.pruned_by_spectrum += expansion_stats.pruned_by_spectrum;
+        let candidates_after_pruning = expansions.len();
+        telemetry.candidates_after_pruning += candidates_after_pruning;
+
+        let mut collisions_with_seen = 0usize;
+        let mut collisions_with_other_frontier = 0usize;
+        let mut approximate_other_side_hits = 0usize;
+        let mut discovered_nodes = 0usize;
+        let mut parents_with_progress = HashSet::new();
+        let mut enqueued_nodes = 0usize;
+        let mut layer_move_family_telemetry = expansion_stats.move_family_telemetry.clone();
+        let mut layer_records = observer
+            .as_ref()
+            .map(|_| Vec::with_capacity(expansions.len()));
+        let next_depth = current_depth + 1;
+        let merge_started = Instant::now();
+
+        for expansion in &expansions {
+            let parent_orig = orig
+                .get(&expansion.parent_canon)
+                .expect("parent node should have an original matrix")
+                .clone();
+            if parent.contains_key(&expansion.next_canon) {
+                collisions_with_seen += 1;
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: current_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: SearchEdgeStatus::SeenCollision,
+                        approximate_other_side_hit: false,
+                        enqueued: false,
+                    });
+                }
+                continue;
+            }
+
+            discovered_nodes += 1;
+            parent.insert(
+                expansion.next_canon.clone(),
+                Some((expansion.parent_canon.clone(), expansion.step.clone())),
+            );
+            depths.insert(expansion.next_canon.clone(), next_depth);
+            orig.insert(expansion.next_canon.clone(), expansion.next_orig.clone());
+            let next_signature = approx_signature(&expansion.next_canon);
+            let approximate_hit = other_signatures.contains(&next_signature);
+            signatures.insert(next_signature);
+
+            let enqueued =
+                expansion.next_orig.rows > 2 || expansion.next_orig.max_entry() <= config.max_entry;
+            let mut record_status = SearchEdgeStatus::Discovered;
+
+            if let Some(&other_depth) = other_depths.get(&expansion.next_canon) {
+                collisions_with_other_frontier += 1;
+                parents_with_progress.insert(expansion.parent_canon.clone());
+                move_family_telemetry_mut(
+                    &mut layer_move_family_telemetry,
+                    expansion.move_family,
+                )
+                .exact_meets += 1;
+                move_family_telemetry_mut(
+                    &mut layer_move_family_telemetry,
+                    expansion.move_family,
+                )
+                .discovered_nodes += 1;
+                record_status = SearchEdgeStatus::ExactMeet;
+                let path_depth = next_depth + other_depth;
+                if let Some(records) = layer_records.as_mut() {
+                    records.push(SearchEdgeRecord {
+                        layer_index,
+                        direction,
+                        move_family: expansion.move_family,
+                        from_canonical: expansion.parent_canon.clone(),
+                        from_orig: parent_orig.clone(),
+                        to_canonical: expansion.next_canon.clone(),
+                        to_orig: expansion.next_orig.clone(),
+                        from_depth: current_depth,
+                        to_depth: next_depth,
+                        step: expansion.step.clone(),
+                        status: record_status,
+                        approximate_other_side_hit: approximate_hit,
+                        enqueued,
+                    });
+                }
+                if path_depth > config.max_lag {
+                    continue;
+                }
+
+                let merge_nanos = elapsed_nanos(merge_started);
+                let finalize_started = Instant::now();
+                telemetry.collisions_with_seen += collisions_with_seen;
+                telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
+                telemetry.approximate_other_side_hits += approximate_other_side_hits;
+                telemetry.same_future_past_collisions +=
+                    expansion_stats.same_future_past_collisions;
+                telemetry.discovered_nodes += discovered_nodes;
+                let dead_end_nodes = current_frontier
+                    .len()
+                    .saturating_sub(parents_with_progress.len());
+                telemetry.dead_end_nodes += dead_end_nodes;
+                telemetry.enqueued_nodes += enqueued_nodes;
+                telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+                accumulate_move_family_telemetry(
+                    &mut telemetry.move_family_telemetry,
+                    &layer_move_family_telemetry,
+                );
+                if let Some(records) = layer_records.as_ref() {
+                    emit_layer(&mut observer, records);
+                }
+                let finalize_nanos = elapsed_nanos(finalize_started);
+                telemetry.layers.push(SearchLayerTelemetry {
+                    layer_index,
+                    direction: Some(direction),
+                    frontier_nodes: expansion_stats.frontier_nodes,
+                    factorisation_calls: expansion_stats.factorisation_calls,
+                    factorisations_enumerated: expansion_stats.factorisations_enumerated,
+                    candidates_generated: expansion_stats.candidates_generated,
+                    pruned_by_size: expansion_stats.pruned_by_size,
+                    pruned_by_spectrum: expansion_stats.pruned_by_spectrum,
+                    candidates_after_pruning,
+                    collisions_with_seen,
+                    collisions_with_other_frontier,
+                    approximate_other_side_hits,
+                    same_future_past_collisions: expansion_stats.same_future_past_collisions,
+                    discovered_nodes,
+                    dead_end_nodes,
+                    enqueued_nodes,
+                    next_frontier_nodes: frontier.pending_len(),
+                    total_visited_nodes: telemetry.total_visited_nodes,
+                    timing: layer_timing(
+                        layer_started,
+                        expansion_timing,
+                        merge_nanos,
+                        finalize_nanos,
+                    ),
+                    move_family_telemetry: finalize_move_family_telemetry(
+                        layer_move_family_telemetry,
+                    ),
+                });
+                return finish_search_dyn(
+                    observer,
+                    request,
+                    DynSseResult::Equivalent(reconstruct_bidirectional_dyn_path(
+                        a,
+                        b,
+                        &expansion.next_canon,
+                        &fwd_parent,
+                        &fwd_orig,
+                        &bwd_parent,
+                        &bwd_orig,
+                    )),
+                    telemetry,
+                );
+            }
+
+            if approximate_hit {
+                approximate_other_side_hits += 1;
+                move_family_telemetry_mut(
+                    &mut layer_move_family_telemetry,
+                    expansion.move_family,
+                )
+                .approximate_other_side_hits += 1;
+            }
+
+            parents_with_progress.insert(expansion.parent_canon.clone());
+            move_family_telemetry_mut(&mut layer_move_family_telemetry, expansion.move_family)
+                .discovered_nodes += 1;
+
+            let mut retained = false;
+            if enqueued {
+                let outcome = push_stratified_beam_refill_entry(
+                    frontier,
+                    &expansion.next_canon,
+                    next_depth,
+                    other_signatures,
+                    target,
+                    &mut serial,
+                );
+                retained = outcome.active_admitted || outcome.deferred_admitted;
+                record_stratified_push(&mut telemetry, outcome);
+                if retained {
+                    enqueued_nodes += 1;
+                }
+                telemetry.stratified_beam_refill.final_active_frontier_nodes =
+                    frontier.active_len() + other_active_frontier_nodes;
+                telemetry
+                    .stratified_beam_refill
+                    .final_deferred_frontier_nodes =
+                    frontier.deferred_len() + other_deferred_frontier_nodes;
+            }
+            if let Some(records) = layer_records.as_mut() {
+                records.push(SearchEdgeRecord {
+                    layer_index,
+                    direction,
+                    move_family: expansion.move_family,
+                    from_canonical: expansion.parent_canon.clone(),
+                    from_orig: parent_orig,
+                    to_canonical: expansion.next_canon.clone(),
+                    to_orig: expansion.next_orig.clone(),
+                    from_depth: current_depth,
+                    to_depth: next_depth,
+                    step: expansion.step.clone(),
+                    status: record_status,
+                    approximate_other_side_hit: approximate_hit,
+                    enqueued: retained,
+                });
+            }
+        }
+
+        let merge_nanos = elapsed_nanos(merge_started);
+        let finalize_started = Instant::now();
+        telemetry.collisions_with_seen += collisions_with_seen;
+        telemetry.collisions_with_other_frontier += collisions_with_other_frontier;
+        telemetry.approximate_other_side_hits += approximate_other_side_hits;
+        telemetry.same_future_past_collisions += expansion_stats.same_future_past_collisions;
+        telemetry.discovered_nodes += discovered_nodes;
+        let dead_end_nodes = current_frontier
+            .len()
+            .saturating_sub(parents_with_progress.len());
+        telemetry.dead_end_nodes += dead_end_nodes;
+        telemetry.enqueued_nodes += enqueued_nodes;
+        telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+        accumulate_move_family_telemetry(
+            &mut telemetry.move_family_telemetry,
+            &layer_move_family_telemetry,
+        );
+        if let Some(records) = layer_records.as_ref() {
+            emit_layer(&mut observer, records);
+        }
+        let finalize_nanos = elapsed_nanos(finalize_started);
+        telemetry.layers.push(SearchLayerTelemetry {
+            layer_index,
+            direction: Some(direction),
+            frontier_nodes: expansion_stats.frontier_nodes,
+            factorisation_calls: expansion_stats.factorisation_calls,
+            factorisations_enumerated: expansion_stats.factorisations_enumerated,
+            candidates_generated: expansion_stats.candidates_generated,
+            pruned_by_size: expansion_stats.pruned_by_size,
+            pruned_by_spectrum: expansion_stats.pruned_by_spectrum,
+            candidates_after_pruning,
+            collisions_with_seen,
+            collisions_with_other_frontier,
+            approximate_other_side_hits,
+            same_future_past_collisions: expansion_stats.same_future_past_collisions,
+            discovered_nodes,
+            dead_end_nodes,
+            enqueued_nodes,
+            next_frontier_nodes: frontier.pending_len(),
+            total_visited_nodes: telemetry.total_visited_nodes,
+            timing: layer_timing(layer_started, expansion_timing, merge_nanos, finalize_nanos),
+            move_family_telemetry: finalize_move_family_telemetry(layer_move_family_telemetry),
+        });
+        telemetry.max_frontier_size = telemetry
+            .max_frontier_size
+            .max(fwd_frontier.pending_len().max(bwd_frontier.pending_len()));
+        layer_index += 1;
+
+        if timed_out {
+            break;
+        }
+    }
+
+    telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+    telemetry.stratified_beam_refill.final_active_frontier_nodes =
+        fwd_frontier.active_len() + bwd_frontier.active_len();
+    telemetry
+        .stratified_beam_refill
+        .final_deferred_frontier_nodes = fwd_frontier.deferred_len() + bwd_frontier.deferred_len();
+    finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
+}
+
 fn search_beam_bfs_handoff_dyn_with_telemetry(
     a: &DynMatrix,
     b: &DynMatrix,
@@ -5162,6 +5734,29 @@ mod tests {
             Some("endpoint_multi_meet_cap currently only supports --frontier-mode bfs")
         );
         assert!(telemetry.endpoint_exact_meets.is_none());
+        assert!(telemetry.layers.is_empty());
+    }
+
+    #[test]
+    fn test_direct_2x2_stratified_refill_rejects_non_2x2_intermediate_config() {
+        let source = SqMatrix::new([[0, 0], [0, 1]]);
+        let target = SqMatrix::new([[0, 1], [0, 1]]);
+        let config = SearchConfig {
+            frontier_mode: FrontierMode::StratifiedBeamRefill,
+            beam_width: Some(2),
+            max_intermediate_dim: 3,
+            ..default_config()
+        };
+
+        let (result, telemetry) = search_sse_2x2_with_telemetry(&source, &target, &config);
+
+        assert!(matches!(result, SseResult::Unknown));
+        assert_eq!(
+            telemetry.invalid_config.as_deref(),
+            Some(
+                "stratified_beam_refill with max_intermediate_dim > 2 requires the dynamic search API"
+            )
+        );
         assert!(telemetry.layers.is_empty());
     }
 

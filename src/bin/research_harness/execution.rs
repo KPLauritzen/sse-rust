@@ -505,7 +505,8 @@ fn normalized_beam_width(
     if !frontier_mode.uses_beam_width() {
         if beam_width.is_some() {
             return Err(
-                "beam_width requires frontier_mode to be beam or beam_bfs_handoff".to_string(),
+                "beam_width requires frontier_mode to be beam, beam_bfs_handoff, or stratified_beam_refill"
+                    .to_string(),
             );
         }
         return Ok(None);
@@ -533,9 +534,13 @@ fn normalized_beam_bfs_handoff_deferred_cap(
     frontier_mode: FrontierMode,
     beam_bfs_handoff_deferred_cap: Option<usize>,
 ) -> Result<Option<usize>, String> {
-    if frontier_mode != FrontierMode::BeamBfsHandoff && beam_bfs_handoff_deferred_cap.is_some() {
+    if !matches!(
+        frontier_mode,
+        FrontierMode::BeamBfsHandoff | FrontierMode::StratifiedBeamRefill
+    ) && beam_bfs_handoff_deferred_cap.is_some()
+    {
         return Err(
-            "beam_bfs_handoff_deferred_cap requires frontier_mode to be beam_bfs_handoff"
+            "beam_bfs_handoff_deferred_cap requires frontier_mode to be beam_bfs_handoff or stratified_beam_refill"
                 .to_string(),
         );
     }

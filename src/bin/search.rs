@@ -174,14 +174,14 @@ where
                        --max-lag N              max elementary SSE steps (default: 4)\n\
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
-                       --frontier-mode MODE     bfs | beam | beam-bfs-handoff (default: bfs)\n\
+                       --frontier-mode MODE     bfs | beam | beam-bfs-handoff | stratified-beam-refill (default: bfs)\n\
                        --move-policy POLICY     mixed | graph-plus-structured | graph-only (default: mixed)\n\
                        --search-mode MODE       legacy shortcut: mixed | graph-plus-structured | graph-only | beam\n\
                        --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
                        --beam-bfs-handoff-depth N\n\
                                               inclusive beam depth before handing discoveries to BFS (default: 4)\n\
                        --beam-bfs-handoff-deferred-cap N\n\
-                                              cap retained deferred overflow entries before BFS (default: unlimited; 0 drops all retained overflow)\n\
+                                              cap retained deferred overflow entries before BFS, or global deferred cap for stratified-beam-refill\n\
                        --endpoint-multi-meet-cap N\n\
                                               retain up to N admissible exact endpoint meets on the CLI output surface (endpoint-search + bfs only)\n\
                        --stage STAGE            endpoint-search | guided-refinement | shortcut-search\n\
@@ -335,7 +335,10 @@ where
         config.beam_width = Some(DEFAULT_BEAM_WIDTH);
     }
     if !config.frontier_mode.uses_beam_width() && config.beam_width.is_some() {
-        return Err("--beam-width requires --frontier-mode beam or beam-bfs-handoff".to_string());
+        return Err(
+            "--beam-width requires --frontier-mode beam, beam-bfs-handoff, or stratified-beam-refill"
+                .to_string(),
+        );
     }
     if config.frontier_mode != FrontierMode::BeamBfsHandoff
         && config.beam_bfs_handoff_depth.is_some()
@@ -344,11 +347,13 @@ where
             "--beam-bfs-handoff-depth requires --frontier-mode beam-bfs-handoff".to_string(),
         );
     }
-    if config.frontier_mode != FrontierMode::BeamBfsHandoff
-        && config.beam_bfs_handoff_deferred_cap.is_some()
+    if !matches!(
+        config.frontier_mode,
+        FrontierMode::BeamBfsHandoff | FrontierMode::StratifiedBeamRefill
+    ) && config.beam_bfs_handoff_deferred_cap.is_some()
     {
         return Err(
-            "--beam-bfs-handoff-deferred-cap requires --frontier-mode beam-bfs-handoff".to_string(),
+            "--beam-bfs-handoff-deferred-cap requires --frontier-mode beam-bfs-handoff or stratified-beam-refill".to_string(),
         );
     }
     if config.endpoint_multi_meet_cap.is_some() && stage != SearchStage::EndpointSearch {
@@ -383,6 +388,9 @@ fn parse_frontier_mode(value: &str) -> Result<FrontierMode, String> {
         "bfs" => Ok(FrontierMode::Bfs),
         "beam" => Ok(FrontierMode::Beam),
         "beam-bfs-handoff" | "beam_bfs_handoff" => Ok(FrontierMode::BeamBfsHandoff),
+        "stratified-beam-refill" | "stratified_beam_refill" => {
+            Ok(FrontierMode::StratifiedBeamRefill)
+        }
         _ => Err(format!("unknown frontier mode: {value}")),
     }
 }

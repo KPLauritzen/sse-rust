@@ -53,6 +53,7 @@ fn main() {
         beam_width: None,
         beam_bfs_handoff_depth: None,
         beam_bfs_handoff_deferred_cap: None,
+        endpoint_multi_meet_cap: None,
     };
     let dim3_config = SearchConfig {
         max_lag,
@@ -63,6 +64,7 @@ fn main() {
         beam_width: None,
         beam_bfs_handoff_depth: None,
         beam_bfs_handoff_deferred_cap: None,
+        endpoint_multi_meet_cap: None,
     };
 
     let mut rectangular_buckets: HashMap<DynMatrix, HashSet<SqMatrix<2>>> = HashMap::new();

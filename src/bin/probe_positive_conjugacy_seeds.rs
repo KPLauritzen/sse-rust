@@ -128,6 +128,7 @@ fn main() -> Result<(), String> {
         beam_width: None,
         beam_bfs_handoff_depth: None,
         beam_bfs_handoff_deferred_cap: None,
+        endpoint_multi_meet_cap: None,
     };
 
     let (direct_result, direct_telemetry) =
@@ -1283,6 +1284,7 @@ mod tests {
             beam_width: None,
             beam_bfs_handoff_depth: None,
             beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
         }
     }
 
