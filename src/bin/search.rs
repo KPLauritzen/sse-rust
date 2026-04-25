@@ -245,7 +245,7 @@ where
                        --max-lag N              max elementary SSE steps (default: 4)\n\
                        --max-intermediate-dim N max intermediate dimension (default: 2)\n\
                        --max-entry N            max entry value in U,V (default: 25)\n\
-                       --frontier-mode MODE     bfs | beam | concrete-shift-profile-beam | beam-bfs-handoff | stratified-beam-refill (default: bfs)\n\
+                       --frontier-mode MODE     bfs | beam | concrete-shift-profile-beam | same-future-past-diversity-beam | beam-bfs-handoff | stratified-beam-refill (default: bfs)\n\
                        --move-policy POLICY     mixed | graph-plus-structured | graph-only (default: mixed)\n\
                        --search-mode MODE       legacy shortcut: mixed | graph-plus-structured | graph-only | beam\n\
                        --beam-width N           cap each beam frontier (default when beam is selected: 64)\n\
@@ -440,7 +440,7 @@ where
     }
     if !config.frontier_mode.uses_beam_width() && config.beam_width.is_some() {
         return Err(
-            "--beam-width requires --frontier-mode beam, concrete-shift-profile-beam, beam-bfs-handoff, or stratified-beam-refill"
+            "--beam-width requires --frontier-mode beam, concrete-shift-profile-beam, same-future-past-diversity-beam, beam-bfs-handoff, or stratified-beam-refill"
                 .to_string(),
         );
     }
@@ -574,6 +574,9 @@ fn parse_frontier_mode(value: &str) -> Result<FrontierMode, String> {
         "beam" => Ok(FrontierMode::Beam),
         "concrete-shift-profile-beam" | "concrete_shift_profile_beam" => {
             Ok(FrontierMode::ConcreteShiftProfileBeam)
+        }
+        "same-future-past-diversity-beam" | "same_future_past_diversity_beam" => {
+            Ok(FrontierMode::SameFuturePastDiversityBeam)
         }
         "beam-bfs-handoff" | "beam_bfs_handoff" => Ok(FrontierMode::BeamBfsHandoff),
         "stratified-beam-refill" | "stratified_beam_refill" => {
@@ -1948,7 +1951,7 @@ mod tests {
 
         assert_eq!(
             err,
-            "--beam-width requires --frontier-mode beam, concrete-shift-profile-beam, beam-bfs-handoff, or stratified-beam-refill"
+            "--beam-width requires --frontier-mode beam, concrete-shift-profile-beam, same-future-past-diversity-beam, beam-bfs-handoff, or stratified-beam-refill"
         );
     }
 
@@ -1989,6 +1992,28 @@ mod tests {
         assert_eq!(
             cli.config.frontier_mode,
             FrontierMode::ConcreteShiftProfileBeam
+        );
+        assert_eq!(cli.config.beam_width, Some(5));
+    }
+
+    #[test]
+    fn parse_cli_accepts_same_future_past_diversity_beam_mode() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--frontier-mode".to_string(),
+                "same-future-past-diversity-beam".to_string(),
+                "--beam-width".to_string(),
+                "5".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            cli.config.frontier_mode,
+            FrontierMode::SameFuturePastDiversityBeam
         );
         assert_eq!(cli.config.beam_width, Some(5));
     }

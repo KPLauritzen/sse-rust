@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
 
-use ahash::AHashSet as HashSet;
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
+use crate::graph_moves::{same_future_past_signature, SameFuturePastSignature};
 use crate::matrix::DynMatrix;
 use crate::path_scoring::{score_node, score_node_with_concrete_shift_profile};
 use crate::types::SearchConfig;
@@ -95,6 +96,25 @@ impl BeamFrontier {
             self.entries.sort_by(compare_beam_frontier_entries);
         }
     }
+
+    pub(super) fn refresh_approximate_hits_with_scoring_mode(
+        &mut self,
+        other_signatures: &HashSet<ApproxSignature>,
+        _scoring_mode: BeamScoringMode,
+    ) {
+        self.refresh_approximate_hits(other_signatures);
+    }
+
+    pub(super) fn same_future_past_bucket_counts(&self) -> HashMap<SameFuturePastSignature, usize> {
+        let mut counts = HashMap::<SameFuturePastSignature, usize>::new();
+        for entry in &self.entries {
+            let Some(bucket) = same_future_past_signature(&entry.canonical) else {
+                continue;
+            };
+            *counts.entry(bucket).or_default() += 1;
+        }
+        counts
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -169,6 +189,7 @@ pub(super) const DEFAULT_BEAM_BFS_HANDOFF_DEPTH: usize = 4;
 pub(super) enum BeamScoringMode {
     Default,
     ConcreteShiftProfile,
+    SameFuturePastDiversity,
 }
 
 pub(super) fn effective_beam_bfs_handoff_depth(config: &SearchConfig) -> usize {
@@ -620,7 +641,9 @@ fn beam_candidate_score(
     let signature = approx_signature(matrix);
     let approximate_hit = other_signatures.contains(&signature);
     let raw_score = match scoring_mode {
-        BeamScoringMode::Default => score_node(matrix, target),
+        BeamScoringMode::Default | BeamScoringMode::SameFuturePastDiversity => {
+            score_node(matrix, target)
+        }
         BeamScoringMode::ConcreteShiftProfile => {
             score_node_with_concrete_shift_profile(matrix, target)
         }
@@ -659,14 +682,15 @@ pub(super) fn push_beam_frontier_entry_with_scoring(
     serial: &mut usize,
     scoring_mode: BeamScoringMode,
 ) {
-    let _ = frontier.push(build_beam_frontier_entry(
+    let entry = build_beam_frontier_entry(
         canonical,
         depth,
         other_signatures,
         target,
         serial,
         scoring_mode,
-    ));
+    );
+    let _ = frontier.push(entry);
 }
 
 pub(super) fn push_beam_bfs_handoff_entry(
@@ -786,6 +810,50 @@ mod tests {
         let best = frontier.pop_best().unwrap();
         assert!(best.approximate_hit);
         assert_eq!(best.canonical, exact);
+    }
+
+    #[test]
+    fn test_same_future_past_diversity_summary_counts_saturated_buckets() {
+        let first = DynMatrix::new(2, 2, vec![1, 0, 0, 0]);
+        let duplicate = DynMatrix::new(2, 2, vec![0, 1, 0, 0]);
+        let distinct = DynMatrix::new(2, 2, vec![1, 1, 0, 0]);
+        assert_eq!(
+            same_future_past_signature(&first),
+            same_future_past_signature(&duplicate)
+        );
+        assert_ne!(
+            same_future_past_signature(&first),
+            same_future_past_signature(&distinct)
+        );
+
+        let mut frontier = BeamFrontier::new(3);
+        frontier.push(BeamFrontierEntry {
+            canonical: first,
+            depth: 1,
+            score: 1,
+            approximate_hit: false,
+            serial: 0,
+        });
+        frontier.push(BeamFrontierEntry {
+            canonical: duplicate,
+            depth: 1,
+            score: 2,
+            approximate_hit: false,
+            serial: 1,
+        });
+        frontier.push(BeamFrontierEntry {
+            canonical: distinct,
+            depth: 1,
+            score: 3,
+            approximate_hit: false,
+            serial: 2,
+        });
+
+        let counts = frontier.same_future_past_bucket_counts();
+        assert_eq!(frontier.len(), 3);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts.values().filter(|count| **count > 1).count(), 1);
+        assert_eq!(counts.values().copied().max(), Some(2));
     }
 
     #[test]

@@ -202,6 +202,66 @@ fn record_stratified_push(
     telemetry.stratified_beam_refill.drops_by_global_cap += outcome.drops_by_global_cap;
 }
 
+fn record_same_future_past_diversity_frontiers(
+    telemetry: &mut SearchTelemetry,
+    fwd_frontier: &BeamFrontier,
+    bwd_frontier: &BeamFrontier,
+) {
+    let fwd_counts = fwd_frontier.same_future_past_bucket_counts();
+    let bwd_counts = bwd_frontier.same_future_past_bucket_counts();
+    let cross_frontier_overlap_buckets = fwd_counts
+        .keys()
+        .filter(|bucket| bwd_counts.contains_key(*bucket))
+        .count();
+    let same_side_saturated_buckets = fwd_counts.values().filter(|count| **count > 1).count()
+        + bwd_counts.values().filter(|count| **count > 1).count();
+    let same_side_max_bucket_size = fwd_counts
+        .values()
+        .chain(bwd_counts.values())
+        .copied()
+        .max()
+        .unwrap_or_default();
+
+    let mut bucket_counts = fwd_counts;
+    for (bucket, count) in bwd_counts {
+        *bucket_counts.entry(bucket).or_default() += count;
+    }
+    telemetry.same_future_past_diversity.final_frontier_nodes =
+        fwd_frontier.len() + bwd_frontier.len();
+    telemetry.same_future_past_diversity.final_unique_buckets = bucket_counts.len();
+    telemetry.same_future_past_diversity.final_saturated_buckets = same_side_saturated_buckets;
+    telemetry.same_future_past_diversity.final_max_bucket_size = same_side_max_bucket_size;
+    telemetry
+        .same_future_past_diversity
+        .final_cross_frontier_overlap_buckets = cross_frontier_overlap_buckets;
+    telemetry.same_future_past_diversity.max_frontier_nodes = telemetry
+        .same_future_past_diversity
+        .max_frontier_nodes
+        .max(telemetry.same_future_past_diversity.final_frontier_nodes);
+    telemetry.same_future_past_diversity.max_unique_buckets = telemetry
+        .same_future_past_diversity
+        .max_unique_buckets
+        .max(telemetry.same_future_past_diversity.final_unique_buckets);
+    telemetry.same_future_past_diversity.max_saturated_buckets = telemetry
+        .same_future_past_diversity
+        .max_saturated_buckets
+        .max(telemetry.same_future_past_diversity.final_saturated_buckets);
+    telemetry.same_future_past_diversity.max_bucket_size = telemetry
+        .same_future_past_diversity
+        .max_bucket_size
+        .max(telemetry.same_future_past_diversity.final_max_bucket_size);
+    telemetry
+        .same_future_past_diversity
+        .max_cross_frontier_overlap_buckets = telemetry
+        .same_future_past_diversity
+        .max_cross_frontier_overlap_buckets
+        .max(
+            telemetry
+                .same_future_past_diversity
+                .final_cross_frontier_overlap_buckets,
+        );
+}
+
 struct SuppressFinishedObserver<'a> {
     inner: &'a mut dyn SearchObserver,
 }
@@ -824,6 +884,18 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 deadline,
                 config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
                 BeamScoringMode::ConcreteShiftProfile,
+            );
+        }
+        FrontierMode::SameFuturePastDiversityBeam => {
+            return search_beam_dyn_with_telemetry(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                deadline,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::SameFuturePastDiversity,
             );
         }
         FrontierMode::BeamBfsHandoff => {
@@ -1494,6 +1566,17 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 &request,
                 config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
                 BeamScoringMode::ConcreteShiftProfile,
+            );
+        }
+        FrontierMode::SameFuturePastDiversityBeam => {
+            return search_beam_2x2_with_telemetry_and_observer(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::SameFuturePastDiversity,
             );
         }
         FrontierMode::BeamBfsHandoff => {
@@ -2547,6 +2630,9 @@ fn search_beam_2x2_with_telemetry_and_observer(
         &mut serial,
         scoring_mode,
     );
+    if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+    }
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
@@ -2571,8 +2657,8 @@ fn search_beam_2x2_with_telemetry_and_observer(
 
     let mut layer_index = 0usize;
     loop {
-        fwd_frontier.refresh_approximate_hits(&bwd_signatures);
-        bwd_frontier.refresh_approximate_hits(&fwd_signatures);
+        fwd_frontier.refresh_approximate_hits_with_scoring_mode(&bwd_signatures, scoring_mode);
+        bwd_frontier.refresh_approximate_hits_with_scoring_mode(&fwd_signatures, scoring_mode);
         let Some(expand_forward) = choose_next_beam_direction(&fwd_frontier, &bwd_frontier) else {
             break;
         };
@@ -2776,6 +2862,13 @@ fn search_beam_2x2_with_telemetry_and_observer(
                         layer_move_family_telemetry,
                     ),
                 });
+                if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+                    record_same_future_past_diversity_frontiers(
+                        &mut telemetry,
+                        &fwd_frontier,
+                        &bwd_frontier,
+                    );
+                }
                 return finish_search_2x2(
                     observer,
                     request,
@@ -2882,10 +2975,20 @@ fn search_beam_2x2_with_telemetry_and_observer(
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
             .max(fwd_frontier.len().max(bwd_frontier.len()));
+        if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+            record_same_future_past_diversity_frontiers(
+                &mut telemetry,
+                &fwd_frontier,
+                &bwd_frontier,
+            );
+        }
         layer_index += 1;
     }
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
+    if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+    }
     if let Some(witness) = try_concrete_shift_shortcut_2x2(a, b, config) {
         telemetry.concrete_shift_shortcut = true;
         return finish_search_2x2(
@@ -3402,6 +3505,9 @@ fn search_beam_dyn_with_telemetry(
         &mut serial,
         scoring_mode,
     );
+    if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+    }
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
@@ -3426,8 +3532,8 @@ fn search_beam_dyn_with_telemetry(
 
     let mut layer_index = 0usize;
     loop {
-        fwd_frontier.refresh_approximate_hits(&bwd_signatures);
-        bwd_frontier.refresh_approximate_hits(&fwd_signatures);
+        fwd_frontier.refresh_approximate_hits_with_scoring_mode(&bwd_signatures, scoring_mode);
+        bwd_frontier.refresh_approximate_hits_with_scoring_mode(&fwd_signatures, scoring_mode);
         let Some(expand_forward) = choose_next_beam_direction(&fwd_frontier, &bwd_frontier) else {
             break;
         };
@@ -3638,6 +3744,13 @@ fn search_beam_dyn_with_telemetry(
                         layer_move_family_telemetry,
                     ),
                 });
+                if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+                    record_same_future_past_diversity_frontiers(
+                        &mut telemetry,
+                        &fwd_frontier,
+                        &bwd_frontier,
+                    );
+                }
                 return finish_search_dyn(
                     observer,
                     request,
@@ -3744,6 +3857,13 @@ fn search_beam_dyn_with_telemetry(
         telemetry.max_frontier_size = telemetry
             .max_frontier_size
             .max(fwd_frontier.len().max(bwd_frontier.len()));
+        if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+            record_same_future_past_diversity_frontiers(
+                &mut telemetry,
+                &fwd_frontier,
+                &bwd_frontier,
+            );
+        }
         layer_index += 1;
 
         if timed_out {
@@ -3751,6 +3871,9 @@ fn search_beam_dyn_with_telemetry(
         }
     }
 
+    if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
+        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+    }
     finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
 }
 

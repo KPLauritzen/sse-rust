@@ -11,6 +11,7 @@ pub enum FrontierMode {
     Bfs,
     Beam,
     ConcreteShiftProfileBeam,
+    SameFuturePastDiversityBeam,
     BeamBfsHandoff,
     StratifiedBeamRefill,
 }
@@ -39,6 +40,7 @@ impl FrontierMode {
             self,
             Self::Beam
                 | Self::ConcreteShiftProfileBeam
+                | Self::SameFuturePastDiversityBeam
                 | Self::BeamBfsHandoff
                 | Self::StratifiedBeamRefill
         )
@@ -527,6 +529,45 @@ impl StratifiedBeamRefillTelemetry {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SameFuturePastDiversityTelemetry {
+    pub active_admissions: usize,
+    pub rejected_admissions: usize,
+    pub unique_bucket_admissions: usize,
+    pub duplicate_bucket_admissions: usize,
+    pub replacements_from_saturated_bucket: usize,
+    pub final_frontier_nodes: usize,
+    pub final_unique_buckets: usize,
+    pub final_saturated_buckets: usize,
+    pub final_max_bucket_size: usize,
+    pub final_cross_frontier_overlap_buckets: usize,
+    pub max_frontier_nodes: usize,
+    pub max_unique_buckets: usize,
+    pub max_saturated_buckets: usize,
+    pub max_bucket_size: usize,
+    pub max_cross_frontier_overlap_buckets: usize,
+}
+
+impl SameFuturePastDiversityTelemetry {
+    pub fn is_empty(&self) -> bool {
+        self.active_admissions == 0
+            && self.rejected_admissions == 0
+            && self.unique_bucket_admissions == 0
+            && self.duplicate_bucket_admissions == 0
+            && self.replacements_from_saturated_bucket == 0
+            && self.final_frontier_nodes == 0
+            && self.final_unique_buckets == 0
+            && self.final_saturated_buckets == 0
+            && self.final_max_bucket_size == 0
+            && self.final_cross_frontier_overlap_buckets == 0
+            && self.max_frontier_nodes == 0
+            && self.max_unique_buckets == 0
+            && self.max_saturated_buckets == 0
+            && self.max_bucket_size == 0
+            && self.max_cross_frontier_overlap_buckets == 0
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EndpointExactMeetWitness {
     pub path_lag: usize,
@@ -619,6 +660,11 @@ pub struct SearchTelemetry {
         skip_serializing_if = "StratifiedBeamRefillTelemetry::is_empty"
     )]
     pub stratified_beam_refill: StratifiedBeamRefillTelemetry,
+    #[serde(
+        default,
+        skip_serializing_if = "SameFuturePastDiversityTelemetry::is_empty"
+    )]
+    pub same_future_past_diversity: SameFuturePastDiversityTelemetry,
     #[serde(skip)]
     pub endpoint_exact_meets: Option<EndpointExactMeetSurface>,
 }
@@ -661,6 +707,8 @@ mod tests {
         let beam: FrontierMode = serde_json::from_str("\"beam\"").unwrap();
         let concrete_shift_profile_beam: FrontierMode =
             serde_json::from_str("\"concrete_shift_profile_beam\"").unwrap();
+        let same_future_past_diversity_beam: FrontierMode =
+            serde_json::from_str("\"same_future_past_diversity_beam\"").unwrap();
         let beam_bfs_handoff: FrontierMode = serde_json::from_str("\"beam_bfs_handoff\"").unwrap();
         let stratified_beam_refill: FrontierMode =
             serde_json::from_str("\"stratified_beam_refill\"").unwrap();
@@ -670,6 +718,10 @@ mod tests {
         assert_eq!(
             concrete_shift_profile_beam,
             FrontierMode::ConcreteShiftProfileBeam
+        );
+        assert_eq!(
+            same_future_past_diversity_beam,
+            FrontierMode::SameFuturePastDiversityBeam
         );
         assert_eq!(beam_bfs_handoff, FrontierMode::BeamBfsHandoff);
         assert_eq!(stratified_beam_refill, FrontierMode::StratifiedBeamRefill);

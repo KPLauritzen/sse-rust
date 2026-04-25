@@ -563,6 +563,10 @@ fn print_profiles(profiles: &[SearchProfile]) {
                 "concrete-shift-profile-beam({})",
                 profile.config.beam_width.unwrap_or(0)
             ),
+            FrontierMode::SameFuturePastDiversityBeam => format!(
+                "same-future-past-diversity-beam({})",
+                profile.config.beam_width.unwrap_or(0)
+            ),
             FrontierMode::BeamBfsHandoff => {
                 format!(
                     "beam-bfs-handoff({})",

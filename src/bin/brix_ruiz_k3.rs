@@ -228,6 +228,9 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
         "concrete-shift-profile-beam" | "concrete_shift_profile_beam" => {
             FrontierMode::ConcreteShiftProfileBeam
         }
+        "same-future-past-diversity-beam" | "same_future_past_diversity_beam" => {
+            FrontierMode::SameFuturePastDiversityBeam
+        }
         "beam-bfs-handoff" | "beam_bfs_handoff" => FrontierMode::BeamBfsHandoff,
         "stratified-beam-refill" | "stratified_beam_refill" => {
             FrontierMode::StratifiedBeamRefill
