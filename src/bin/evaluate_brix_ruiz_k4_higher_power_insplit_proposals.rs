@@ -435,7 +435,7 @@ fn run_probe(proposal: &DynMatrix, target: &DynMatrix, config: &SearchConfig) ->
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let (outcome, outcome_reason, lag) = summarize_result(&result);
     CachedProbe {
-        admitted: !matches!(result, DynSseResult::NotEquivalent(_)),
+        admitted: telemetry.invalid_config.is_none() && !telemetry.invariant_filtered,
         outcome,
         outcome_reason,
         lag,
