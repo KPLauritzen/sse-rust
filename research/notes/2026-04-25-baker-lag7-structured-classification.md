@@ -58,9 +58,17 @@ I updated the opt-in classifier only:
 
 - added `--match-up-to-permutation` to
   [`src/bin/classify_witness_steps.rs`](../../src/bin/classify_witness_steps.rs);
+- capped permutation-aware matching at `5x5` so the opt-in diagnostic cannot
+  silently fan out into an unbounded factorial probe;
+- kept the source-side invariant check `U*V == source representative` in
+  permutation-aware mode before accepting a factorisation-family match;
+- documented in CLI help that `--match-up-to-permutation` applies only to
+  factorisation-family matching;
 - added a `structured_factorization_match` classification so binary-sparse and
   rectangular matches are not reported as "not represented" merely because a
   graph-only probe at the same bound fails;
+- added focused classifier unit tests for permutation-aware matching, guard
+  behavior, and structured-match classification precedence;
 - refreshed stale `SearchConfig` initializers in a few research binaries after
   `endpoint_multi_meet_cap` was added.
 
@@ -297,6 +305,31 @@ timeout -k 5s 20s target/debug/research_harness \
 Build elapsed: `0:02.23`, exit `0`. Harness elapsed: `0:00.15`, exit `0`.
 The harness returned `actual_outcome = equivalent`, `steps = 7`, and accepted
 one guide artifact.
+
+Post-review focused validation:
+
+```text
+timeout -k 20s 180s cargo test --features research-tools --bin classify_witness_steps
+```
+
+Elapsed: `0:01.25`, exit `0`. This ran the three new classifier unit tests.
+
+After the first review fix, I reran `cargo fmt --all`, the two requested bin
+tests, the two requested `cargo run` validations, both classifier report
+commands, and the requested `research_harness` command. All exited `0`; the
+regenerated classification artifacts retained the same keep/reject evidence.
+
+After the second review fix, I reran:
+
+```text
+timeout -k 20s 120s cargo fmt --all
+timeout -k 20s 180s cargo test --features research-tools --bin classify_witness_steps
+timeout -k 20s 180s cargo build --features research-tools --bin classify_witness_steps
+```
+
+Elapsed: `0:01.04`, `0:00.68`, and `0:00.43`; all exited `0`. I also
+regenerated both classifier report artifacts; their keep/reject evidence was
+unchanged.
 
 ## Follow-Up
 

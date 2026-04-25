@@ -8,6 +8,8 @@ use sse_core::matrix::DynMatrix;
 use sse_core::search::search_sse_dyn;
 use sse_core::types::{GuideArtifactPayload, MoveFamilyPolicy, SearchConfig};
 
+const MAX_PERMUTATION_MATCH_DIM: usize = 5;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum StepClassification {
@@ -166,7 +168,8 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                     "Usage: classify_witness_steps --guide-artifact PATH [--guide-artifact PATH ...]\
 \n       [--factorisation-max-entry N] [--graph-probe-max-lag N]\
 \n       [--graph-probe-max-intermediate-dim N] [--graph-probe-max-entry N]\
-\n       [--match-up-to-permutation]"
+\n       [--match-up-to-permutation]\n\
+\n       --match-up-to-permutation applies only to factorisation-family matching"
                         .to_string(),
                 );
             }
@@ -356,6 +359,14 @@ fn matching_factorisation_families(
             from_matrix.rows, from_matrix.cols, to_matrix.rows, to_matrix.cols
         ));
     }
+    if factorisation_match.match_up_to_permutation
+        && from_matrix.rows.max(to_matrix.rows) > MAX_PERMUTATION_MATCH_DIM
+    {
+        return Err(format!(
+            "--match-up-to-permutation is capped at {MAX_PERMUTATION_MATCH_DIM}x{MAX_PERMUTATION_MATCH_DIM}; got {}x{} -> {}x{}",
+            from_matrix.rows, from_matrix.cols, to_matrix.rows, to_matrix.cols
+        ));
+    }
 
     let mut families = Vec::new();
     let target_canon = factorisation_match
@@ -368,11 +379,15 @@ fn matching_factorisation_families(
             max_entry,
             move_family_policy,
             |family, u, v| {
+                let source = u.mul(&v);
+                if source != representative {
+                    return;
+                }
                 let target = v.mul(&u);
                 let matches = if let Some(target_canon) = &target_canon {
                     target.canonical_perm() == *target_canon
                 } else {
-                    u.mul(&v) == *from_matrix && target == *to_matrix
+                    target == *to_matrix
                 };
                 if matches {
                     families.push(family.to_string());
@@ -476,4 +491,100 @@ fn graph_probe_max_entry(
     graph_probe
         .max_entry
         .unwrap_or_else(|| factorisation_max_entry(from_matrix, to_matrix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        classify_step, matching_factorisation_families, FactorisationMatchConfig, GraphProbeConfig,
+        StepClassification,
+    };
+    use sse_core::matrix::DynMatrix;
+    use sse_core::types::MoveFamilyPolicy;
+
+    #[test]
+    fn permutation_matching_recovers_relabelled_elementary_conjugation() {
+        let from = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0]);
+        let to = DynMatrix::new(4, 4, vec![1, 2, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 2, 0, 0, 1]);
+
+        let exact = matching_factorisation_families(
+            &from,
+            &to,
+            FactorisationMatchConfig {
+                max_entry: Some(5),
+                match_up_to_permutation: false,
+            },
+            4,
+            5,
+            MoveFamilyPolicy::GraphPlusStructured,
+        )
+        .expect("exact matching should run");
+        let up_to_permutation = matching_factorisation_families(
+            &from,
+            &to,
+            FactorisationMatchConfig {
+                max_entry: Some(5),
+                match_up_to_permutation: true,
+            },
+            4,
+            5,
+            MoveFamilyPolicy::GraphPlusStructured,
+        )
+        .expect("permutation matching should run");
+
+        assert!(!exact.contains(&"elementary_conjugation".to_string()));
+        assert!(up_to_permutation.contains(&"elementary_conjugation".to_string()));
+    }
+
+    #[test]
+    fn permutation_matching_rejects_dimensions_above_guard() {
+        let from = DynMatrix::new(6, 6, vec![0; 36]);
+        let to = DynMatrix::new(6, 6, vec![0; 36]);
+
+        let err = matching_factorisation_families(
+            &from,
+            &to,
+            FactorisationMatchConfig {
+                max_entry: Some(5),
+                match_up_to_permutation: true,
+            },
+            6,
+            5,
+            MoveFamilyPolicy::GraphPlusStructured,
+        )
+        .expect_err("permutation matching should be guarded above the low-dimensional cap");
+
+        assert!(err.contains("--match-up-to-permutation is capped"));
+    }
+
+    #[test]
+    fn structured_match_classification_wins_over_failed_graph_probe() {
+        let from = DynMatrix::new(3, 3, vec![1, 2, 2, 2, 1, 1, 1, 0, 0]);
+        let to = DynMatrix::new(4, 4, vec![1, 2, 2, 0, 1, 0, 2, 0, 0, 1, 1, 1, 1, 1, 2, 0]);
+
+        let report = classify_step(
+            1,
+            &from,
+            &to,
+            FactorisationMatchConfig {
+                max_entry: Some(5),
+                match_up_to_permutation: true,
+            },
+            GraphProbeConfig {
+                max_lag: 1,
+                max_intermediate_dim: 4,
+                max_entry: Some(5),
+            },
+        )
+        .expect("step should classify");
+
+        assert_eq!(
+            report.classification,
+            StepClassification::StructuredFactorizationMatch
+        );
+        assert_eq!(
+            report.graph_plus_structured_families,
+            vec!["binary_sparse_rectangular_factorisation_3x3_to_4"]
+        );
+    }
 }
