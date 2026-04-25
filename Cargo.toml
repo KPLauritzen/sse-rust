@@ -135,6 +135,11 @@ path = "src/bin/evaluate_brix_ruiz_k4_balanced_bridge_proposals.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "evaluate_brix_ruiz_k4_higher_power_insplit_proposals"
+path = "src/bin/evaluate_brix_ruiz_k4_higher_power_insplit_proposals.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "probe_positive_conjugacy_seeds"
 path = "src/bin/probe_positive_conjugacy_seeds.rs"
 required-features = ["research-tools"]
