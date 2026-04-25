@@ -28,9 +28,9 @@ use crate::search_observer::{
 };
 use crate::types::{
     DynSsePath, DynSseResult, EndpointExactMeetSurface, EndpointExactMeetWitness, EsseStep,
-    FrontierMode, MoveFamilyPolicy, SearchConfig, SearchDirection, SearchLayerTelemetry,
-    SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
-    SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    FrontierMode, MoveFamilyPolicy, SameFuturePastDiversityLayerSample, SearchConfig,
+    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
+    SearchRequest, SearchRunResult, SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 #[cfg(test)]
 use crate::types::{SearchStage, ShortcutSearchConfig, ShortcutSearchStopReason};
@@ -206,6 +206,7 @@ fn record_same_future_past_diversity_frontiers(
     telemetry: &mut SearchTelemetry,
     fwd_frontier: &BeamFrontier,
     bwd_frontier: &BeamFrontier,
+    layer_sample: Option<(usize, SearchDirection)>,
 ) {
     let fwd_counts = fwd_frontier.same_future_past_bucket_counts();
     let bwd_counts = bwd_frontier.same_future_past_bucket_counts();
@@ -226,9 +227,10 @@ fn record_same_future_past_diversity_frontiers(
     for (bucket, count) in bwd_counts {
         *bucket_counts.entry(bucket).or_default() += count;
     }
-    telemetry.same_future_past_diversity.final_frontier_nodes =
-        fwd_frontier.len() + bwd_frontier.len();
-    telemetry.same_future_past_diversity.final_unique_buckets = bucket_counts.len();
+    let frontier_nodes = fwd_frontier.len() + bwd_frontier.len();
+    let unique_buckets = bucket_counts.len();
+    telemetry.same_future_past_diversity.final_frontier_nodes = frontier_nodes;
+    telemetry.same_future_past_diversity.final_unique_buckets = unique_buckets;
     telemetry.same_future_past_diversity.final_saturated_buckets = same_side_saturated_buckets;
     telemetry.same_future_past_diversity.final_max_bucket_size = same_side_max_bucket_size;
     telemetry
@@ -260,6 +262,19 @@ fn record_same_future_past_diversity_frontiers(
                 .same_future_past_diversity
                 .final_cross_frontier_overlap_buckets,
         );
+    if let Some((layer_index, direction)) = layer_sample {
+        telemetry.same_future_past_diversity.layer_samples.push(
+            SameFuturePastDiversityLayerSample {
+                layer_index,
+                direction,
+                frontier_nodes,
+                unique_buckets,
+                saturated_buckets: same_side_saturated_buckets,
+                max_bucket_size: same_side_max_bucket_size,
+                cross_frontier_overlap_buckets,
+            },
+        );
+    }
 }
 
 struct SuppressFinishedObserver<'a> {
@@ -2631,7 +2646,12 @@ fn search_beam_2x2_with_telemetry_and_observer(
         scoring_mode,
     );
     if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
-        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+        record_same_future_past_diversity_frontiers(
+            &mut telemetry,
+            &fwd_frontier,
+            &bwd_frontier,
+            None,
+        );
     }
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
@@ -2867,6 +2887,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                         &mut telemetry,
                         &fwd_frontier,
                         &bwd_frontier,
+                        Some((layer_index, direction)),
                     );
                 }
                 return finish_search_2x2(
@@ -2980,6 +3001,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
                 &mut telemetry,
                 &fwd_frontier,
                 &bwd_frontier,
+                Some((layer_index, direction)),
             );
         }
         layer_index += 1;
@@ -2987,7 +3009,12 @@ fn search_beam_2x2_with_telemetry_and_observer(
 
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
     if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
-        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+        record_same_future_past_diversity_frontiers(
+            &mut telemetry,
+            &fwd_frontier,
+            &bwd_frontier,
+            None,
+        );
     }
     if let Some(witness) = try_concrete_shift_shortcut_2x2(a, b, config) {
         telemetry.concrete_shift_shortcut = true;
@@ -3506,7 +3533,12 @@ fn search_beam_dyn_with_telemetry(
         scoring_mode,
     );
     if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
-        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+        record_same_future_past_diversity_frontiers(
+            &mut telemetry,
+            &fwd_frontier,
+            &bwd_frontier,
+            None,
+        );
     }
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
@@ -3749,6 +3781,7 @@ fn search_beam_dyn_with_telemetry(
                         &mut telemetry,
                         &fwd_frontier,
                         &bwd_frontier,
+                        Some((layer_index, direction)),
                     );
                 }
                 return finish_search_dyn(
@@ -3862,6 +3895,7 @@ fn search_beam_dyn_with_telemetry(
                 &mut telemetry,
                 &fwd_frontier,
                 &bwd_frontier,
+                Some((layer_index, direction)),
             );
         }
         layer_index += 1;
@@ -3872,7 +3906,12 @@ fn search_beam_dyn_with_telemetry(
     }
 
     if scoring_mode == BeamScoringMode::SameFuturePastDiversity {
-        record_same_future_past_diversity_frontiers(&mut telemetry, &fwd_frontier, &bwd_frontier);
+        record_same_future_past_diversity_frontiers(
+            &mut telemetry,
+            &fwd_frontier,
+            &bwd_frontier,
+            None,
+        );
     }
     finish_search_dyn(observer, request, DynSseResult::Unknown, telemetry)
 }
@@ -6246,6 +6285,35 @@ mod tests {
         }
         assert!(telemetry.frontier_nodes_expanded >= 1);
         assert!(telemetry.max_frontier_size <= 4);
+    }
+
+    #[test]
+    fn test_same_future_past_diversity_beam_records_layer_samples() {
+        let a = SqMatrix::new([[1, 1], [2, 5]]);
+        let b = SqMatrix::new([[1, 2], [1, 5]]);
+        let config = SearchConfig {
+            max_lag: 4,
+            max_intermediate_dim: 3,
+            max_entry: 6,
+            frontier_mode: FrontierMode::SameFuturePastDiversityBeam,
+            move_family_policy: MoveFamilyPolicy::Mixed,
+            beam_width: Some(4),
+            beam_bfs_handoff_depth: None,
+            beam_bfs_handoff_deferred_cap: None,
+            endpoint_multi_meet_cap: None,
+        };
+
+        let (_result, telemetry) = search_sse_2x2_with_telemetry(&a, &b, &config);
+
+        assert!(!telemetry
+            .same_future_past_diversity
+            .layer_samples
+            .is_empty());
+        assert!(telemetry
+            .same_future_past_diversity
+            .layer_samples
+            .iter()
+            .all(|sample| sample.frontier_nodes >= sample.unique_buckets));
     }
 
     #[test]

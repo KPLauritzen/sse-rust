@@ -529,6 +529,17 @@ impl StratifiedBeamRefillTelemetry {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SameFuturePastDiversityLayerSample {
+    pub layer_index: usize,
+    pub direction: SearchDirection,
+    pub frontier_nodes: usize,
+    pub unique_buckets: usize,
+    pub saturated_buckets: usize,
+    pub max_bucket_size: usize,
+    pub cross_frontier_overlap_buckets: usize,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SameFuturePastDiversityTelemetry {
     pub active_admissions: usize,
@@ -546,6 +557,8 @@ pub struct SameFuturePastDiversityTelemetry {
     pub max_saturated_buckets: usize,
     pub max_bucket_size: usize,
     pub max_cross_frontier_overlap_buckets: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layer_samples: Vec<SameFuturePastDiversityLayerSample>,
 }
 
 impl SameFuturePastDiversityTelemetry {
@@ -565,6 +578,7 @@ impl SameFuturePastDiversityTelemetry {
             && self.max_saturated_buckets == 0
             && self.max_bucket_size == 0
             && self.max_cross_frontier_overlap_buckets == 0
+            && self.layer_samples.is_empty()
     }
 }
 
