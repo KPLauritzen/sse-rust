@@ -461,7 +461,13 @@ fn decide_keep_or_reject(
                 <= blind_strategy.max_frontier_nodes_expanded
             && higher_power_strategy.max_total_visited_nodes
                 <= blind_strategy.max_total_visited_nodes
-            && higher_power_strategy.total_elapsed_ms <= blind_strategy.total_elapsed_ms)
+            && higher_power_strategy.total_elapsed_ms <= blind_strategy.total_elapsed_ms
+            && (higher_power_strategy.admitted_count > blind_strategy.admitted_count
+                || higher_power_strategy.max_frontier_nodes_expanded
+                    < blind_strategy.max_frontier_nodes_expanded
+                || higher_power_strategy.max_total_visited_nodes
+                    < blind_strategy.max_total_visited_nodes
+                || higher_power_strategy.total_elapsed_ms < blind_strategy.total_elapsed_ms))
     {
         "keep for larger retained-lane scout follow-up".to_string()
     } else {
@@ -576,6 +582,39 @@ mod tests {
             max_frontier_nodes_expanded: 5,
             max_total_visited_nodes: 800,
             total_elapsed_ms: 70,
+            proposals: Vec::new(),
+        };
+
+        assert_eq!(
+            decide_keep_or_reject(&blind, &higher_power),
+            "reject for now on this scout surface"
+        );
+    }
+
+    #[test]
+    fn keep_decision_rejects_exact_tie() {
+        let blind = StrategyReport {
+            strategy: StrategyKind::BlindCoarseGap,
+            shortlist_size: 6,
+            admitted_count: 6,
+            equivalent_count: 0,
+            approximate_hit_count: 0,
+            proposals_with_approx_hit_count: 0,
+            max_frontier_nodes_expanded: 6,
+            max_total_visited_nodes: 846,
+            total_elapsed_ms: 78,
+            proposals: Vec::new(),
+        };
+        let higher_power = StrategyReport {
+            strategy: StrategyKind::HigherPowerGap,
+            shortlist_size: 6,
+            admitted_count: 6,
+            equivalent_count: 0,
+            approximate_hit_count: 0,
+            proposals_with_approx_hit_count: 0,
+            max_frontier_nodes_expanded: 6,
+            max_total_visited_nodes: 846,
+            total_elapsed_ms: 78,
             proposals: Vec::new(),
         };
 
