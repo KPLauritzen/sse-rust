@@ -1,4 +1,6 @@
+use std::collections::BTreeSet;
 use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
 
 #[cfg(feature = "dhat-profile")]
@@ -12,7 +14,8 @@ use sse_core::search::{
 };
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
-    EndpointExactMeetSurface, FrontierMode, GuideArtifactCompatibility, GuideArtifactProvenance,
+    DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness, FrontierMode,
+    GuideArtifactCompatibility, GuideArtifactPayload, GuideArtifactProvenance,
     GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult,
     SearchStage, SearchTelemetry, ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
 };
@@ -33,6 +36,69 @@ struct Cli {
     dhat: bool,
     visited_db: Option<String>,
     write_guide_artifact: Option<String>,
+    endpoint_witness_inventory: Option<String>,
+    endpoint_witness_control_guides: Vec<ControlGuideSpec>,
+    endpoint_witness_guide_dir: Option<String>,
+    endpoint_witness_guide_ranks: Option<Vec<usize>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ControlGuideSpec {
+    class: String,
+    path: String,
+    artifact_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct EndpointWitnessInventory {
+    artifact_kind: &'static str,
+    source: Vec<Vec<u32>>,
+    target: Vec<Vec<u32>>,
+    requested_cap: usize,
+    retained_count: usize,
+    orientation_status: &'static str,
+    orientation_note: &'static str,
+    controls_loaded: Vec<EndpointWitnessControlSummary>,
+    rows: Vec<EndpointWitnessInventoryRow>,
+    emitted_guide_artifacts: Vec<EndpointWitnessGuideArtifactOutput>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct EndpointWitnessControlSummary {
+    class: String,
+    artifact_id: Option<String>,
+    label: Option<String>,
+    source_ref: String,
+    reconstructed_path_length: usize,
+    full_path_hash: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct EndpointWitnessInventoryRow {
+    retained_rank: usize,
+    retained_index: usize,
+    meet_lag: usize,
+    reconstructed_path_length: usize,
+    endpoint_orientation: &'static str,
+    meeting_state_signature: String,
+    full_path_signature: String,
+    full_path_hash: String,
+    control_matches: Vec<EndpointWitnessControlMatch>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct EndpointWitnessControlMatch {
+    class: String,
+    artifact_id: Option<String>,
+    label: Option<String>,
+    source_ref: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct EndpointWitnessGuideArtifactOutput {
+    retained_rank: usize,
+    path: String,
+    artifact_id: String,
 }
 
 #[cfg(feature = "pprof-profile")]
@@ -107,6 +173,7 @@ where
         &result,
         cli.write_guide_artifact.as_deref(),
     )?;
+    maybe_write_endpoint_witness_inventory(&request, &telemetry, &cli)?;
     if cli.json {
         print_json(
             &cli.a,
@@ -159,6 +226,10 @@ where
     let mut dhat = false;
     let mut visited_db = None;
     let mut write_guide_artifact = None;
+    let mut endpoint_witness_inventory = None;
+    let mut endpoint_witness_control_guides = Vec::new();
+    let mut endpoint_witness_guide_dir = None;
+    let mut endpoint_witness_guide_ranks = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -203,6 +274,14 @@ where
                        --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
                        --write-guide-artifact PATH\n\
                                                write a reusable full_path guide artifact JSON file\n\
+                       --endpoint-witness-inventory PATH\n\
+                                               write a compact retained exact-meet witness inventory JSON file\n\
+                       --endpoint-witness-control-guide CLASS=PATH[#ARTIFACT_ID]\n\
+                                               load pinned full_path control guide(s) for exact signature matching (repeatable)\n\
+                       --endpoint-witness-guide-dir DIR\n\
+                                               write selected retained exact-meet witnesses as full_path guide artifacts\n\
+                       --endpoint-witness-guide-ranks RANKS\n\
+                                               comma-separated 1-based retained ranks to write with --endpoint-witness-guide-dir\n\
                        --json                   output JSON instead of human-readable text\n\
                        --telemetry              include search telemetry in output\n\
                        --pprof                  print a terminal CPU profile (requires pprof-profile feature)\n\
@@ -307,6 +386,31 @@ where
                         .ok_or("--write-guide-artifact requires a path")?,
                 );
             }
+            "--endpoint-witness-inventory" => {
+                endpoint_witness_inventory = Some(
+                    args.next()
+                        .ok_or("--endpoint-witness-inventory requires a path")?,
+                );
+            }
+            "--endpoint-witness-control-guide" => {
+                endpoint_witness_control_guides.push(parse_control_guide_spec(
+                    &args.next().ok_or(
+                        "--endpoint-witness-control-guide requires CLASS=PATH[#ARTIFACT_ID]",
+                    )?,
+                )?);
+            }
+            "--endpoint-witness-guide-dir" => {
+                endpoint_witness_guide_dir = Some(
+                    args.next()
+                        .ok_or("--endpoint-witness-guide-dir requires a path")?,
+                );
+            }
+            "--endpoint-witness-guide-ranks" => {
+                endpoint_witness_guide_ranks =
+                    Some(parse_rank_list(&args.next().ok_or(
+                        "--endpoint-witness-guide-ranks requires a comma-separated list",
+                    )?)?);
+            }
             "--json" => json = true,
             "--telemetry" => telemetry = true,
             "--pprof" => pprof = true,
@@ -364,6 +468,25 @@ where
             "--endpoint-multi-meet-cap currently only supports --frontier-mode bfs".to_string(),
         );
     }
+    if (endpoint_witness_inventory.is_some()
+        || endpoint_witness_guide_dir.is_some()
+        || !endpoint_witness_control_guides.is_empty())
+        && config.endpoint_multi_meet_cap.is_none()
+    {
+        return Err(
+            "endpoint witness inventory options require --endpoint-multi-meet-cap".to_string(),
+        );
+    }
+    if endpoint_witness_guide_ranks.is_some() && endpoint_witness_guide_dir.is_none() {
+        return Err(
+            "--endpoint-witness-guide-ranks requires --endpoint-witness-guide-dir".to_string(),
+        );
+    }
+    if !endpoint_witness_control_guides.is_empty() && endpoint_witness_inventory.is_none() {
+        return Err(
+            "--endpoint-witness-control-guide requires --endpoint-witness-inventory".to_string(),
+        );
+    }
 
     Ok(Cli {
         a,
@@ -380,7 +503,69 @@ where
         dhat,
         visited_db,
         write_guide_artifact,
+        endpoint_witness_inventory,
+        endpoint_witness_control_guides,
+        endpoint_witness_guide_dir,
+        endpoint_witness_guide_ranks,
     })
+}
+
+fn parse_control_guide_spec(value: &str) -> Result<ControlGuideSpec, String> {
+    let (class, path) = value
+        .split_once('=')
+        .ok_or("--endpoint-witness-control-guide expects CLASS=PATH[#ARTIFACT_ID]")?;
+    let class = class.trim();
+    let path = path.trim();
+    if class.is_empty() {
+        return Err("--endpoint-witness-control-guide class must not be empty".to_string());
+    }
+    if path.is_empty() {
+        return Err("--endpoint-witness-control-guide path must not be empty".to_string());
+    }
+    let (path, artifact_id) = match path.rsplit_once('#') {
+        Some((_path, artifact_id)) if artifact_id.trim().is_empty() => {
+            return Err(
+                "--endpoint-witness-control-guide artifact id after # must not be empty"
+                    .to_string(),
+            );
+        }
+        Some((path, artifact_id)) => (
+            path.trim().to_string(),
+            Some(artifact_id.trim().to_string()),
+        ),
+        None => (path.to_string(), None),
+    };
+    if path.is_empty() {
+        return Err("--endpoint-witness-control-guide path must not be empty".to_string());
+    }
+    Ok(ControlGuideSpec {
+        class: class.to_string(),
+        path,
+        artifact_id,
+    })
+}
+
+fn parse_rank_list(value: &str) -> Result<Vec<usize>, String> {
+    let mut ranks = Vec::new();
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let rank = part
+            .parse::<usize>()
+            .map_err(|err| format!("invalid retained rank '{part}': {err}"))?;
+        if rank == 0 {
+            return Err("retained ranks are 1-based and must be at least 1".to_string());
+        }
+        ranks.push(rank);
+    }
+    if ranks.is_empty() {
+        return Err("--endpoint-witness-guide-ranks must include at least one rank".to_string());
+    }
+    ranks.sort_unstable();
+    ranks.dedup();
+    Ok(ranks)
 }
 
 fn parse_frontier_mode(value: &str) -> Result<FrontierMode, String> {
@@ -539,6 +724,255 @@ fn maybe_write_guide_artifact(
         .map_err(|err| format!("failed to serialize guide artifact JSON: {err}"))?;
     fs::write(output_path, format!("{json}\n"))
         .map_err(|err| format!("failed to write guide artifact to {output_path}: {err}"))
+}
+
+fn maybe_write_endpoint_witness_inventory(
+    request: &SearchRequest,
+    telemetry: &SearchTelemetry,
+    cli: &Cli,
+) -> Result<(), String> {
+    if cli.endpoint_witness_inventory.is_none() && cli.endpoint_witness_guide_dir.is_none() {
+        return Ok(());
+    }
+    let surface = telemetry.endpoint_exact_meets.as_ref().ok_or_else(|| {
+        "endpoint witness inventory requested, but no retained endpoint_exact_meets surface was produced"
+            .to_string()
+    })?;
+    let controls = load_endpoint_witness_controls(&cli.endpoint_witness_control_guides)?;
+    let mut emitted_guide_artifacts = Vec::new();
+    if let Some(dir) = cli.endpoint_witness_guide_dir.as_deref() {
+        emitted_guide_artifacts = write_endpoint_witness_guide_artifacts(
+            request,
+            surface,
+            dir,
+            cli.endpoint_witness_guide_ranks.as_deref(),
+        )?;
+    }
+    let inventory =
+        build_endpoint_witness_inventory(request, surface, &controls, emitted_guide_artifacts);
+    if let Some(path) = cli.endpoint_witness_inventory.as_deref() {
+        let json = serde_json::to_string_pretty(&inventory)
+            .map_err(|err| format!("failed to serialize endpoint witness inventory: {err}"))?;
+        fs::write(path, format!("{json}\n")).map_err(|err| {
+            format!("failed to write endpoint witness inventory to {path}: {err}")
+        })?;
+    }
+    Ok(())
+}
+
+fn load_endpoint_witness_controls(
+    specs: &[ControlGuideSpec],
+) -> Result<Vec<EndpointWitnessLoadedControl>, String> {
+    let mut controls = Vec::new();
+    for spec in specs {
+        let artifacts = load_guide_artifacts_from_path(&spec.path)?;
+        let mut matched = 0usize;
+        for artifact in artifacts {
+            if let Some(expected_id) = spec.artifact_id.as_deref() {
+                if artifact.artifact_id.as_deref() != Some(expected_id) {
+                    continue;
+                }
+            }
+            let GuideArtifactPayload::FullPath { path } = &artifact.payload;
+            matched += 1;
+            controls.push(EndpointWitnessLoadedControl {
+                class: spec.class.clone(),
+                artifact_id: artifact.artifact_id.clone(),
+                label: artifact.provenance.label.clone(),
+                source_ref: control_source_ref(spec),
+                reconstructed_path_length: path.steps.len(),
+                full_path_signature: witness_matrix_signature(path),
+                full_path_hash: stable_path_hash(path),
+            });
+        }
+        if spec.artifact_id.is_some() && matched == 0 {
+            return Err(format!(
+                "control guide {} did not contain artifact_id {}",
+                spec.path,
+                spec.artifact_id.as_deref().unwrap_or("")
+            ));
+        }
+    }
+    Ok(controls)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct EndpointWitnessLoadedControl {
+    class: String,
+    artifact_id: Option<String>,
+    label: Option<String>,
+    source_ref: String,
+    reconstructed_path_length: usize,
+    full_path_signature: String,
+    full_path_hash: String,
+}
+
+fn control_source_ref(spec: &ControlGuideSpec) -> String {
+    match spec.artifact_id.as_deref() {
+        Some(artifact_id) => format!("{}#{}", spec.path, artifact_id),
+        None => spec.path.clone(),
+    }
+}
+
+fn write_endpoint_witness_guide_artifacts(
+    request: &SearchRequest,
+    surface: &EndpointExactMeetSurface,
+    dir: &str,
+    selected_ranks: Option<&[usize]>,
+) -> Result<Vec<EndpointWitnessGuideArtifactOutput>, String> {
+    fs::create_dir_all(dir)
+        .map_err(|err| format!("failed to create endpoint witness guide dir {dir}: {err}"))?;
+    let selected = selected_ranks
+        .map(|ranks| ranks.iter().copied().collect::<BTreeSet<_>>())
+        .unwrap_or_else(|| (1..=surface.retained.len()).collect::<BTreeSet<_>>());
+    for rank in &selected {
+        if *rank > surface.retained.len() {
+            return Err(format!(
+                "requested retained rank {rank}, but only {} exact meets were retained",
+                surface.retained.len()
+            ));
+        }
+    }
+    let mut outputs = Vec::new();
+    for (index, witness) in surface.retained.iter().enumerate() {
+        let rank = index + 1;
+        if !selected.contains(&rank) {
+            continue;
+        }
+        let path_hash = stable_path_hash(&witness.path);
+        let artifact_id = format!(
+            "endpoint-exact-meet-rank-{rank}-meet-lag-{}-reconstructed-lag-{}-path-{}",
+            witness.path_lag,
+            witness.path.steps.len(),
+            path_hash.trim_start_matches("fnv1a64:")
+        );
+        let mut artifact =
+            build_full_path_guide_artifact(&request.source, &request.target, &witness.path)
+                .map_err(|err| {
+                    format!("failed to build retained exact-meet guide artifact rank {rank}: {err}")
+                })?;
+        artifact.artifact_id = Some(artifact_id.clone());
+        artifact.provenance = GuideArtifactProvenance {
+            source_kind: Some("endpoint_exact_meet_inventory".to_string()),
+            label: Some(format!("retained endpoint exact meet rank {rank}")),
+            source_ref: Some(format!("endpoint_exact_meet_rank:{rank}")),
+        };
+        artifact.compatibility = GuideArtifactCompatibility {
+            supported_stages: vec![SearchStage::GuidedRefinement, SearchStage::ShortcutSearch],
+            max_endpoint_dim: Some(request.source.rows.max(request.target.rows)),
+        };
+        let output_path = Path::new(dir).join(format!("rank-{rank:03}-{artifact_id}.json"));
+        let json = serde_json::to_string_pretty(&artifact).map_err(|err| {
+            format!("failed to serialize retained exact-meet guide artifact rank {rank}: {err}")
+        })?;
+        fs::write(&output_path, format!("{json}\n")).map_err(|err| {
+            format!(
+                "failed to write retained exact-meet guide artifact rank {rank} to {}: {err}",
+                output_path.display()
+            )
+        })?;
+        outputs.push(EndpointWitnessGuideArtifactOutput {
+            retained_rank: rank,
+            path: output_path.display().to_string(),
+            artifact_id,
+        });
+    }
+    Ok(outputs)
+}
+
+fn build_endpoint_witness_inventory(
+    request: &SearchRequest,
+    surface: &EndpointExactMeetSurface,
+    controls: &[EndpointWitnessLoadedControl],
+    emitted_guide_artifacts: Vec<EndpointWitnessGuideArtifactOutput>,
+) -> EndpointWitnessInventory {
+    EndpointWitnessInventory {
+        artifact_kind: "endpoint_exact_meet_witness_inventory",
+        source: dyn_matrix_to_vecs(&request.source),
+        target: dyn_matrix_to_vecs(&request.target),
+        requested_cap: surface.requested_cap,
+        retained_count: surface.retained.len(),
+        orientation_status: "not_recorded",
+        orientation_note: "retained exact-meet telemetry stores the canonical meeting state and reconstructed source-to-target path, but not the frontier side/orientation that produced the meet",
+        controls_loaded: controls
+            .iter()
+            .map(|control| EndpointWitnessControlSummary {
+                class: control.class.clone(),
+                artifact_id: control.artifact_id.clone(),
+                label: control.label.clone(),
+                source_ref: control.source_ref.clone(),
+                reconstructed_path_length: control.reconstructed_path_length,
+                full_path_hash: control.full_path_hash.clone(),
+            })
+            .collect(),
+        rows: surface
+            .retained
+            .iter()
+            .enumerate()
+            .map(|(index, witness)| endpoint_witness_inventory_row(index, witness, controls))
+            .collect(),
+        emitted_guide_artifacts,
+    }
+}
+
+fn endpoint_witness_inventory_row(
+    index: usize,
+    witness: &EndpointExactMeetWitness,
+    controls: &[EndpointWitnessLoadedControl],
+) -> EndpointWitnessInventoryRow {
+    let full_path_signature = witness_matrix_signature(&witness.path);
+    let full_path_hash = stable_signature_hash(&full_path_signature);
+    EndpointWitnessInventoryRow {
+        retained_rank: index + 1,
+        retained_index: index,
+        meet_lag: witness.path_lag,
+        reconstructed_path_length: witness.path.steps.len(),
+        endpoint_orientation: "not_recorded",
+        meeting_state_signature: matrix_signature(&witness.meeting_canonical),
+        control_matches: controls
+            .iter()
+            .filter(|control| control.full_path_signature == full_path_signature)
+            .map(|control| EndpointWitnessControlMatch {
+                class: control.class.clone(),
+                artifact_id: control.artifact_id.clone(),
+                label: control.label.clone(),
+                source_ref: control.source_ref.clone(),
+            })
+            .collect(),
+        full_path_signature,
+        full_path_hash,
+    }
+}
+
+fn witness_matrix_signature(path: &DynSsePath) -> String {
+    path.matrices
+        .iter()
+        .map(matrix_signature)
+        .collect::<Vec<_>>()
+        .join(" -> ")
+}
+
+fn matrix_signature(matrix: &DynMatrix) -> String {
+    let data = matrix
+        .data
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{}x{}:{data}", matrix.rows, matrix.cols)
+}
+
+fn stable_path_hash(path: &DynSsePath) -> String {
+    stable_signature_hash(&witness_matrix_signature(path))
+}
+
+fn stable_signature_hash(signature: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in signature.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 fn search_stage_label(stage: SearchStage) -> &'static str {
@@ -961,16 +1395,22 @@ fn dyn_matrix_to_vecs(m: &DynMatrix) -> Vec<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_result_json, parse_cli, parse_matrix, run_with_args};
+    use super::{
+        build_endpoint_witness_inventory, build_result_json, parse_cli, parse_matrix,
+        run_with_args, stable_path_hash, witness_matrix_signature,
+        write_endpoint_witness_guide_artifacts, EndpointWitnessLoadedControl,
+    };
     use rusqlite::Connection;
     use sse_core::concrete_shift::{
         canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
     };
+    use sse_core::guide_artifacts::load_guide_artifacts_from_path;
     use sse_core::matrix::{DynMatrix, SqMatrix};
     use sse_core::types::{
         ConcreteShiftProof2x2, DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness,
-        FrontierMode, GuideArtifact, GuideArtifactPayload, MoveFamilyPolicy, SearchRunResult,
-        SearchStage, SearchTelemetry,
+        FrontierMode, GuideArtifact, GuideArtifactPayload, GuidedRefinementConfig,
+        MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult, SearchStage,
+        SearchTelemetry, ShortcutSearchConfig,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1021,6 +1461,101 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.config.endpoint_multi_meet_cap, Some(3));
+    }
+
+    #[test]
+    fn parse_cli_accepts_endpoint_witness_inventory_flags() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "2".to_string(),
+                "--endpoint-witness-inventory".to_string(),
+                "inventory.json".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=research/guide_artifacts/k3_normalized_guide_pool.json#k3-lind-marcus-baker-lag7".to_string(),
+                "--endpoint-witness-guide-dir".to_string(),
+                "guides".to_string(),
+                "--endpoint-witness-guide-ranks".to_string(),
+                "2,1,1".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            cli.endpoint_witness_inventory.as_deref(),
+            Some("inventory.json")
+        );
+        assert_eq!(cli.endpoint_witness_control_guides.len(), 1);
+        assert_eq!(cli.endpoint_witness_control_guides[0].class, "baker");
+        assert_eq!(
+            cli.endpoint_witness_control_guides[0]
+                .artifact_id
+                .as_deref(),
+            Some("k3-lind-marcus-baker-lag7")
+        );
+        assert_eq!(cli.endpoint_witness_guide_dir.as_deref(), Some("guides"));
+        assert_eq!(cli.endpoint_witness_guide_ranks, Some(vec![1, 2]));
+    }
+
+    #[test]
+    fn parse_cli_rejects_empty_endpoint_witness_control_path() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "1".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=#control".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("path must not be empty"));
+    }
+
+    #[test]
+    fn parse_cli_rejects_empty_endpoint_witness_control_artifact_id() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "1".to_string(),
+                "--endpoint-witness-inventory".to_string(),
+                "inventory.json".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=control.json#".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("artifact id after # must not be empty"));
+    }
+
+    #[test]
+    fn parse_cli_rejects_endpoint_witness_control_without_inventory() {
+        let err = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--endpoint-multi-meet-cap".to_string(),
+                "1".to_string(),
+                "--endpoint-witness-guide-dir".to_string(),
+                "guides".to_string(),
+                "--endpoint-witness-control-guide".to_string(),
+                "baker=control.json".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("requires --endpoint-witness-inventory"));
     }
 
     #[test]
@@ -1186,6 +1721,82 @@ mod tests {
             json["endpoint_exact_meets"]["retained"][0]["path"]["matrices"][0],
             serde_json::json!([[1, 0], [0, 1]])
         );
+    }
+
+    #[test]
+    fn endpoint_witness_inventory_rows_include_hashes_and_control_matches() {
+        let request = identity_request();
+        let path = DynSsePath {
+            matrices: vec![request.source.clone()],
+            steps: vec![],
+        };
+        let surface = EndpointExactMeetSurface {
+            requested_cap: 1,
+            retained: vec![EndpointExactMeetWitness {
+                path_lag: 3,
+                meeting_canonical: request.source.clone(),
+                path: path.clone(),
+            }],
+        };
+        let controls = vec![EndpointWitnessLoadedControl {
+            class: "baker".to_string(),
+            artifact_id: Some("control".to_string()),
+            label: Some("Baker control".to_string()),
+            source_ref: "control.json#control".to_string(),
+            reconstructed_path_length: 0,
+            full_path_signature: witness_matrix_signature(&path),
+            full_path_hash: stable_path_hash(&path),
+        }];
+
+        let inventory = build_endpoint_witness_inventory(&request, &surface, &controls, vec![]);
+
+        assert_eq!(inventory.retained_count, 1);
+        assert_eq!(inventory.orientation_status, "not_recorded");
+        assert_eq!(inventory.rows[0].retained_rank, 1);
+        assert_eq!(inventory.rows[0].retained_index, 0);
+        assert_eq!(inventory.rows[0].meet_lag, 3);
+        assert_eq!(inventory.rows[0].reconstructed_path_length, 0);
+        assert_eq!(inventory.rows[0].meeting_state_signature, "2x2:1,0,0,1");
+        assert!(inventory.rows[0].full_path_hash.starts_with("fnv1a64:"));
+        assert_eq!(inventory.rows[0].control_matches[0].class, "baker");
+    }
+
+    #[test]
+    fn endpoint_witness_guide_artifact_output_round_trips() {
+        let request = identity_request();
+        let surface = EndpointExactMeetSurface {
+            requested_cap: 1,
+            retained: vec![EndpointExactMeetWitness {
+                path_lag: 0,
+                meeting_canonical: request.source.clone(),
+                path: DynSsePath {
+                    matrices: vec![request.source.clone()],
+                    steps: vec![],
+                },
+            }],
+        };
+        let dir = temp_output_path("endpoint-witness-guides");
+        let outputs = write_endpoint_witness_guide_artifacts(
+            &request,
+            &surface,
+            &dir.display().to_string(),
+            Some(&[1]),
+        )
+        .unwrap();
+
+        assert_eq!(outputs.len(), 1);
+        let artifacts = load_guide_artifacts_from_path(&dir).unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(
+            artifacts[0].provenance.source_kind.as_deref(),
+            Some("endpoint_exact_meet_inventory")
+        );
+        assert!(matches!(
+            &artifacts[0].payload,
+            GuideArtifactPayload::FullPath { path } if path.steps.is_empty()
+        ));
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1583,6 +2194,19 @@ mod tests {
             "sse-core-search-{label}-{}-{nonce}.json",
             std::process::id()
         ))
+    }
+
+    fn identity_request() -> SearchRequest {
+        let matrix = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        SearchRequest {
+            source: matrix.clone(),
+            target: matrix,
+            config: SearchConfig::default(),
+            stage: SearchStage::EndpointSearch,
+            guide_artifacts: Vec::new(),
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig::default(),
+        }
     }
 
     fn temp_sqlite_path(label: &str) -> std::path::PathBuf {
