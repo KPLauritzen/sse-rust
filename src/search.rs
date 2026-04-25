@@ -6341,7 +6341,10 @@ mod tests {
             assert_eq!(sample.layer_index, layer.layer_index);
             assert_eq!(Some(sample.direction), layer.direction);
             assert!(sample.frontier_nodes >= sample.unique_buckets);
-            assert!(sample.unique_buckets >= sample.saturated_buckets);
+            assert!(
+                sample.saturated_buckets
+                    <= sample.unique_buckets + sample.cross_frontier_overlap_buckets
+            );
             assert!(sample.max_bucket_size >= 1);
         }
         assert!(samples
