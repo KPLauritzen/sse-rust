@@ -228,6 +228,9 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
         "concrete-shift-profile-beam" | "concrete_shift_profile_beam" => {
             FrontierMode::ConcreteShiftProfileBeam
         }
+        "witness-bridge-profile-beam" | "witness_bridge_profile_beam" => {
+            FrontierMode::WitnessBridgeProfileBeam
+        }
         "same-future-past-diversity-beam" | "same_future_past_diversity_beam" => {
             FrontierMode::SameFuturePastDiversityBeam
         }

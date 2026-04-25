@@ -270,6 +270,59 @@ pub fn score_node_with_concrete_shift_profile(node: &DynMatrix, target: &DynMatr
     base + profile_score
 }
 
+pub fn score_node_with_witness_bridge_profile(node: &DynMatrix, target: &DynMatrix) -> f64 {
+    score_node(node, target) + witness_bridge_profile_score(node)
+}
+
+fn witness_bridge_profile_score(node: &DynMatrix) -> f64 {
+    if matches_witness_bridge_profile(node) {
+        -48.0
+    } else {
+        0.0
+    }
+}
+
+fn matches_witness_bridge_profile(node: &DynMatrix) -> bool {
+    if !matches!(node.rows, 3 | 4) || !node.is_square() {
+        return false;
+    }
+
+    let (support, row_supports, col_supports) = support_profile(node);
+    match node.rows {
+        3 => {
+            (support == 7 && row_supports == [1, 3, 3] && col_supports == [2, 2, 3])
+                || (support == 7 && row_supports == [2, 2, 3] && col_supports == [1, 3, 3])
+                || (support == 8 && row_supports == [2, 3, 3] && col_supports == [2, 3, 3])
+        }
+        4 => {
+            (support == 11 && row_supports == [2, 2, 3, 4] && col_supports == [2, 2, 3, 4])
+                || (support == 11 && row_supports == [2, 3, 3, 3] && col_supports == [1, 3, 3, 4])
+                || (support == 11 && row_supports == [1, 3, 3, 4] && col_supports == [2, 3, 3, 3])
+        }
+        _ => false,
+    }
+}
+
+fn support_profile(node: &DynMatrix) -> (usize, Vec<usize>, Vec<usize>) {
+    let mut support = 0usize;
+    let mut row_supports = vec![0usize; node.rows];
+    let mut col_supports = vec![0usize; node.cols];
+
+    for row in 0..node.rows {
+        for col in 0..node.cols {
+            if node.get(row, col) > 0 {
+                support += 1;
+                row_supports[row] += 1;
+                col_supports[col] += 1;
+            }
+        }
+    }
+
+    row_supports.sort_unstable();
+    col_supports.sort_unstable();
+    (support, row_supports, col_supports)
+}
+
 fn concrete_shift_profile_score(node: &DynMatrix, target: &DynMatrix) -> Option<f64> {
     let node = node.to_sq::<2>()?;
     let target = target.to_sq::<2>()?;
@@ -489,7 +542,8 @@ fn sorted_l1_u8(left: &[u8], right: &[u8]) -> u64 {
 mod tests {
     use super::{
         candidate_score_specs, concrete_shift_profile_status_score, rank_target, score_node,
-        score_node_with_concrete_shift_profile, score_node_with_weights, signature_distance,
+        score_node_with_concrete_shift_profile, score_node_with_weights,
+        score_node_with_witness_bridge_profile, signature_distance,
         BEAM_DIMENSION_STRICT_SCORE_WEIGHTS, DEFAULT_BEAM_SCORE_NAME,
     };
     use crate::concrete_shift::ConcreteShiftProfileStatus2x2;
@@ -590,6 +644,42 @@ mod tests {
 
         assert!(limited_shift < pure_limit);
         assert!(pure_limit < exhausted);
+    }
+
+    #[test]
+    fn witness_bridge_profile_score_prefers_frozen_support_profile() {
+        let target = DynMatrix::new(2, 2, vec![1, 3, 2, 1]);
+        let bridge = DynMatrix::new(3, 3, vec![1, 0, 0, 1, 1, 1, 1, 1, 1]);
+        let same_dim_miss = DynMatrix::new(3, 3, vec![1, 1, 0, 1, 1, 0, 0, 1, 1]);
+
+        assert!(
+            score_node_with_witness_bridge_profile(&bridge, &target)
+                < score_node_with_witness_bridge_profile(&same_dim_miss, &target)
+        );
+    }
+
+    #[test]
+    fn witness_bridge_profile_score_covers_frozen_profile_table() {
+        let target = DynMatrix::new(2, 2, vec![1, 3, 2, 1]);
+        let matching_profiles = [
+            DynMatrix::new(3, 3, vec![1, 0, 0, 1, 1, 1, 1, 1, 1]),
+            DynMatrix::new(3, 3, vec![1, 1, 1, 0, 1, 1, 0, 1, 1]),
+            DynMatrix::new(3, 3, vec![0, 1, 1, 1, 1, 1, 1, 1, 1]),
+            DynMatrix::new(4, 4, vec![1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1]),
+            DynMatrix::new(4, 4, vec![1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0]),
+            DynMatrix::new(4, 4, vec![1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0]),
+        ];
+
+        for profile in matching_profiles {
+            let bonus = score_node_with_witness_bridge_profile(&profile, &target)
+                - score_node(&profile, &target);
+            assert_eq!(bonus, -48.0);
+        }
+
+        let outside_frozen_dims = DynMatrix::new(5, 5, vec![1; 25]);
+        let bonus = score_node_with_witness_bridge_profile(&outside_frozen_dims, &target)
+            - score_node(&outside_frozen_dims, &target);
+        assert_eq!(bonus, 0.0);
     }
 
     #[test]
