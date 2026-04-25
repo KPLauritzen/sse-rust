@@ -860,6 +860,7 @@ pub fn concrete_shift_proposal_data_2x2(
     bounds: ConcreteShiftProposalBounds2x2,
     sample_limit_per_fiber: usize,
 ) -> Result<ConcreteShiftProposalData2x2, String> {
+    verify_concrete_shift_relation_2x2(a, b, witness, relation)?;
     let ctx = ModuleContext::new(a, b, &witness.shift)?;
     let lag = witness.shift.lag;
     let shift_signature = format!(
@@ -898,8 +899,8 @@ pub fn concrete_shift_proposal_data_2x2(
             omega_e: ctx.omega_e_domain.lengths(),
             omega_f: ctx.omega_f_domain.lengths(),
         },
-        rs_to_a_path_fibers: bridge_fiber_summaries_from_rs(&ctx, witness, sample_limit_per_fiber),
-        sr_to_b_path_fibers: bridge_fiber_summaries_from_sr(&ctx, witness, sample_limit_per_fiber),
+        rs_to_a_path_fibers: bridge_fiber_summaries_from_rs(&ctx, witness, sample_limit_per_fiber)?,
+        sr_to_b_path_fibers: bridge_fiber_summaries_from_sr(&ctx, witness, sample_limit_per_fiber)?,
     })
 }
 
@@ -1603,7 +1604,7 @@ fn bridge_fiber_summaries_from_rs(
     ctx: &ModuleContext,
     witness: &ConcreteShiftWitness2x2,
     sample_limit_per_fiber: usize,
-) -> Vec<ConcreteShiftBridgeFiberSummary2x2> {
+) -> Result<Vec<ConcreteShiftBridgeFiberSummary2x2>, String> {
     bridge_fiber_summaries(
         &ctx.omega_e_domain.fibers,
         &ctx.omega_e_codomain.fibers,
@@ -1621,7 +1622,7 @@ fn bridge_fiber_summaries_from_sr(
     ctx: &ModuleContext,
     witness: &ConcreteShiftWitness2x2,
     sample_limit_per_fiber: usize,
-) -> Vec<ConcreteShiftBridgeFiberSummary2x2> {
+) -> Result<Vec<ConcreteShiftBridgeFiberSummary2x2>, String> {
     bridge_fiber_summaries(
         &ctx.omega_f_domain.fibers,
         &ctx.omega_f_codomain.fibers,
@@ -1641,22 +1642,33 @@ fn bridge_fiber_summaries<T, F>(
     mapping: &[Vec<usize>; 4],
     mut build_sample: F,
     sample_limit_per_fiber: usize,
-) -> Vec<ConcreteShiftBridgeFiberSummary2x2>
+) -> Result<Vec<ConcreteShiftBridgeFiberSummary2x2>, String>
 where
     F: FnMut(&T, usize) -> ConcreteShiftBridgePathSample2x2,
 {
     let mut summaries = Vec::new();
 
     for fiber in 0..4 {
+        let fiber_mapping = mapping[fiber].as_slice();
+        let fiber_codomain = codomain_fibers[fiber].as_slice();
         let samples = domain_fibers[fiber]
             .iter()
             .enumerate()
             .take(sample_limit_per_fiber)
             .map(|(local_idx, domain_item)| {
-                let path_idx = codomain_fibers[fiber][mapping[fiber][local_idx]];
-                build_sample(domain_item, path_idx)
+                let mapped_local = *fiber_mapping.get(local_idx).ok_or_else(|| {
+                    format!(
+                        "bridge sample mapping missing for fiber {fiber} at local index {local_idx}"
+                    )
+                })?;
+                let path_idx = *fiber_codomain.get(mapped_local).ok_or_else(|| {
+                    format!(
+                        "bridge sample codomain missing for fiber {fiber} at mapped index {mapped_local}"
+                    )
+                })?;
+                Ok(build_sample(domain_item, path_idx))
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
 
         summaries.push(ConcreteShiftBridgeFiberSummary2x2 {
             fiber: [fiber / 2, fiber % 2],
@@ -1666,7 +1678,7 @@ where
         });
     }
 
-    summaries
+    Ok(summaries)
 }
 
 fn stable_signature_hash(signature: &str) -> String {
@@ -2250,6 +2262,64 @@ mod tests {
                 .unwrap()
                 .contains('>')
         );
+    }
+
+    #[test]
+    fn test_concrete_shift_proposal_data_rejects_mismatched_relation() {
+        let a = SqMatrix::new([[2, 0], [0, 1]]);
+        let shift = ShiftEquivalenceWitness2x2 {
+            lag: 1,
+            r: SqMatrix::identity(),
+            s: a.clone(),
+        };
+        let mut witness =
+            canonical_module_shift_witness_2x2(&a, &a, shift).expect("expected witness");
+        witness.sigma_g.mapping[0].swap(0, 1);
+
+        let err = concrete_shift_proposal_data_2x2(
+            &a,
+            &a,
+            ConcreteShiftRelation2x2::Aligned,
+            &witness,
+            ConcreteShiftProposalBounds2x2 {
+                max_lag: 1,
+                max_entry: 1,
+                max_witnesses: 8,
+            },
+            1,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("aligned relation"));
+    }
+
+    #[test]
+    fn test_concrete_shift_proposal_data_returns_err_for_bad_mapping() {
+        let a = SqMatrix::identity();
+        let shift = ShiftEquivalenceWitness2x2 {
+            lag: 1,
+            r: SqMatrix::identity(),
+            s: SqMatrix::identity(),
+        };
+        let mut witness =
+            canonical_module_shift_witness_2x2(&a, &a, shift).expect("expected witness");
+        witness.omega_e.mapping[0].push(0);
+
+        let err = concrete_shift_proposal_data_2x2(
+            &a,
+            &a,
+            ConcreteShiftRelation2x2::Compatible,
+            &witness,
+            ConcreteShiftProposalBounds2x2 {
+                max_lag: 1,
+                max_entry: 1,
+                max_witnesses: 8,
+            },
+            1,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("omega_e fiber 0 has wrong length"));
     }
 
     #[test]
