@@ -188,8 +188,8 @@ pub struct MatrixSupportSummary2x2 {
     pub signature: String,
     pub matrix: [[u32; 2]; 2],
     pub nonzero_positions: Vec<[usize; 2]>,
-    pub row_sums: [u32; 2],
-    pub col_sums: [u32; 2],
+    pub row_sums: [u64; 2],
+    pub col_sums: [u64; 2],
     pub entry_sum: u64,
     pub max_entry: u32,
 }
@@ -1539,14 +1539,14 @@ fn relation_label(relation: ConcreteShiftRelation2x2) -> &'static str {
 
 fn matrix_support_summary(matrix: &SqMatrix<2>) -> MatrixSupportSummary2x2 {
     let mut nonzero_positions = Vec::new();
-    let mut row_sums = [0u32; 2];
-    let mut col_sums = [0u32; 2];
+    let mut row_sums = [0u64; 2];
+    let mut col_sums = [0u64; 2];
 
     for source in 0..2 {
         for target in 0..2 {
             let value = matrix.data[source][target];
-            row_sums[source] += value;
-            col_sums[target] += value;
+            row_sums[source] += u64::from(value);
+            col_sums[target] += u64::from(value);
             if value > 0 {
                 nonzero_positions.push([source, target]);
             }
