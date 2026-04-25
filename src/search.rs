@@ -6494,7 +6494,10 @@ mod tests {
 
         let (result, telemetry) = execute_search_request(&request).unwrap();
         match result {
-            SearchRunResult::EquivalentByConcreteShift(proof) => {
+            SearchRunResult::EquivalentByStructuredProof(proof) => {
+                let proof = proof
+                    .as_concrete_shift_2x2()
+                    .expect("2x2 endpoint dispatch should currently return concrete-shift proofs");
                 assert_eq!(proof.relation, ConcreteShiftRelation2x2::Aligned);
                 assert_eq!(proof.witness.shift.lag, 1);
             }
@@ -7365,7 +7368,10 @@ mod tests {
         let run_result: SearchRunResult =
             SseResult::EquivalentByConcreteShift(shortcut_proof.clone()).into();
         match run_result {
-            SearchRunResult::EquivalentByConcreteShift(run_proof) => {
+            SearchRunResult::EquivalentByStructuredProof(run_proof) => {
+                let run_proof = run_proof
+                    .as_concrete_shift_2x2()
+                    .expect("converted structured proof should retain concrete-shift payload");
                 assert_eq!(run_proof.relation, ConcreteShiftRelation2x2::Aligned)
             }
             other => panic!("expected concrete-shift run result, got {:?}", other),

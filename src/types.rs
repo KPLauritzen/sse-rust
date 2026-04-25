@@ -418,20 +418,71 @@ pub enum DynSseResult {
     Unknown,
 }
 
+/// Generic structured proof payload shared by result/event/persistence layers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StructuredProofResult {
+    ConcreteShift2x2(ConcreteShiftProof2x2),
+}
+
+impl StructuredProofResult {
+    pub fn outcome_label(&self) -> &'static str {
+        match self {
+            Self::ConcreteShift2x2(_) => "equivalent_by_concrete_shift",
+        }
+    }
+
+    pub fn description(&self) -> String {
+        match self {
+            Self::ConcreteShift2x2(proof) => proof.description(),
+        }
+    }
+
+    pub fn relation_label(&self) -> Option<&'static str> {
+        match self {
+            Self::ConcreteShift2x2(proof) => Some(proof.relation.as_str()),
+        }
+    }
+
+    pub fn as_concrete_shift_2x2(&self) -> Option<&ConcreteShiftProof2x2> {
+        match self {
+            Self::ConcreteShift2x2(proof) => Some(proof),
+        }
+    }
+}
+
+impl From<ConcreteShiftProof2x2> for StructuredProofResult {
+    fn from(proof: ConcreteShiftProof2x2) -> Self {
+        Self::ConcreteShift2x2(proof)
+    }
+}
+
 /// Generic result boundary shared by request/result/event/persistence layers.
 #[derive(Clone, Debug)]
 pub enum SearchRunResult {
     Equivalent(DynSsePath),
-    EquivalentByConcreteShift(ConcreteShiftProof2x2),
+    EquivalentByStructuredProof(StructuredProofResult),
     NotEquivalent(String),
     Unknown,
+}
+
+impl SearchRunResult {
+    pub fn outcome_label(&self) -> &'static str {
+        match self {
+            Self::Equivalent(_) => "equivalent",
+            Self::EquivalentByStructuredProof(proof) => proof.outcome_label(),
+            Self::NotEquivalent(_) => "not_equivalent",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 impl From<SseResult<2>> for SearchRunResult {
     fn from(result: SseResult<2>) -> Self {
         match result {
             SseResult::Equivalent(path) => Self::Equivalent(path.into()),
-            SseResult::EquivalentByConcreteShift(proof) => Self::EquivalentByConcreteShift(proof),
+            SseResult::EquivalentByConcreteShift(proof) => {
+                Self::EquivalentByStructuredProof(proof.into())
+            }
             SseResult::NotEquivalent(reason) => Self::NotEquivalent(reason),
             SseResult::Unknown => Self::Unknown,
         }

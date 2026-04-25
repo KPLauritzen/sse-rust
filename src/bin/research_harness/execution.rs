@@ -195,7 +195,8 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
                 telemetry,
             },
         },
-        SearchRunResult::EquivalentByConcreteShift(proof) => {
+        SearchRunResult::EquivalentByStructuredProof(proof) => {
+            let proof = proof.as_concrete_shift_2x2();
             if case.expected_witness_signature.is_some() {
                 WorkerCaseResult {
                     id: case.id.clone(),
@@ -218,6 +219,9 @@ pub(crate) fn run_case(case: &ResearchCase, cases_path: &Path) -> WorkerCaseResu
                     telemetry,
                 }
             } else {
+                let proof = proof.expect(
+                    "structured proof boundary currently only carries concrete-shift proofs",
+                );
                 WorkerCaseResult {
                     id: case.id.clone(),
                     actual_outcome: "equivalent".to_string(),

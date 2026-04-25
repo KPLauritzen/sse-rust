@@ -200,7 +200,7 @@ where
 
 fn exit_code(result: &SearchRunResult) -> ExitCode {
     match result {
-        SearchRunResult::Equivalent(_) | SearchRunResult::EquivalentByConcreteShift(_) => {
+        SearchRunResult::Equivalent(_) | SearchRunResult::EquivalentByStructuredProof(_) => {
             ExitCode::SUCCESS
         }
         SearchRunResult::NotEquivalent(_) => ExitCode::from(1),
@@ -685,7 +685,7 @@ fn maybe_write_guide_artifact(
 
     let path = match result {
         SearchRunResult::Equivalent(path) => path,
-        SearchRunResult::EquivalentByConcreteShift(_) => {
+        SearchRunResult::EquivalentByStructuredProof(_) => {
             return Err(
                 "--write-guide-artifact only supports path witnesses; concrete shift witnesses \
                  cannot be exported as full_path guide artifacts"
@@ -1076,7 +1076,7 @@ fn print_pretty(
                 println!("  V = {}", format_dyn_matrix(&step.v));
             }
         }
-        SearchRunResult::EquivalentByConcreteShift(proof) => {
+        SearchRunResult::EquivalentByStructuredProof(proof) => {
             println!("Result: EQUIVALENT ({})", proof.description());
         }
         SearchRunResult::NotEquivalent(reason) => {
@@ -1282,11 +1282,11 @@ fn build_result_json(
             None,
             None,
         ),
-        SearchRunResult::EquivalentByConcreteShift(proof) => (
-            "equivalent_by_concrete_shift",
+        SearchRunResult::EquivalentByStructuredProof(proof) => (
+            proof.outcome_label(),
             None,
             Some(proof.description()),
-            Some(proof.relation.as_str().to_string()),
+            proof.relation_label().map(str::to_string),
         ),
         SearchRunResult::NotEquivalent(reason) => {
             ("not_equivalent", None, Some(reason.clone()), None)
@@ -1676,7 +1676,7 @@ mod tests {
             &dyn_a,
             &dyn_a,
             SearchStage::EndpointSearch,
-            &SearchRunResult::EquivalentByConcreteShift(proof),
+            &SearchRunResult::EquivalentByStructuredProof(proof.into()),
             &SearchTelemetry::default(),
             false,
         );

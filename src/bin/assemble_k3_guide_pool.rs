@@ -770,11 +770,11 @@ fn materialize_candidate(candidate: &PathCandidate) -> Result<DynSsePath, String
         }
         let segment = match search_segment(&window[0], &window[1], max_dim, max_entry, 1)? {
             SearchRunResult::Equivalent(path) => path,
-            SearchRunResult::EquivalentByConcreteShift(_) => {
+            SearchRunResult::EquivalentByStructuredProof(_) => {
                 let fallback_lag = 3usize;
                 match search_segment(&window[0], &window[1], max_dim, max_entry, fallback_lag)? {
                     SearchRunResult::Equivalent(path) => path,
-                    SearchRunResult::EquivalentByConcreteShift(_) => {
+                    SearchRunResult::EquivalentByStructuredProof(_) => {
                         return Err(
                             "segment only resolved via concrete-shift witness; explicit path replay unavailable"
                                 .to_string(),

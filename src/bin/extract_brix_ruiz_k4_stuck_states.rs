@@ -685,7 +685,7 @@ fn status_label(status: SearchEdgeStatus) -> &'static str {
 fn result_label(result: &SearchRunResult) -> String {
     match result {
         SearchRunResult::Equivalent(_) => "equivalent".to_string(),
-        SearchRunResult::EquivalentByConcreteShift(_) => "equivalent_by_concrete_shift".to_string(),
+        SearchRunResult::EquivalentByStructuredProof(_) => result.outcome_label().to_string(),
         SearchRunResult::NotEquivalent(reason) => format!("not_equivalent: {reason}"),
         SearchRunResult::Unknown => "unknown".to_string(),
     }

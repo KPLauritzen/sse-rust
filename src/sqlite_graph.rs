@@ -329,11 +329,9 @@ impl SqliteGraphRecorder {
             SearchRunResult::Equivalent(path) => {
                 ("equivalent", None, Some(path.steps.len() as i64))
             }
-            SearchRunResult::EquivalentByConcreteShift(proof) => (
-                "equivalent_by_concrete_shift",
-                Some(proof.description()),
-                None,
-            ),
+            SearchRunResult::EquivalentByStructuredProof(proof) => {
+                (proof.outcome_label(), Some(proof.description()), None)
+            }
             SearchRunResult::NotEquivalent(reason) => {
                 ("not_equivalent", Some(reason.clone()), None)
             }
@@ -566,19 +564,21 @@ fn result_json(result: &SearchRunResult) -> Result<String, String> {
                 })
                 .collect::<Vec<_>>(),
         }),
-        SearchRunResult::EquivalentByConcreteShift(proof) => json!({
-            "outcome": "equivalent_by_concrete_shift",
-            "relation": proof.relation.as_str(),
-            "witness": {
-                "lag": proof.witness.shift.lag,
-                "r": proof.witness.shift.r.data,
-                "s": proof.witness.shift.s.data,
-                "sigma_g": proof.witness.sigma_g.mapping,
-                "sigma_h": proof.witness.sigma_h.mapping,
-                "omega_e": proof.witness.omega_e.mapping,
-                "omega_f": proof.witness.omega_f.mapping,
-            },
-        }),
+        SearchRunResult::EquivalentByStructuredProof(proof) => match proof {
+            crate::types::StructuredProofResult::ConcreteShift2x2(proof) => json!({
+                "outcome": "equivalent_by_concrete_shift",
+                "relation": proof.relation.as_str(),
+                "witness": {
+                    "lag": proof.witness.shift.lag,
+                    "r": proof.witness.shift.r.data,
+                    "s": proof.witness.shift.s.data,
+                    "sigma_g": proof.witness.sigma_g.mapping,
+                    "sigma_h": proof.witness.sigma_h.mapping,
+                    "omega_e": proof.witness.omega_e.mapping,
+                    "omega_f": proof.witness.omega_f.mapping,
+                },
+            }),
+        },
         SearchRunResult::NotEquivalent(reason) => json!({
             "outcome": "not_equivalent",
             "reason": reason,
@@ -810,10 +810,13 @@ mod tests {
             },
         )
         .unwrap();
-        let result = SearchRunResult::EquivalentByConcreteShift(ConcreteShiftProof2x2 {
-            relation: ConcreteShiftRelation2x2::Balanced,
-            witness,
-        });
+        let result = SearchRunResult::EquivalentByStructuredProof(
+            ConcreteShiftProof2x2 {
+                relation: ConcreteShiftRelation2x2::Balanced,
+                witness,
+            }
+            .into(),
+        );
 
         let json = result_json(&result).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -856,10 +859,13 @@ mod tests {
                 },
             )
             .unwrap();
-            let result = SearchRunResult::EquivalentByConcreteShift(ConcreteShiftProof2x2 {
-                relation: ConcreteShiftRelation2x2::Compatible,
-                witness,
-            });
+            let result = SearchRunResult::EquivalentByStructuredProof(
+                ConcreteShiftProof2x2 {
+                    relation: ConcreteShiftRelation2x2::Compatible,
+                    witness,
+                }
+                .into(),
+            );
             recorder
                 .finish_run(&result, &SearchTelemetry::default())
                 .unwrap();
