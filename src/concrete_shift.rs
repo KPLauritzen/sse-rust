@@ -2415,6 +2415,50 @@ mod tests {
     }
 
     #[test]
+    fn test_boolean_bridge_aligned_concrete_shift_identity_control() {
+        let a = SqMatrix::identity();
+        let result = search_concrete_shift_equivalence_with_lag_2x2(
+            &a,
+            &a,
+            1,
+            1,
+            10_000,
+            ConcreteShiftRelation2x2::Aligned,
+        );
+        match result {
+            ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                assert!(verify_aligned_concrete_shift_2x2(&a, &a, &witness).is_ok());
+                assert!(witness.shift.r.max_entry() <= 1);
+                assert!(witness.shift.s.max_entry() <= 1);
+            }
+            other => panic!("expected restricted aligned witness, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_boolean_bridge_aligned_concrete_shift_shortcut_control() {
+        let a = SqMatrix::new([[0, 1], [1, 2]]);
+        let b = SqMatrix::new([[1, 1], [2, 1]]);
+        let result = search_concrete_shift_equivalence_with_lag_2x2(
+            &a,
+            &b,
+            1,
+            1,
+            10_000,
+            ConcreteShiftRelation2x2::Aligned,
+        );
+        match result {
+            ConcreteShiftSearchResult2x2::Equivalent(witness) => {
+                assert!(verify_aligned_concrete_shift_2x2(&a, &b, &witness).is_ok());
+                assert_eq!(witness.shift.lag, 1);
+                assert!(witness.shift.r.max_entry() <= 1);
+                assert!(witness.shift.s.max_entry() <= 1);
+            }
+            other => panic!("expected restricted aligned witness, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_search_aligned_module_shift_equivalence_exhausted() {
         let a = SqMatrix::new([[1, 0], [0, 0]]);
         let b = SqMatrix::new([[0, 1], [0, 0]]);

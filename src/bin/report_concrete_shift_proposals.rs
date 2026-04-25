@@ -17,11 +17,13 @@ struct ControlCase2x2 {
 #[derive(Debug)]
 struct Cli {
     case_ids: Vec<String>,
+    surface: ReportSurface,
     relation: ConcreteShiftRelation2x2,
     bounds: ConcreteShiftProposalBounds2x2,
     bridge_sample_limit: usize,
 }
 
+#[derive(Debug)]
 enum CliAction {
     Run(Cli),
     Help,
@@ -32,6 +34,8 @@ struct Report {
     schema_version: u32,
     artifact_kind: &'static str,
     relation: &'static str,
+    witness_class: &'static str,
+    search_restriction: &'static str,
     bounds: ConcreteShiftProposalBounds2x2,
     bridge_sample_limit: usize,
     cases: Vec<CaseReport>,
@@ -45,6 +49,44 @@ struct CaseReport {
     target: [[u32; 2]; 2],
     result_status: &'static str,
     proposal: Option<ConcreteShiftProposalData2x2>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReportSurface {
+    General,
+    BooleanBridgeAligned,
+}
+
+impl ReportSurface {
+    fn artifact_kind(self) -> &'static str {
+        match self {
+            Self::General => "concrete_shift_proposal_report",
+            Self::BooleanBridgeAligned => "boolean_bridge_aligned_concrete_shift_proposal_report",
+        }
+    }
+
+    fn witness_class(self) -> &'static str {
+        match self {
+            Self::General => "bounded concrete-shift witness surface",
+            Self::BooleanBridgeAligned => {
+                "restricted boolean-bridge aligned concrete-shift witness class"
+            }
+        }
+    }
+
+    fn search_restriction(self) -> &'static str {
+        match self {
+            Self::General => "none",
+            Self::BooleanBridgeAligned => "relation=aligned and bridge matrices R,S are boolean",
+        }
+    }
+
+    fn equivalent_status(self) -> &'static str {
+        match self {
+            Self::General => "equivalent_by_concrete_shift",
+            Self::BooleanBridgeAligned => "equivalent_by_boolean_bridge_aligned_concrete_shift",
+        }
+    }
 }
 
 fn main() -> Result<(), String> {
@@ -65,12 +107,22 @@ fn main() -> Result<(), String> {
 
     let cases = cases
         .into_iter()
-        .map(|case| run_case(case, &config, &cli.bounds, cli.bridge_sample_limit))
+        .map(|case| {
+            run_case(
+                case,
+                &config,
+                &cli.bounds,
+                cli.bridge_sample_limit,
+                cli.surface,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let report = Report {
         schema_version: 1,
-        artifact_kind: "concrete_shift_proposal_report",
+        artifact_kind: cli.surface.artifact_kind(),
         relation: cli.relation.as_str(),
+        witness_class: cli.surface.witness_class(),
+        search_restriction: cli.surface.search_restriction(),
         bounds: cli.bounds,
         bridge_sample_limit: cli.bridge_sample_limit,
         cases,
@@ -86,12 +138,15 @@ fn main() -> Result<(), String> {
 
 fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
     let mut case_ids = Vec::new();
+    let mut surface = ReportSurface::General;
     let mut relation = ConcreteShiftRelation2x2::Aligned;
+    let mut relation_set = false;
     let mut bounds = ConcreteShiftProposalBounds2x2 {
         max_lag: 1,
         max_entry: 6,
         max_witnesses: 10_000,
     };
+    let mut max_entry_set = false;
     let mut bridge_sample_limit = 2usize;
     let mut args = args.peekable();
 
@@ -102,19 +157,46 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
                 let value = args
                     .next()
                     .ok_or("--relation requires a value".to_string())?;
-                relation = parse_relation(&value)?;
+                let parsed = parse_relation(&value)?;
+                if surface == ReportSurface::BooleanBridgeAligned
+                    && parsed != ConcreteShiftRelation2x2::Aligned
+                {
+                    return Err(
+                        "--boolean-bridge-aligned only supports --relation aligned".to_string()
+                    );
+                }
+                relation = parsed;
+                relation_set = true;
             }
             "--max-lag" => {
                 bounds.max_lag = parse_u32_arg(&mut args, "--max-lag")?;
             }
             "--max-entry" => {
-                bounds.max_entry = parse_u32_arg(&mut args, "--max-entry")?;
+                let parsed = parse_u32_arg(&mut args, "--max-entry")?;
+                if surface == ReportSurface::BooleanBridgeAligned && parsed != 1 {
+                    return Err("--boolean-bridge-aligned only supports --max-entry 1".to_string());
+                }
+                bounds.max_entry = parsed;
+                max_entry_set = true;
             }
             "--max-witnesses" => {
                 bounds.max_witnesses = parse_usize_arg(&mut args, "--max-witnesses")?;
             }
             "--bridge-sample-limit" => {
                 bridge_sample_limit = parse_usize_arg(&mut args, "--bridge-sample-limit")?;
+            }
+            "--boolean-bridge-aligned" => {
+                if relation_set && relation != ConcreteShiftRelation2x2::Aligned {
+                    return Err(
+                        "--boolean-bridge-aligned only supports --relation aligned".to_string()
+                    );
+                }
+                if max_entry_set && bounds.max_entry != 1 {
+                    return Err("--boolean-bridge-aligned only supports --max-entry 1".to_string());
+                }
+                surface = ReportSurface::BooleanBridgeAligned;
+                relation = ConcreteShiftRelation2x2::Aligned;
+                bounds.max_entry = 1;
             }
             "--list-cases" => {
                 print_cases();
@@ -141,6 +223,7 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
 
     Ok(CliAction::Run(Cli {
         case_ids,
+        surface,
         relation,
         bounds,
         bridge_sample_limit,
@@ -149,6 +232,7 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
 
 fn usage() -> &'static str {
     "Usage: report_concrete_shift_proposals [--case CASE ...]\
+\n       [--boolean-bridge-aligned]\
 \n       [--relation aligned|balanced|compatible] [--max-lag N] [--max-entry N]\
 \n       [--max-witnesses N] [--bridge-sample-limit N] [--list-cases]"
 }
@@ -228,11 +312,12 @@ fn run_case(
     config: &ConcreteShiftSearchConfig2x2,
     bounds: &ConcreteShiftProposalBounds2x2,
     bridge_sample_limit: usize,
+    surface: ReportSurface,
 ) -> Result<CaseReport, String> {
     let result = search_concrete_shift_equivalence_2x2(&case.source, &case.target, config);
     let (result_status, proposal) = match result {
         ConcreteShiftSearchResult2x2::Equivalent(witness) => (
-            "equivalent_by_concrete_shift",
+            surface.equivalent_status(),
             Some(concrete_shift_proposal_data_2x2(
                 &case.source,
                 &case.target,
@@ -258,7 +343,8 @@ fn run_case(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cli, CliAction};
+    use super::{available_cases, parse_cli, run_case, CliAction, ReportSurface};
+    use sse_core::concrete_shift::{ConcreteShiftProposalBounds2x2, ConcreteShiftSearchConfig2x2};
 
     #[test]
     fn parse_cli_defaults_to_nontrivial_control() {
@@ -299,6 +385,79 @@ mod tests {
         assert_eq!(cli.bounds.max_entry, 3);
         assert_eq!(cli.bounds.max_witnesses, 64);
         assert_eq!(cli.bridge_sample_limit, 1);
+    }
+
+    #[test]
+    fn parse_cli_accepts_boolean_bridge_aligned_surface() {
+        let CliAction::Run(cli) = parse_cli(
+            vec![
+                "--case".to_string(),
+                "identity".to_string(),
+                "--boolean-bridge-aligned".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap() else {
+            panic!("expected runnable cli");
+        };
+
+        assert_eq!(cli.case_ids, vec!["identity"]);
+        assert_eq!(cli.surface, ReportSurface::BooleanBridgeAligned);
+        assert_eq!(cli.relation.as_str(), "aligned");
+        assert_eq!(cli.bounds.max_entry, 1);
+    }
+
+    #[test]
+    fn parse_cli_rejects_conflicting_boolean_bridge_relation() {
+        let err = parse_cli(
+            vec![
+                "--boolean-bridge-aligned".to_string(),
+                "--relation".to_string(),
+                "compatible".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("--boolean-bridge-aligned"));
+        assert!(err.contains("--relation aligned"));
+    }
+
+    #[test]
+    fn boolean_bridge_aligned_surface_keeps_positive_controls() {
+        let config = ConcreteShiftSearchConfig2x2 {
+            relation: sse_core::concrete_shift::ConcreteShiftRelation2x2::Aligned,
+            max_lag: 1,
+            max_entry: 1,
+            max_witnesses: 10_000,
+        };
+        let bounds = ConcreteShiftProposalBounds2x2 {
+            max_lag: 1,
+            max_entry: 1,
+            max_witnesses: 10_000,
+        };
+
+        for case in available_cases() {
+            let report = run_case(
+                case.clone(),
+                &config,
+                &bounds,
+                1,
+                ReportSurface::BooleanBridgeAligned,
+            )
+            .expect("expected case report");
+
+            assert_eq!(
+                report.result_status,
+                "equivalent_by_boolean_bridge_aligned_concrete_shift"
+            );
+
+            let proposal = report.proposal.expect("expected proposal");
+            assert_eq!(proposal.relation, "aligned");
+            assert_eq!(proposal.lag, 1);
+            assert!(proposal.bridge_r.max_entry <= 1);
+            assert!(proposal.bridge_s.max_entry <= 1);
+        }
     }
 
     #[test]
