@@ -3315,6 +3315,97 @@ mod tests {
         cleanup_sqlite_artifacts(&output_path);
     }
 
+    #[test]
+    fn run_with_args_guided_refinement_visited_db_preserves_parent_and_child_runs() {
+        let guide_path = temp_output_path("guided-refinement-guide");
+        let output_path = temp_sqlite_path("guided-refinement-visited-db");
+        fs::write(
+            &guide_path,
+            r#"{
+  "artifact_id": "two-step-identity",
+  "endpoints": {
+    "source": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+    "target": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+  },
+  "kind": "full_path",
+  "path": {
+    "matrices": [
+      {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+      {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+      {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+    ],
+    "steps": [
+      {
+        "u": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+        "v": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+      },
+      {
+        "u": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+        "v": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+      }
+    ]
+  },
+  "compatibility": {
+    "supported_stages": ["guided_refinement"]
+  },
+  "quality": {
+    "lag": 2,
+    "cost": 2
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let exit_code = run_with_args(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--stage".to_string(),
+                "guided-refinement".to_string(),
+                "--guide-artifacts".to_string(),
+                guide_path.display().to_string(),
+                "--visited-db".to_string(),
+                output_path.display().to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+
+        let conn = Connection::open(&output_path).unwrap();
+        let runs: Vec<(String, Option<String>, Option<i64>, Option<i64>)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT stage, outcome, path_steps, finished_unix_ms
+                     FROM search_runs
+                     ORDER BY id",
+                )
+                .unwrap();
+            stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect()
+        };
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].0, "guided_refinement");
+        assert_eq!(runs[0].1.as_deref(), Some("equivalent"));
+        assert_eq!(runs[0].2, Some(0));
+        assert!(runs[0].3.is_some());
+        assert_eq!(runs[1].0, "endpoint_search");
+        assert_eq!(runs[1].1.as_deref(), Some("equivalent"));
+        assert_eq!(runs[1].2, Some(0));
+        assert!(runs[1].3.is_some());
+
+        drop(conn);
+        let _ = fs::remove_file(&guide_path);
+        cleanup_sqlite_artifacts(&output_path);
+    }
+
     fn temp_output_path(label: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
