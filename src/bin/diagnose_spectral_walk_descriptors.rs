@@ -423,7 +423,10 @@ fn build_pair_report(pair: &Pair, samples: &[SampleReport]) -> Result<PairReport
             same_coarse_signature,
             same_trimmed_active_window_signature,
             same_existing_power_trace_prefix_1_to_4,
+            same_full_directed_closed_walk_traces_1_to_6,
+            same_full_directed_total_walks_1_to_4,
             same_full_directed_adjacency_charpoly,
+            same_bowen_franks_i_minus_m,
             same_active_weighted_gram_spectrum,
             same_active_support_laplacian_spectrum,
             same_active_weighted_laplacian_spectrum,
@@ -468,7 +471,10 @@ fn diagnostic_reading(
     same_coarse_signature: bool,
     same_trimmed_active_window_signature: bool,
     same_existing_power_trace_prefix_1_to_4: bool,
+    same_full_directed_closed_walk_traces_1_to_6: bool,
+    same_full_directed_total_walks_1_to_4: bool,
     same_full_directed_adjacency_charpoly: bool,
+    same_bowen_franks_i_minus_m: bool,
     same_active_weighted_gram_spectrum: bool,
     same_active_support_laplacian_spectrum: bool,
     same_active_weighted_laplacian_spectrum: bool,
@@ -501,11 +507,27 @@ fn diagnostic_reading(
         }
         "known_local_transfer_not_one_current_family"
             if same_existing_power_trace_prefix_1_to_4
-                && same_full_directed_adjacency_charpoly =>
+                && same_full_directed_closed_walk_traces_1_to_6
+                && same_full_directed_adjacency_charpoly
+                && same_bowen_franks_i_minus_m
+                && !same_full_directed_total_walks_1_to_4
+                && !same_active_weighted_gram_spectrum
+                && !same_active_support_laplacian_spectrum
+                && !same_active_weighted_laplacian_spectrum =>
         {
             "full directed spectral data preserves the Baker A4 -> A5 transfer because it overlaps existing SSE power-trace invariants; active-block gram/laplacian descriptors split it, so they are not transfer-reuse signals".to_string()
         }
-        "known_reuse_calibration" if same_trimmed_active_window_signature => {
+        "known_reuse_calibration"
+            if same_trimmed_active_window_signature
+                && same_existing_power_trace_prefix_1_to_4
+                && same_full_directed_closed_walk_traces_1_to_6
+                && same_full_directed_total_walks_1_to_4
+                && same_full_directed_adjacency_charpoly
+                && same_bowen_franks_i_minus_m
+                && same_active_weighted_gram_spectrum
+                && same_active_support_laplacian_spectrum
+                && same_active_weighted_laplacian_spectrum =>
+        {
             "all tested exact spectral/walk descriptors preserve this literal k3 replay-overlap calibration".to_string()
         }
         _ => "mixed spectral/walk result; inspect exact descriptor matches before promotion"
@@ -894,6 +916,36 @@ mod tests {
                 "{} should match full directed charpoly",
                 pair.id
             );
+        }
+    }
+
+    #[test]
+    fn bowen_franks_matches_all_pairs_but_total_walk_counts_split_non_reuse_controls() {
+        let reports = sample_report_map();
+        for pair in selected_pairs() {
+            let left = &reports[pair.left_id];
+            let right = &reports[pair.right_id];
+            assert_eq!(
+                left.bowen_franks_i_minus_m, right.bowen_franks_i_minus_m,
+                "{} should match the existing Bowen-Franks descriptor",
+                pair.id
+            );
+
+            match pair.id {
+                "k3_replay_overlap_step2" => assert_eq!(
+                    left.full_directed_total_walks_1_to_4, right.full_directed_total_walks_1_to_4,
+                    "{} should preserve total-walk counts",
+                    pair.id
+                ),
+                "brix_rank4_frontier_vs_counterpart"
+                | "brix_rank6_frontier_vs_counterpart"
+                | "baker_a4_to_a5" => assert_ne!(
+                    left.full_directed_total_walks_1_to_4, right.full_directed_total_walks_1_to_4,
+                    "{} should split total-walk counts",
+                    pair.id
+                ),
+                _ => panic!("unexpected pair id {}", pair.id),
+            }
         }
     }
 
