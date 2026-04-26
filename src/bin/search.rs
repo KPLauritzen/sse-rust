@@ -741,6 +741,7 @@ struct ApproximateHitParitySearchScopeState {
     search_scope_id: usize,
     parent_search_scope_id: Option<usize>,
     nesting_depth: usize,
+    request: SearchRequest,
     stage: SearchStage,
     source: DynMatrix,
     target: DynMatrix,
@@ -765,6 +766,7 @@ impl ApproximateHitParitySearchScopeState {
             search_scope_id,
             parent_search_scope_id,
             nesting_depth,
+            request: started.request.clone(),
             stage: started.request.stage,
             source: started.request.source.clone(),
             target: started.request.target.clone(),
@@ -881,9 +883,18 @@ impl ApproximateHitParityObserver {
     }
 
     fn finish_scope(&mut self, finished: &SearchFinishedRecord) {
-        let Some(search_scope_id) = self.search_scope_stack.pop() else {
+        let Some(search_scope_id) = self.search_scope_stack.last().copied() else {
             return;
         };
+        let matches_top_scope = self
+            .search_scopes
+            .get(search_scope_id.saturating_sub(1))
+            .map(|scope| requests_match(&scope.request, &finished.request))
+            .unwrap_or(false);
+        if !matches_top_scope {
+            return;
+        }
+        self.search_scope_stack.pop();
         let Some(scope) = self.scope_state_mut(search_scope_id) else {
             return;
         };
@@ -1669,6 +1680,13 @@ fn result_label(result: &SearchRunResult) -> &'static str {
         SearchRunResult::NotEquivalent(_) => "not_equivalent",
         SearchRunResult::Unknown => "unknown",
     }
+}
+
+fn requests_match(left: &SearchRequest, right: &SearchRequest) -> bool {
+    left.stage == right.stage
+        && left.source == right.source
+        && left.target == right.target
+        && left.config == right.config
 }
 
 fn status_label(status: SearchEdgeStatus) -> &'static str {
@@ -2759,6 +2777,36 @@ mod tests {
             SearchStage::EndpointSearch
         );
         assert_eq!(report.annotated_hits[0].search_scope_nesting_depth, 1);
+    }
+
+    #[test]
+    fn approximate_hit_parity_report_ignores_unmatched_nested_finish() {
+        let mut request = identity_request();
+        request.stage = SearchStage::GuidedRefinement;
+        let result = SearchRunResult::Unknown;
+        let telemetry = SearchTelemetry::default();
+        let mut segment_request = request.clone();
+        segment_request.stage = SearchStage::EndpointSearch;
+        segment_request.config.max_lag = 1;
+        segment_request.source = rank4_to_matrix();
+        segment_request.target = rank4_counterpart_matrix();
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
+        observer.on_event(&search_finished_event(
+            &segment_request,
+            &SearchRunResult::Unknown,
+            &SearchTelemetry::default(),
+        ));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
+
+        let report = observer.build_report(&request, &result, &telemetry);
+        assert_eq!(report.search_scopes.len(), 1);
+        assert_eq!(report.search_scopes[0].stage, SearchStage::GuidedRefinement);
+        assert_eq!(report.search_scopes[0].result.as_deref(), Some("unknown"));
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(true));
+        assert!(report.annotated_hits.is_empty());
+        assert!(report.summary.report_is_complete);
     }
 
     #[test]
