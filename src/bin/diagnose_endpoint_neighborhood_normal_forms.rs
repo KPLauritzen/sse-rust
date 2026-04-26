@@ -59,6 +59,7 @@ fn run() -> Result<(), String> {
     }
 
     let parity_pair_reports = build_parity_pair_reports(&samples);
+    let bucket_experiment_reports = build_bucket_experiment_reports(&samples, &parity_pair_reports);
     let report = EndpointNeighborhoodReport {
         endpoint_radius: cli.endpoint_radius,
         top_stuck: cli.top_stuck,
@@ -71,6 +72,8 @@ fn run() -> Result<(), String> {
         sample_summary: build_sample_summary(&samples),
         parity_pair_summary: build_parity_pair_summary(&parity_pair_reports),
         parity_pair_reports,
+        bucket_experiment_summary: build_bucket_experiment_summary(&bucket_experiment_reports),
+        bucket_experiment_reports,
         candidate_results: vec![
             analyze_candidate(
                 "mass_support_signature",
@@ -354,6 +357,8 @@ struct EndpointNeighborhoodReport {
     sample_summary: SampleSummary,
     parity_pair_summary: ParityPairSummary,
     parity_pair_reports: Vec<ParityPairReport>,
+    bucket_experiment_summary: BucketExperimentSummary,
+    bucket_experiment_reports: Vec<BucketExperimentReport>,
     candidate_results: Vec<CandidateReport>,
 }
 
@@ -386,8 +391,9 @@ struct ParityPairReport {
     right: ParitySampleReport,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct ParitySampleReport {
+    sample_identity: String,
     label: String,
     sample_kind: String,
     endpoint_side: String,
@@ -396,6 +402,70 @@ struct ParitySampleReport {
     coarse_signature: String,
     trimmed_active_window: DynMatrix,
     trimmed_active_window_signature: String,
+}
+
+#[derive(Serialize)]
+struct BucketExperimentSummary {
+    total_experiments: usize,
+    by_kind: BTreeMap<String, usize>,
+    by_expected_action: BTreeMap<String, usize>,
+    exact_top_tier_promotions: usize,
+    coarse_only_proposal_cases: usize,
+}
+
+#[derive(Serialize)]
+struct BucketExperimentReport {
+    pair_id: String,
+    pair_kind: String,
+    dimension: usize,
+    endpoint_context: String,
+    candidate_pool_kind: String,
+    anchor: BucketExperimentSampleRef,
+    expected_candidate: BucketExperimentSampleRef,
+    candidate_pool_size: usize,
+    coarse_bucket_only: CoarseBucketOnlyReport,
+    three_way_signal: ThreeWaySignalBucketReport,
+    observed_effect: String,
+}
+
+#[derive(Serialize)]
+struct BucketExperimentSampleRef {
+    label: String,
+    sample_kind: String,
+    endpoint_side: String,
+    coarse_signature: String,
+    trimmed_active_window_signature: String,
+}
+
+#[derive(Serialize)]
+struct CoarseBucketOnlyReport {
+    candidate_count: usize,
+    expected_candidate_in_bucket: bool,
+    expected_candidate_rank_start: Option<usize>,
+    expected_candidate_rank_end: Option<usize>,
+    candidate_labels: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ThreeWaySignalBucketReport {
+    exact_trimmed_match_count: usize,
+    coarse_only_mismatch_count: usize,
+    ignored_candidate_count: usize,
+    expected_candidate_action: String,
+    expected_candidate_rank_start: Option<usize>,
+    expected_candidate_rank_end: Option<usize>,
+    actionable_candidates: Vec<BucketExperimentCandidateReport>,
+}
+
+#[derive(Serialize)]
+struct BucketExperimentCandidateReport {
+    label: String,
+    sample_kind: String,
+    endpoint_side: String,
+    recommended_action: String,
+    coarse_signature_match: bool,
+    trimmed_active_window_match: bool,
+    is_expected_candidate: bool,
 }
 
 fn build_sample_summary(samples: &[SampleState]) -> SampleSummary {
@@ -575,6 +645,7 @@ fn build_parity_sample_report(sample: &SampleState) -> ParitySampleReport {
     let canonical_matrix = sample.matrix.canonical_perm();
     let trimmed_active_window = trim_zero_rows_and_cols(&canonical_matrix);
     ParitySampleReport {
+        sample_identity: sample_identity_token(sample),
         label: sample.label.clone(),
         sample_kind: sample.sample_kind.clone(),
         endpoint_side: sample.endpoint_side.clone(),
@@ -588,6 +659,327 @@ fn build_parity_sample_report(sample: &SampleState) -> ParitySampleReport {
             join_u32(&trimmed_active_window.data)
         ),
         trimmed_active_window,
+    }
+}
+
+fn build_bucket_experiment_reports(
+    samples: &[SampleState],
+    pair_reports: &[ParityPairReport],
+) -> Vec<BucketExperimentReport> {
+    let sample_reports = samples
+        .iter()
+        .map(|sample| {
+            let report = build_parity_sample_report(sample);
+            (report.sample_identity.clone(), report)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let sample_lookup = samples
+        .iter()
+        .map(|sample| (sample_identity_token(sample), sample))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut reports = Vec::new();
+    for pair_report in pair_reports {
+        let Some(anchor) = sample_lookup.get(&pair_report.left.sample_identity) else {
+            continue;
+        };
+        let Some(anchor_report) = sample_reports.get(&pair_report.left.sample_identity) else {
+            continue;
+        };
+        let Some(expected_report) = sample_reports.get(&pair_report.right.sample_identity) else {
+            continue;
+        };
+
+        let candidate_pool = candidate_pool_for_anchor(samples, anchor);
+        let candidate_pool_reports = candidate_pool
+            .into_iter()
+            .filter_map(|candidate| {
+                sample_reports
+                    .get(&sample_identity_token(candidate))
+                    .cloned()
+                    .map(|report| (candidate, report))
+            })
+            .collect::<Vec<_>>();
+
+        let mut coarse_bucket_candidates = Vec::new();
+        let mut actionable_candidates = Vec::new();
+        let mut ignored_candidate_count = 0usize;
+        let mut exact_trimmed_match_count = 0usize;
+        let mut coarse_only_mismatch_count = 0usize;
+
+        for (_candidate, candidate_report) in &candidate_pool_reports {
+            let coarse_signature_match =
+                anchor_report.coarse_signature == candidate_report.coarse_signature;
+            let trimmed_active_window_match = anchor_report.trimmed_active_window_signature
+                == candidate_report.trimmed_active_window_signature;
+            let (_, recommended_action) =
+                classify_parity_signal(coarse_signature_match, trimmed_active_window_match);
+
+            if coarse_signature_match {
+                coarse_bucket_candidates.push(BucketExperimentCandidateReport {
+                    label: candidate_report.label.clone(),
+                    sample_kind: candidate_report.sample_kind.clone(),
+                    endpoint_side: candidate_report.endpoint_side.clone(),
+                    recommended_action: recommended_action.to_string(),
+                    coarse_signature_match,
+                    trimmed_active_window_match,
+                    is_expected_candidate: candidate_report.sample_identity
+                        == expected_report.sample_identity,
+                });
+            } else {
+                ignored_candidate_count += 1;
+            }
+
+            match recommended_action {
+                "reuse_endpoint_local_parity" => {
+                    exact_trimmed_match_count += 1;
+                    actionable_candidates.push(BucketExperimentCandidateReport {
+                        label: candidate_report.label.clone(),
+                        sample_kind: candidate_report.sample_kind.clone(),
+                        endpoint_side: candidate_report.endpoint_side.clone(),
+                        recommended_action: recommended_action.to_string(),
+                        coarse_signature_match,
+                        trimmed_active_window_match,
+                        is_expected_candidate: candidate_report.sample_identity
+                            == expected_report.sample_identity,
+                    });
+                }
+                "rank_or_propose_inside_coarse_bucket" => {
+                    coarse_only_mismatch_count += 1;
+                    actionable_candidates.push(BucketExperimentCandidateReport {
+                        label: candidate_report.label.clone(),
+                        sample_kind: candidate_report.sample_kind.clone(),
+                        endpoint_side: candidate_report.endpoint_side.clone(),
+                        recommended_action: recommended_action.to_string(),
+                        coarse_signature_match,
+                        trimmed_active_window_match,
+                        is_expected_candidate: candidate_report.sample_identity
+                            == expected_report.sample_identity,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        actionable_candidates.sort_by(|left, right| {
+            candidate_action_priority(&left.recommended_action)
+                .cmp(&candidate_action_priority(&right.recommended_action))
+                .then_with(|| left.label.cmp(&right.label))
+        });
+        coarse_bucket_candidates.sort_by(|left, right| left.label.cmp(&right.label));
+
+        let expected_candidate_in_bucket = coarse_bucket_candidates
+            .iter()
+            .any(|candidate| candidate.is_expected_candidate);
+        let (baseline_rank_start, baseline_rank_end) = if expected_candidate_in_bucket {
+            (Some(1), Some(coarse_bucket_candidates.len()))
+        } else {
+            (None, None)
+        };
+        let (signal_rank_start, signal_rank_end) =
+            expected_candidate_rank_range(&actionable_candidates);
+        let expected_candidate_action = actionable_candidates
+            .iter()
+            .find(|candidate| candidate.is_expected_candidate)
+            .map(|candidate| candidate.recommended_action.clone())
+            .unwrap_or_else(|| "ignore".to_string());
+
+        reports.push(BucketExperimentReport {
+            pair_id: pair_report.pair_id.clone(),
+            pair_kind: pair_report.pair_kind.clone(),
+            dimension: pair_report.dimension,
+            endpoint_context: pair_report.endpoint_context.clone(),
+            candidate_pool_kind: candidate_pool_kind(anchor),
+            anchor: bucket_experiment_sample_ref(anchor_report),
+            expected_candidate: bucket_experiment_sample_ref(expected_report),
+            candidate_pool_size: candidate_pool_reports.len(),
+            coarse_bucket_only: CoarseBucketOnlyReport {
+                candidate_count: coarse_bucket_candidates.len(),
+                expected_candidate_in_bucket,
+                expected_candidate_rank_start: baseline_rank_start,
+                expected_candidate_rank_end: baseline_rank_end,
+                candidate_labels: coarse_bucket_candidates
+                    .iter()
+                    .map(|candidate| candidate.label.clone())
+                    .collect(),
+            },
+            three_way_signal: ThreeWaySignalBucketReport {
+                exact_trimmed_match_count,
+                coarse_only_mismatch_count,
+                ignored_candidate_count,
+                expected_candidate_action: expected_candidate_action.clone(),
+                expected_candidate_rank_start: signal_rank_start,
+                expected_candidate_rank_end: signal_rank_end,
+                actionable_candidates,
+            },
+            observed_effect: describe_bucket_experiment_effect(
+                coarse_bucket_candidates.len(),
+                exact_trimmed_match_count,
+                &expected_candidate_action,
+            ),
+        });
+    }
+
+    reports.sort_by(|left, right| left.pair_id.cmp(&right.pair_id));
+    reports
+}
+
+fn build_bucket_experiment_summary(reports: &[BucketExperimentReport]) -> BucketExperimentSummary {
+    let mut by_kind = BTreeMap::new();
+    let mut by_expected_action = BTreeMap::new();
+    let mut exact_top_tier_promotions = 0usize;
+    let mut coarse_only_proposal_cases = 0usize;
+
+    for report in reports {
+        *by_kind.entry(report.pair_kind.clone()).or_insert(0) += 1;
+        *by_expected_action
+            .entry(report.three_way_signal.expected_candidate_action.clone())
+            .or_insert(0) += 1;
+
+        if report.three_way_signal.expected_candidate_action == "reuse_endpoint_local_parity"
+            && report.three_way_signal.expected_candidate_rank_start == Some(1)
+            && report.three_way_signal.exact_trimmed_match_count == 1
+            && report.coarse_bucket_only.candidate_count > 1
+        {
+            exact_top_tier_promotions += 1;
+        }
+
+        if report.three_way_signal.expected_candidate_action
+            == "rank_or_propose_inside_coarse_bucket"
+            && report.three_way_signal.exact_trimmed_match_count == 0
+        {
+            coarse_only_proposal_cases += 1;
+        }
+    }
+
+    BucketExperimentSummary {
+        total_experiments: reports.len(),
+        by_kind,
+        by_expected_action,
+        exact_top_tier_promotions,
+        coarse_only_proposal_cases,
+    }
+}
+
+fn candidate_pool_for_anchor<'a>(
+    samples: &'a [SampleState],
+    anchor: &SampleState,
+) -> Vec<&'a SampleState> {
+    match &anchor.origin {
+        SampleOrigin::Witness { guide_identity, .. } => samples
+            .iter()
+            .filter(|candidate| candidate.dim == anchor.dim)
+            .filter(|candidate| candidate.endpoint_side == anchor.endpoint_side)
+            .filter(|candidate| {
+                matches!(&candidate.origin, SampleOrigin::Witness { .. })
+                    && witness_guide_identity(candidate) != guide_identity
+            })
+            .collect(),
+        SampleOrigin::Stuck { role, .. } => samples
+            .iter()
+            .filter(|candidate| candidate.dim == anchor.dim)
+            .filter(|candidate| {
+                matches!(
+                    (&candidate.origin, role),
+                    (
+                        SampleOrigin::Stuck {
+                            role: StuckRole::Counterpart,
+                            ..
+                        },
+                        StuckRole::Frontier
+                    ) | (
+                        SampleOrigin::Stuck {
+                            role: StuckRole::Frontier,
+                            ..
+                        },
+                        StuckRole::Counterpart
+                    )
+                )
+            })
+            .collect(),
+    }
+}
+
+fn candidate_pool_kind(anchor: &SampleState) -> String {
+    match &anchor.origin {
+        SampleOrigin::Witness { .. } => "cross_guide_same_endpoint_side_dim".to_string(),
+        SampleOrigin::Stuck {
+            role: StuckRole::Frontier,
+            ..
+        } => "retained_opposite_frontier_same_dim".to_string(),
+        SampleOrigin::Stuck {
+            role: StuckRole::Counterpart,
+            ..
+        } => "retained_frontier_same_dim".to_string(),
+    }
+}
+
+fn bucket_experiment_sample_ref(report: &ParitySampleReport) -> BucketExperimentSampleRef {
+    BucketExperimentSampleRef {
+        label: report.label.clone(),
+        sample_kind: report.sample_kind.clone(),
+        endpoint_side: report.endpoint_side.clone(),
+        coarse_signature: report.coarse_signature.clone(),
+        trimmed_active_window_signature: report.trimmed_active_window_signature.clone(),
+    }
+}
+
+fn candidate_action_priority(action: &str) -> usize {
+    match action {
+        "reuse_endpoint_local_parity" => 0,
+        "rank_or_propose_inside_coarse_bucket" => 1,
+        "diagnose_only" => 2,
+        _ => 3,
+    }
+}
+
+fn expected_candidate_rank_range(
+    candidates: &[BucketExperimentCandidateReport],
+) -> (Option<usize>, Option<usize>) {
+    let Some(expected_index) = candidates
+        .iter()
+        .position(|candidate| candidate.is_expected_candidate)
+    else {
+        return (None, None);
+    };
+    let expected_action = &candidates[expected_index].recommended_action;
+    let rank_start = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate_action_priority(&candidate.recommended_action)
+                < candidate_action_priority(expected_action)
+        })
+        .count()
+        + 1;
+    let rank_end = rank_start
+        + candidates
+            .iter()
+            .filter(|candidate| candidate.recommended_action == *expected_action)
+            .count()
+        - 1;
+    (Some(rank_start), Some(rank_end))
+}
+
+fn describe_bucket_experiment_effect(
+    coarse_bucket_candidate_count: usize,
+    exact_trimmed_match_count: usize,
+    expected_candidate_action: &str,
+) -> String {
+    match expected_candidate_action {
+        "reuse_endpoint_local_parity" if coarse_bucket_candidate_count > 1 => format!(
+            "promotes the expected candidate from a {}-way coarse tie into the exact-trimmed top tier",
+            coarse_bucket_candidate_count
+        ),
+        "reuse_endpoint_local_parity" => {
+            "upgrades the coarse hit into an explicit exact-trimmed reuse decision".to_string()
+        }
+        "rank_or_propose_inside_coarse_bucket" if exact_trimmed_match_count == 0 => {
+            "keeps the expected candidate available only as a coarse-bucket proposal and blocks any false exact-reuse upgrade".to_string()
+        }
+        "rank_or_propose_inside_coarse_bucket" => {
+            "keeps the expected candidate inside the coarse bucket, but behind exact-trimmed reuse candidates".to_string()
+        }
+        _ => "leaves the expected candidate outside the actionable coarse bucket".to_string(),
     }
 }
 
@@ -1184,6 +1576,168 @@ mod tests {
         assert_eq!(
             report.recommended_action,
             "rank_or_propose_inside_coarse_bucket"
+        );
+    }
+
+    #[test]
+    fn bucket_experiment_promotes_exact_k3_control_inside_coarse_bucket() {
+        let anchor = DynMatrix::new(4, 4, vec![1, 0, 2, 0, 0, 2, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0]);
+        let exact_peer = anchor.clone();
+        let coarse_only_peer =
+            DynMatrix::new(4, 4, vec![1, 2, 0, 0, 0, 1, 2, 0, 1, 0, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            mass_support_signature(&anchor),
+            mass_support_signature(&coarse_only_peer)
+        );
+        assert_ne!(
+            trimmed_active_window_signature(&anchor),
+            trimmed_active_window_signature(&coarse_only_peer)
+        );
+
+        let samples = vec![
+            SampleState {
+                label: "guide_a_step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 4,
+                endpoint_side: "source".to_string(),
+                matrix: anchor,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "demo".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_b_step2".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 4,
+                endpoint_side: "source".to_string(),
+                matrix: exact_peer,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "demo".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_b_distractor".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 4,
+                endpoint_side: "source".to_string(),
+                matrix: coarse_only_peer,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "other".to_string(),
+                    artifact_index: 1,
+                    step_index: 1,
+                },
+            },
+        ];
+
+        let pair_reports = build_parity_pair_reports(&samples);
+        let experiments = build_bucket_experiment_reports(&samples, &pair_reports);
+
+        assert_eq!(experiments.len(), 1);
+        let experiment = &experiments[0];
+        assert_eq!(experiment.coarse_bucket_only.candidate_count, 2);
+        assert_eq!(
+            experiment.coarse_bucket_only.expected_candidate_rank_start,
+            Some(1)
+        );
+        assert_eq!(
+            experiment.coarse_bucket_only.expected_candidate_rank_end,
+            Some(2)
+        );
+        assert_eq!(
+            experiment.three_way_signal.expected_candidate_action,
+            "reuse_endpoint_local_parity"
+        );
+        assert_eq!(experiment.three_way_signal.exact_trimmed_match_count, 1);
+        assert_eq!(
+            experiment.three_way_signal.expected_candidate_rank_start,
+            Some(1)
+        );
+        assert_eq!(
+            experiment.three_way_signal.expected_candidate_rank_end,
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn bucket_experiment_keeps_k4_lane_as_coarse_only_proposal() {
+        let distractor = DynMatrix::new(4, 4, vec![1, 4, 1, 8, 1, 0, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            mass_support_signature(&rank4_to_matrix()),
+            mass_support_signature(&distractor)
+        );
+        assert_ne!(
+            trimmed_active_window_signature(&rank4_to_matrix()),
+            trimmed_active_window_signature(&distractor)
+        );
+
+        let samples = vec![
+            SampleState {
+                label: "rank4_to".to_string(),
+                sample_kind: "k4_stuck:diag".to_string(),
+                dim: 4,
+                endpoint_side: "frontier".to_string(),
+                matrix: rank4_to_matrix(),
+                origin: SampleOrigin::Stuck {
+                    hit_index: 0,
+                    rank: 4,
+                    move_family: "diag".to_string(),
+                    role: StuckRole::Frontier,
+                },
+            },
+            SampleState {
+                label: "rank4_counterpart".to_string(),
+                sample_kind: "k4_counterpart:diag".to_string(),
+                dim: 4,
+                endpoint_side: "opposite_frontier".to_string(),
+                matrix: rank4_counterpart_matrix(),
+                origin: SampleOrigin::Stuck {
+                    hit_index: 0,
+                    rank: 4,
+                    move_family: "diag".to_string(),
+                    role: StuckRole::Counterpart,
+                },
+            },
+            SampleState {
+                label: "other_counterpart".to_string(),
+                sample_kind: "k4_counterpart:other".to_string(),
+                dim: 4,
+                endpoint_side: "opposite_frontier".to_string(),
+                matrix: distractor,
+                origin: SampleOrigin::Stuck {
+                    hit_index: 1,
+                    rank: 6,
+                    move_family: "other".to_string(),
+                    role: StuckRole::Counterpart,
+                },
+            },
+        ];
+
+        let pair_reports = build_parity_pair_reports(&samples);
+        let experiments = build_bucket_experiment_reports(&samples, &pair_reports);
+
+        assert_eq!(experiments.len(), 1);
+        let experiment = &experiments[0];
+        assert_eq!(experiment.coarse_bucket_only.candidate_count, 2);
+        assert_eq!(
+            experiment.three_way_signal.expected_candidate_action,
+            "rank_or_propose_inside_coarse_bucket"
+        );
+        assert_eq!(experiment.three_way_signal.exact_trimmed_match_count, 0);
+        assert_eq!(experiment.three_way_signal.coarse_only_mismatch_count, 2);
+        assert_eq!(
+            experiment.three_way_signal.expected_candidate_rank_start,
+            Some(1)
+        );
+        assert_eq!(
+            experiment.three_way_signal.expected_candidate_rank_end,
+            Some(2)
         );
     }
 
