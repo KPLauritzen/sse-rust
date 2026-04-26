@@ -1175,8 +1175,8 @@ fn trimmed_entry_bag_signature(matrix: &DynMatrix) -> String {
     let trimmed = trimmed_active_window(matrix);
     let mut row_sums = vec![0u64; trimmed.rows];
     let mut col_sums = vec![0u64; trimmed.cols];
-    let mut row_supports = vec![0u8; trimmed.rows];
-    let mut col_supports = vec![0u8; trimmed.cols];
+    let mut row_supports = vec![0u16; trimmed.rows];
+    let mut col_supports = vec![0u16; trimmed.cols];
     let mut positive_entries = Vec::new();
 
     for row in 0..trimmed.rows {
@@ -1204,8 +1204,8 @@ fn trimmed_entry_bag_signature(matrix: &DynMatrix) -> String {
         trimmed.cols,
         join_u64(&row_sums),
         join_u64(&col_sums),
-        join_u8(&row_supports),
-        join_u8(&col_supports),
+        join_u16(&row_supports),
+        join_u16(&col_supports),
         join_u32(&positive_entries),
     )
 }
@@ -1214,7 +1214,7 @@ fn fallback_artifact_id(guide_tag: &str, guide_label: &str, artifact_index: usiz
     format!("{guide_tag}@{guide_label}#{}", artifact_index)
 }
 
-fn join_u8(values: &[u8]) -> String {
+fn join_u16(values: &[u16]) -> String {
     values
         .iter()
         .map(|value| value.to_string())

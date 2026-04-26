@@ -47,8 +47,8 @@ pub fn endpoint_local_parity_action(
 pub fn mass_support_signature(matrix: &DynMatrix) -> String {
     let mut row_sums = vec![0u64; matrix.rows];
     let mut col_sums = vec![0u64; matrix.cols];
-    let mut row_supports = vec![0u8; matrix.rows];
-    let mut col_supports = vec![0u8; matrix.cols];
+    let mut row_supports = vec![0u16; matrix.rows];
+    let mut col_supports = vec![0u16; matrix.cols];
     let mut entry_sum = 0u64;
 
     for row in 0..matrix.rows {
@@ -75,8 +75,8 @@ pub fn mass_support_signature(matrix: &DynMatrix) -> String {
         entry_sum,
         join_u64(&row_sums),
         join_u64(&col_sums),
-        join_u8(&row_supports),
-        join_u8(&col_supports),
+        join_u16(&row_supports),
+        join_u16(&col_supports),
     )
 }
 
@@ -113,7 +113,7 @@ pub fn trim_zero_rows_and_cols(matrix: &DynMatrix) -> DynMatrix {
     DynMatrix::new(active_rows.len(), active_cols.len(), data)
 }
 
-fn join_u8(values: &[u8]) -> String {
+fn join_u16(values: &[u16]) -> String {
     values
         .iter()
         .map(|value| value.to_string())
