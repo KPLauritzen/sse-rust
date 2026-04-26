@@ -34,9 +34,10 @@ For each paired comparison it records:
 5. the recommended future-layer action.
 
 The helper does not touch solver behavior. It only writes JSON diagnostics.
-Witness identity now keys off the full input guide path rather than basename
-alone, and emitted `pair_id` values use stable per-sample hashed identities
-instead of lossy slugged labels.
+Witness identity now keys off normalized input guide paths rather than basename
+alone, artifact identity includes artifact index to avoid duplicate-id
+collisions, and emitted `pair_id` values use stable per-sample hashed
+identities instead of lossy slugged labels.
 
 ## Sample Set
 
@@ -217,7 +218,7 @@ Observed results:
 
 - `cargo fmt --all` passed;
 - `cargo test --features research-tools --bin diagnose_endpoint_neighborhood_normal_forms`
-  passed (`9` tests);
+  passed (`18` tests after identity hardening);
 - the fresh stuck-state extractor wrote
   `tmp/sse-rust-w7e4-k4-stuck-top16.json`; and
 - the bounded parity diagnostic wrote
