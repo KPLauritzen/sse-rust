@@ -450,6 +450,7 @@ struct CoarseBucketOnlyReport {
 struct ThreeWaySignalBucketReport {
     exact_trimmed_match_count: usize,
     coarse_only_mismatch_count: usize,
+    diagnose_only_candidate_count: usize,
     ignored_candidate_count: usize,
     expected_candidate_action: String,
     expected_candidate_rank_start: Option<usize>,
@@ -706,6 +707,8 @@ fn build_bucket_experiment_reports(
         let mut ignored_candidate_count = 0usize;
         let mut exact_trimmed_match_count = 0usize;
         let mut coarse_only_mismatch_count = 0usize;
+        let mut diagnose_only_candidate_count = 0usize;
+        let mut expected_candidate_action = None;
 
         for (_candidate, candidate_report) in &candidate_pool_reports {
             let coarse_signature_match =
@@ -714,6 +717,12 @@ fn build_bucket_experiment_reports(
                 == candidate_report.trimmed_active_window_signature;
             let (_, recommended_action) =
                 classify_parity_signal(coarse_signature_match, trimmed_active_window_match);
+            let is_expected_candidate =
+                candidate_report.sample_identity == expected_report.sample_identity;
+
+            if is_expected_candidate {
+                expected_candidate_action = Some(recommended_action.to_string());
+            }
 
             if coarse_signature_match {
                 coarse_bucket_candidates.push(BucketExperimentCandidateReport {
@@ -723,11 +732,8 @@ fn build_bucket_experiment_reports(
                     recommended_action: recommended_action.to_string(),
                     coarse_signature_match,
                     trimmed_active_window_match,
-                    is_expected_candidate: candidate_report.sample_identity
-                        == expected_report.sample_identity,
+                    is_expected_candidate,
                 });
-            } else {
-                ignored_candidate_count += 1;
             }
 
             match recommended_action {
@@ -740,8 +746,7 @@ fn build_bucket_experiment_reports(
                         recommended_action: recommended_action.to_string(),
                         coarse_signature_match,
                         trimmed_active_window_match,
-                        is_expected_candidate: candidate_report.sample_identity
-                            == expected_report.sample_identity,
+                        is_expected_candidate,
                     });
                 }
                 "rank_or_propose_inside_coarse_bucket" => {
@@ -753,11 +758,15 @@ fn build_bucket_experiment_reports(
                         recommended_action: recommended_action.to_string(),
                         coarse_signature_match,
                         trimmed_active_window_match,
-                        is_expected_candidate: candidate_report.sample_identity
-                            == expected_report.sample_identity,
+                        is_expected_candidate,
                     });
                 }
-                _ => {}
+                "diagnose_only" => {
+                    diagnose_only_candidate_count += 1;
+                }
+                _ => {
+                    ignored_candidate_count += 1;
+                }
             }
         }
 
@@ -778,11 +787,8 @@ fn build_bucket_experiment_reports(
         };
         let (signal_rank_start, signal_rank_end) =
             expected_candidate_rank_range(&actionable_candidates);
-        let expected_candidate_action = actionable_candidates
-            .iter()
-            .find(|candidate| candidate.is_expected_candidate)
-            .map(|candidate| candidate.recommended_action.clone())
-            .unwrap_or_else(|| "ignore".to_string());
+        let expected_candidate_action =
+            expected_candidate_action.unwrap_or_else(|| "ignore".to_string());
 
         reports.push(BucketExperimentReport {
             pair_id: pair_report.pair_id.clone(),
@@ -806,6 +812,7 @@ fn build_bucket_experiment_reports(
             three_way_signal: ThreeWaySignalBucketReport {
                 exact_trimmed_match_count,
                 coarse_only_mismatch_count,
+                diagnose_only_candidate_count,
                 ignored_candidate_count,
                 expected_candidate_action: expected_candidate_action.clone(),
                 expected_candidate_rank_start: signal_rank_start,
@@ -1731,6 +1738,7 @@ mod tests {
         );
         assert_eq!(experiment.three_way_signal.exact_trimmed_match_count, 0);
         assert_eq!(experiment.three_way_signal.coarse_only_mismatch_count, 2);
+        assert_eq!(experiment.three_way_signal.diagnose_only_candidate_count, 0);
         assert_eq!(
             experiment.three_way_signal.expected_candidate_rank_start,
             Some(1)
@@ -1739,6 +1747,14 @@ mod tests {
             experiment.three_way_signal.expected_candidate_rank_end,
             Some(2)
         );
+    }
+
+    #[test]
+    fn classify_parity_signal_preserves_diagnose_only_branch() {
+        let (signal, action) = classify_parity_signal(false, true);
+
+        assert_eq!(signal, "trimmed_match_without_coarse_match");
+        assert_eq!(action, "diagnose_only");
     }
 
     #[test]
