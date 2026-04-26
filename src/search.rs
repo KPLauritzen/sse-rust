@@ -25,10 +25,10 @@ use crate::invariants::{
 use crate::matrix::{DynMatrix, SqMatrix};
 use crate::search_observer::{SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver};
 use crate::types::{
-    DynSsePath, DynSseResult, EndpointExactMeetSurface, EndpointExactMeetWitness, EsseStep,
-    FrontierMode, MoveFamilyPolicy, SameFuturePastDiversityLayerSample, SearchConfig,
-    SearchDirection, SearchLayerTelemetry, SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry,
-    SearchRequest, SearchRunResult, SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
+    DynSsePath, DynSseResult, EsseStep, FrontierMode, MoveFamilyPolicy,
+    SameFuturePastDiversityLayerSample, SearchConfig, SearchDirection, SearchLayerTelemetry,
+    SearchLayerTimingTelemetry, SearchMoveFamilyTelemetry, SearchRequest, SearchRunResult,
+    SearchTelemetry, SsePath, SseResult, DEFAULT_BEAM_WIDTH,
 };
 #[cfg(test)]
 use crate::types::{SearchStage, ShortcutSearchConfig, ShortcutSearchStopReason};
@@ -37,6 +37,7 @@ use rayon::prelude::*;
 
 mod beam;
 mod dispatch;
+mod exact_meets;
 mod frontier;
 mod path;
 mod shortcut;
@@ -53,6 +54,10 @@ use self::beam::{
 use self::dispatch::{
     emit_layer, emit_started_and_roots, endpoint_search_request, finish_search_2x2,
     finish_search_dyn,
+};
+use self::exact_meets::{
+    best_retained_exact_meet_path, maybe_store_endpoint_exact_meets, store_endpoint_exact_meets,
+    ExactMeetRetention,
 };
 use self::frontier::{
     choose_next_layer, expand_frontier_layer, expand_frontier_layer_dyn, FrontierExpansion,
@@ -312,139 +317,6 @@ pub(super) fn validate_endpoint_multi_meet_config(config: &SearchConfig) -> Resu
 
 fn invalid_endpoint_multi_meet_signal(config: &SearchConfig) -> Option<String> {
     validate_endpoint_multi_meet_config(config).err()
-}
-
-#[derive(Clone, Debug)]
-struct RetainedExactMeetCandidate<M> {
-    canonical: M,
-    path_depth: usize,
-    discovery_order: usize,
-}
-
-#[derive(Clone, Debug)]
-struct ExactMeetRetention<M> {
-    requested_cap: usize,
-    next_discovery_order: usize,
-    retained: Vec<RetainedExactMeetCandidate<M>>,
-}
-
-impl<M: Clone + PartialEq> ExactMeetRetention<M> {
-    fn from_config(config: &SearchConfig) -> Option<Self> {
-        config
-            .endpoint_multi_meet_cap
-            .filter(|cap| *cap > 0)
-            .map(Self::new)
-    }
-
-    fn new(requested_cap: usize) -> Self {
-        Self {
-            requested_cap,
-            next_discovery_order: 0,
-            retained: Vec::new(),
-        }
-    }
-
-    fn has_retained(&self) -> bool {
-        !self.retained.is_empty()
-    }
-
-    fn retain(&mut self, canonical: &M, path_depth: usize) {
-        let candidate = RetainedExactMeetCandidate {
-            canonical: canonical.clone(),
-            path_depth,
-            discovery_order: self.next_discovery_order,
-        };
-        self.next_discovery_order += 1;
-        if let Some(existing) = self
-            .retained
-            .iter_mut()
-            .find(|existing| existing.canonical == candidate.canonical)
-        {
-            if candidate.path_depth < existing.path_depth
-                || (candidate.path_depth == existing.path_depth
-                    && candidate.discovery_order < existing.discovery_order)
-            {
-                *existing = candidate;
-            }
-            self.retained.sort_by(|left, right| {
-                left.path_depth
-                    .cmp(&right.path_depth)
-                    .then(left.discovery_order.cmp(&right.discovery_order))
-            });
-            return;
-        }
-        self.retained.push(candidate);
-        self.retained.sort_by(|left, right| {
-            left.path_depth
-                .cmp(&right.path_depth)
-                .then(left.discovery_order.cmp(&right.discovery_order))
-        });
-        if self.retained.len() > self.requested_cap {
-            self.retained.truncate(self.requested_cap);
-        }
-    }
-
-    fn first(&self) -> Option<&RetainedExactMeetCandidate<M>> {
-        self.retained.first()
-    }
-}
-
-fn store_endpoint_exact_meets<M, FPath, FCanon>(
-    telemetry: &mut SearchTelemetry,
-    retention: &ExactMeetRetention<M>,
-    mut reconstruct_path: FPath,
-    mut to_dyn_matrix: FCanon,
-) where
-    M: Clone + PartialEq,
-    FPath: FnMut(&M) -> DynSsePath,
-    FCanon: FnMut(&M) -> DynMatrix,
-{
-    if !retention.has_retained() {
-        return;
-    }
-
-    telemetry.endpoint_exact_meets = Some(EndpointExactMeetSurface {
-        requested_cap: retention.requested_cap,
-        retained: retention
-            .retained
-            .iter()
-            .map(|candidate| EndpointExactMeetWitness {
-                path_lag: candidate.path_depth,
-                meeting_canonical: to_dyn_matrix(&candidate.canonical),
-                path: reconstruct_path(&candidate.canonical),
-            })
-            .collect(),
-    });
-}
-
-fn best_retained_exact_meet_path<M, FPath>(
-    retention: &ExactMeetRetention<M>,
-    mut reconstruct_path: FPath,
-) -> Option<DynSsePath>
-where
-    M: Clone + PartialEq,
-    FPath: FnMut(&M) -> DynSsePath,
-{
-    retention
-        .first()
-        .map(|candidate| reconstruct_path(&candidate.canonical))
-}
-
-fn maybe_store_endpoint_exact_meets<M, FPath, FCanon>(
-    telemetry: &mut SearchTelemetry,
-    retention: &ExactMeetRetention<M>,
-    timed_out: bool,
-    reconstruct_path: FPath,
-    to_dyn_matrix: FCanon,
-) where
-    M: Clone + PartialEq,
-    FPath: FnMut(&M) -> DynSsePath,
-    FCanon: FnMut(&M) -> DynMatrix,
-{
-    if timed_out {
-        return;
-    }
-    store_endpoint_exact_meets(telemetry, retention, reconstruct_path, to_dyn_matrix);
 }
 
 fn reorder_root_expansions_by_positive_conjugacy_seed_hints_2x2(
@@ -2026,7 +1898,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 SseResult::Equivalent(reconstruct_bidirectional_path(
                     a,
                     b,
-                    &best_exact_meet.canonical,
+                    best_exact_meet,
                     &fwd_parent,
                     &fwd_orig,
                     &bwd_parent,
@@ -2511,7 +2383,7 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                 SseResult::Equivalent(reconstruct_graph_plus_structured_bidirectional_path(
                     a,
                     b,
-                    &best_exact_meet.canonical,
+                    best_exact_meet,
                     &fwd_parent,
                     &fwd_orig,
                     &bwd_parent,
@@ -5040,7 +4912,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                 SseResult::Equivalent(reconstruct_graph_only_bidirectional_path(
                     a,
                     b,
-                    &best_exact_meet.canonical,
+                    best_exact_meet,
                     &fwd_parent,
                     &fwd_orig,
                     &bwd_parent,
