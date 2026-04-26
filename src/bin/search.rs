@@ -17,7 +17,8 @@ use sse_core::search::{
     build_full_path_guide_artifact, execute_search_request, execute_search_request_and_observer,
 };
 use sse_core::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver, SearchRootRecord,
+    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
+    SearchRootRecord, SearchStartRecord,
 };
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
@@ -736,49 +737,48 @@ struct ApproximateHitVisit {
     orig: DynMatrix,
 }
 
-#[derive(Default)]
-struct ApproximateHitParityObserver {
+struct ApproximateHitParitySearchScopeState {
+    search_scope_id: usize,
+    parent_search_scope_id: Option<usize>,
+    nesting_depth: usize,
+    request: SearchRequest,
+    stage: SearchStage,
+    source: DynMatrix,
+    target: DynMatrix,
+    max_lag: usize,
+    frontier_mode: FrontierMode,
+    move_family_policy: MoveFamilyPolicy,
+    result: Option<String>,
+    inclusive_approximate_other_side_hits: Option<usize>,
     visits_by_direction: BTreeMap<DirectionLabel, BTreeMap<DynMatrix, ApproximateHitVisit>>,
     visits_by_signature: BTreeMap<DirectionLabel, BTreeMap<String, Vec<ApproximateHitVisit>>>,
-    annotated_hits: Vec<ApproximateHitParityAnnotatedHit>,
+    annotated_hit_records: usize,
 }
 
-impl SearchObserver for ApproximateHitParityObserver {
-    fn on_event(&mut self, event: &SearchEvent) {
-        match event {
-            SearchEvent::Roots(records) => {
-                for record in records {
-                    self.record_root(record);
-                }
-            }
-            SearchEvent::Layer(edges) => {
-                for edge in edges {
-                    self.record_edge(edge);
-                }
-                for edge in edges {
-                    if !matches!(edge.status, SearchEdgeStatus::SeenCollision) {
-                        self.record_visit(
-                            direction_label(edge.direction),
-                            edge.to_depth,
-                            edge.to_canonical.clone(),
-                            edge.to_orig.clone(),
-                        );
-                    }
-                }
-            }
-            _ => {}
+impl ApproximateHitParitySearchScopeState {
+    fn new(
+        search_scope_id: usize,
+        parent_search_scope_id: Option<usize>,
+        nesting_depth: usize,
+        started: &SearchStartRecord,
+    ) -> Self {
+        Self {
+            search_scope_id,
+            parent_search_scope_id,
+            nesting_depth,
+            request: started.request.clone(),
+            stage: started.request.stage,
+            source: started.request.source.clone(),
+            target: started.request.target.clone(),
+            max_lag: started.request.config.max_lag,
+            frontier_mode: started.request.config.frontier_mode,
+            move_family_policy: started.request.config.move_family_policy,
+            result: None,
+            inclusive_approximate_other_side_hits: None,
+            visits_by_direction: BTreeMap::new(),
+            visits_by_signature: BTreeMap::new(),
+            annotated_hit_records: 0,
         }
-    }
-}
-
-impl ApproximateHitParityObserver {
-    fn record_root(&mut self, record: &SearchRootRecord) {
-        self.record_visit(
-            direction_label(record.direction),
-            record.depth,
-            record.canonical.clone(),
-            record.orig.clone(),
-        );
     }
 
     fn record_visit(
@@ -808,15 +808,13 @@ impl ApproximateHitParityObserver {
             .push(visit);
     }
 
-    fn record_edge(&mut self, edge: &SearchEdgeRecord) {
-        if !edge.approximate_other_side_hit || !matches!(edge.status, SearchEdgeStatus::Discovered)
-        {
-            return;
-        }
-
-        let direction = direction_label(edge.direction);
+    fn annotate_bucket_candidates(
+        &self,
+        direction: DirectionLabel,
+        anchor: &DynMatrix,
+    ) -> Vec<ApproximateHitParityCandidate> {
         let opposite = opposite_direction(direction);
-        let coarse_signature = mass_support_signature(&edge.to_canonical);
+        let coarse_signature = mass_support_signature(anchor);
         let mut bucket_candidates = self
             .visits_by_signature
             .get(&opposite)
@@ -824,20 +822,209 @@ impl ApproximateHitParityObserver {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .map(|candidate| annotate_bucket_candidate(&edge.to_canonical, candidate))
+            .map(|candidate| annotate_bucket_candidate(anchor, candidate))
             .collect::<Vec<_>>();
         bucket_candidates.sort_by(compare_bucket_candidates);
-        let best_action = bucket_candidates
-            .first()
-            .map(|candidate| candidate.action)
-            .unwrap_or(EndpointLocalParityAction::Ignore);
+        bucket_candidates
+    }
+}
 
+#[derive(Default)]
+struct ApproximateHitParityObserver {
+    search_scopes: Vec<ApproximateHitParitySearchScopeState>,
+    search_scope_stack: Vec<usize>,
+    annotated_hits: Vec<ApproximateHitParityAnnotatedHit>,
+}
+
+impl SearchObserver for ApproximateHitParityObserver {
+    fn on_event(&mut self, event: &SearchEvent) {
+        match event {
+            SearchEvent::Started(record) => self.start_scope(record),
+            SearchEvent::Roots(records) => {
+                for record in records {
+                    self.record_root(record);
+                }
+            }
+            SearchEvent::Layer(edges) => {
+                for edge in edges {
+                    self.record_edge(edge);
+                }
+                for edge in edges {
+                    if !matches!(edge.status, SearchEdgeStatus::SeenCollision) {
+                        if let Some(scope) = self.current_scope_state_mut() {
+                            scope.record_visit(
+                                direction_label(edge.direction),
+                                edge.to_depth,
+                                edge.to_canonical.clone(),
+                                edge.to_orig.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+            SearchEvent::Finished(record) => self.finish_scope(record),
+        }
+    }
+}
+
+impl ApproximateHitParityObserver {
+    fn start_scope(&mut self, started: &SearchStartRecord) {
+        let search_scope_id = self.search_scopes.len() + 1;
+        let parent_search_scope_id = self.search_scope_stack.last().copied();
+        let nesting_depth = self.search_scope_stack.len();
+        self.search_scopes
+            .push(ApproximateHitParitySearchScopeState::new(
+                search_scope_id,
+                parent_search_scope_id,
+                nesting_depth,
+                started,
+            ));
+        self.search_scope_stack.push(search_scope_id);
+    }
+
+    fn finish_scope(&mut self, finished: &SearchFinishedRecord) {
+        let Some(search_scope_id) = self.search_scope_stack.last().copied() else {
+            return;
+        };
+        let matches_top_scope = self
+            .search_scopes
+            .get(search_scope_id.saturating_sub(1))
+            .map(|scope| requests_match(&scope.request, &finished.request))
+            .unwrap_or(false);
+        if !matches_top_scope {
+            return;
+        }
+        self.search_scope_stack.pop();
+        let Some(scope) = self.scope_state_mut(search_scope_id) else {
+            return;
+        };
+        scope.result = Some(result_label(&finished.result).to_string());
+        scope.inclusive_approximate_other_side_hits =
+            Some(finished.telemetry.approximate_other_side_hits);
+    }
+
+    fn current_scope_state_mut(&mut self) -> Option<&mut ApproximateHitParitySearchScopeState> {
+        let search_scope_id = *self.search_scope_stack.last()?;
+        self.scope_state_mut(search_scope_id)
+    }
+
+    fn scope_state_mut(
+        &mut self,
+        search_scope_id: usize,
+    ) -> Option<&mut ApproximateHitParitySearchScopeState> {
+        self.search_scopes.get_mut(search_scope_id.checked_sub(1)?)
+    }
+
+    fn record_root(&mut self, record: &SearchRootRecord) {
+        let Some(scope) = self.current_scope_state_mut() else {
+            return;
+        };
+        scope.record_visit(
+            direction_label(record.direction),
+            record.depth,
+            record.canonical.clone(),
+            record.orig.clone(),
+        );
+    }
+
+    fn scope_report(
+        &self,
+        scope: &ApproximateHitParitySearchScopeState,
+        child_search_scope_ids: Vec<usize>,
+        child_approximate_other_side_hits: usize,
+    ) -> ApproximateHitParitySearchScope {
+        let (
+            exclusive_approximate_other_side_hits,
+            missing_approximate_hits,
+            excess_annotated_hits,
+            report_is_complete,
+            accounting_inconsistency,
+        ) = match scope.inclusive_approximate_other_side_hits {
+            Some(inclusive) => match inclusive.checked_sub(child_approximate_other_side_hits) {
+                Some(exclusive) => (
+                    Some(exclusive),
+                    Some(exclusive.saturating_sub(scope.annotated_hit_records)),
+                    Some(scope.annotated_hit_records.saturating_sub(exclusive)),
+                    Some(scope.annotated_hit_records == exclusive),
+                    None,
+                ),
+                None => (
+                    None,
+                    None,
+                    None,
+                    Some(false),
+                    Some(
+                        "child_approximate_other_side_hits exceeded inclusive_approximate_other_side_hits",
+                    ),
+                ),
+            },
+            None => (None, None, None, None, None),
+        };
+
+        ApproximateHitParitySearchScope {
+            search_scope_id: scope.search_scope_id,
+            parent_search_scope_id: scope.parent_search_scope_id,
+            nesting_depth: scope.nesting_depth,
+            stage: scope.stage,
+            source: scope.source.clone(),
+            target: scope.target.clone(),
+            max_lag: scope.max_lag,
+            frontier_mode: scope.frontier_mode,
+            move_family_policy: scope.move_family_policy,
+            result: scope.result.clone(),
+            child_search_scope_ids,
+            discovered_approximate_hit_records: scope.annotated_hit_records,
+            inclusive_approximate_other_side_hits: scope.inclusive_approximate_other_side_hits,
+            exclusive_approximate_other_side_hits,
+            child_approximate_other_side_hits,
+            missing_approximate_hits,
+            excess_annotated_hits,
+            report_is_complete,
+            accounting_inconsistency,
+        }
+    }
+
+    fn record_edge(&mut self, edge: &SearchEdgeRecord) {
+        if !edge.approximate_other_side_hit || !matches!(edge.status, SearchEdgeStatus::Discovered)
+        {
+            return;
+        }
+
+        let direction = direction_label(edge.direction);
         let supported_square_state = supports_square_endpoint_local_parity(&edge.to_canonical);
         let trimmed_signature =
             supported_square_state.then(|| trimmed_active_window_signature(&edge.to_canonical));
+        let coarse_signature = mass_support_signature(&edge.to_canonical);
+        let (
+            search_scope_id,
+            search_scope_stage,
+            search_scope_nesting_depth,
+            bucket_candidates,
+            best_action,
+        ) = {
+            let Some(scope) = self.current_scope_state_mut() else {
+                return;
+            };
+            let bucket_candidates = scope.annotate_bucket_candidates(direction, &edge.to_canonical);
+            let best_action = bucket_candidates
+                .first()
+                .map(|candidate| candidate.action)
+                .unwrap_or(EndpointLocalParityAction::Ignore);
+            scope.annotated_hit_records += 1;
+            (
+                scope.search_scope_id,
+                scope.stage,
+                scope.nesting_depth,
+                bucket_candidates,
+                best_action,
+            )
+        };
 
         self.annotated_hits.push(ApproximateHitParityAnnotatedHit {
             rank: 0,
+            search_scope_id,
+            search_scope_stage,
+            search_scope_nesting_depth,
             layer_index: edge.layer_index,
             direction,
             move_family: edge.move_family.to_string(),
@@ -868,6 +1055,48 @@ impl ApproximateHitParityObserver {
         for (idx, hit) in annotated_hits.iter_mut().enumerate() {
             hit.rank = idx + 1;
         }
+
+        let mut child_search_scope_ids: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut inclusive_hits_by_scope: BTreeMap<usize, usize> = BTreeMap::new();
+        for scope in &self.search_scopes {
+            if let Some(parent_search_scope_id) = scope.parent_search_scope_id {
+                child_search_scope_ids
+                    .entry(parent_search_scope_id)
+                    .or_default()
+                    .push(scope.search_scope_id);
+            }
+            if let Some(inclusive_hits) = scope.inclusive_approximate_other_side_hits {
+                inclusive_hits_by_scope.insert(scope.search_scope_id, inclusive_hits);
+            }
+        }
+        let mut complete_search_scopes = 0usize;
+        let mut incomplete_search_scopes = 0usize;
+        let search_scopes = self
+            .search_scopes
+            .iter()
+            .map(|scope| {
+                let child_ids = child_search_scope_ids
+                    .get(&scope.search_scope_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let child_approximate_other_side_hits = child_ids
+                    .iter()
+                    .map(|child_search_scope_id| {
+                        inclusive_hits_by_scope
+                            .get(child_search_scope_id)
+                            .copied()
+                            .unwrap_or_default()
+                    })
+                    .sum();
+                let scope_report =
+                    self.scope_report(scope, child_ids, child_approximate_other_side_hits);
+                match scope_report.report_is_complete {
+                    Some(true) => complete_search_scopes += 1,
+                    Some(false) | None => incomplete_search_scopes += 1,
+                }
+                scope_report
+            })
+            .collect::<Vec<_>>();
 
         let mut hits_by_best_action = BTreeMap::new();
         let mut candidate_actions = BTreeMap::new();
@@ -914,14 +1143,22 @@ impl ApproximateHitParityObserver {
                 excess_annotated_hits,
                 report_is_complete,
                 completeness_note: (!report_is_complete).then_some(
-                    "top-level observer records only the current request surface; nested guided or shortcut segment searches or accounting drift can make the report partial relative to telemetry",
+                    "annotated hit records did not match aggregate approximate_other_side_hits; inspect search_scopes for per-scope inclusive/exclusive accounting and any partial observer coverage",
                 ),
+                search_scopes_observed: search_scopes.len(),
+                nested_search_scopes_observed: search_scopes
+                    .iter()
+                    .filter(|scope| scope.nesting_depth > 0)
+                    .count(),
+                complete_search_scopes,
+                incomplete_search_scopes,
                 supported_square_hits,
                 unsupported_hits,
                 multi_candidate_buckets,
                 hits_by_best_action,
                 candidate_actions,
             },
+            search_scopes,
             annotated_hits,
         }
     }
@@ -943,6 +1180,7 @@ struct ApproximateHitParityReport {
     result: String,
     telemetry_approximate_other_side_hits: usize,
     summary: ApproximateHitParitySummary,
+    search_scopes: Vec<ApproximateHitParitySearchScope>,
     annotated_hits: Vec<ApproximateHitParityAnnotatedHit>,
 }
 
@@ -954,6 +1192,10 @@ struct ApproximateHitParitySummary {
     report_is_complete: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     completeness_note: Option<&'static str>,
+    search_scopes_observed: usize,
+    nested_search_scopes_observed: usize,
+    complete_search_scopes: usize,
+    incomplete_search_scopes: usize,
     supported_square_hits: usize,
     unsupported_hits: usize,
     multi_candidate_buckets: usize,
@@ -962,8 +1204,42 @@ struct ApproximateHitParitySummary {
 }
 
 #[derive(Clone, serde::Serialize)]
+struct ApproximateHitParitySearchScope {
+    search_scope_id: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_search_scope_id: Option<usize>,
+    nesting_depth: usize,
+    stage: SearchStage,
+    source: DynMatrix,
+    target: DynMatrix,
+    max_lag: usize,
+    frontier_mode: FrontierMode,
+    move_family_policy: MoveFamilyPolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<String>,
+    child_search_scope_ids: Vec<usize>,
+    discovered_approximate_hit_records: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inclusive_approximate_other_side_hits: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exclusive_approximate_other_side_hits: Option<usize>,
+    child_approximate_other_side_hits: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missing_approximate_hits: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    excess_annotated_hits: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report_is_complete: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accounting_inconsistency: Option<&'static str>,
+}
+
+#[derive(Clone, serde::Serialize)]
 struct ApproximateHitParityAnnotatedHit {
     rank: usize,
+    search_scope_id: usize,
+    search_scope_stage: SearchStage,
+    search_scope_nesting_depth: usize,
     layer_index: usize,
     direction: DirectionLabel,
     move_family: String,
@@ -1427,6 +1703,16 @@ fn result_label(result: &SearchRunResult) -> &'static str {
     }
 }
 
+fn requests_match(left: &SearchRequest, right: &SearchRequest) -> bool {
+    left.stage == right.stage
+        && left.source == right.source
+        && left.target == right.target
+        && left.config == right.config
+        && left.guide_artifacts == right.guide_artifacts
+        && left.guided_refinement == right.guided_refinement
+        && left.shortcut_search == right.shortcut_search
+}
+
 fn status_label(status: SearchEdgeStatus) -> &'static str {
     match status {
         SearchEdgeStatus::SeenCollision => "seen_collision",
@@ -1869,7 +2155,8 @@ mod tests {
     use sse_core::guide_artifacts::load_guide_artifacts_from_path;
     use sse_core::matrix::{DynMatrix, SqMatrix};
     use sse_core::search_observer::{
-        SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver, SearchRootRecord,
+        SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchFinishedRecord, SearchObserver,
+        SearchRootRecord, SearchStartRecord,
     };
     use sse_core::types::{
         ConcreteShiftProof2x2, DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness,
@@ -2241,15 +2528,25 @@ mod tests {
         };
 
         let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
         observer.on_event(&SearchEvent::Roots(vec![root]));
         observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
 
         let report = observer.build_report(&request, &result, &telemetry);
         assert_eq!(report.summary.supported_square_hits, 1);
         assert!(report.summary.report_is_complete);
         assert_eq!(report.summary.missing_approximate_hits, 0);
         assert_eq!(report.summary.excess_annotated_hits, 0);
+        assert_eq!(report.summary.search_scopes_observed, 1);
+        assert_eq!(report.summary.complete_search_scopes, 1);
+        assert_eq!(report.summary.incomplete_search_scopes, 0);
         assert_eq!(report.annotated_hits.len(), 1);
+        assert_eq!(report.annotated_hits[0].search_scope_id, 1);
+        assert_eq!(
+            report.annotated_hits[0].search_scope_stage,
+            SearchStage::EndpointSearch
+        );
         assert_eq!(
             report.annotated_hits[0].best_action,
             EndpointLocalParityAction::ReuseEndpointLocalParity
@@ -2258,6 +2555,12 @@ mod tests {
             report.annotated_hits[0].bucket_candidates[0].action,
             EndpointLocalParityAction::ReuseEndpointLocalParity
         );
+        assert_eq!(report.search_scopes.len(), 1);
+        assert_eq!(
+            report.search_scopes[0].exclusive_approximate_other_side_hits,
+            Some(1)
+        );
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(true));
     }
 
     #[test]
@@ -2294,14 +2597,17 @@ mod tests {
         };
 
         let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
         observer.on_event(&SearchEvent::Roots(vec![root]));
         observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
 
         let report = observer.build_report(&request, &result, &telemetry);
         assert_eq!(report.summary.supported_square_hits, 1);
         assert!(report.summary.report_is_complete);
         assert_eq!(report.summary.missing_approximate_hits, 0);
         assert_eq!(report.summary.excess_annotated_hits, 0);
+        assert_eq!(report.summary.search_scopes_observed, 1);
         assert_eq!(report.annotated_hits.len(), 1);
         assert_eq!(
             report.annotated_hits[0].best_action,
@@ -2347,14 +2653,17 @@ mod tests {
         };
 
         let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
         observer.on_event(&SearchEvent::Roots(vec![root]));
         observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
 
         let report = observer.build_report(&request, &result, &telemetry);
         assert!(!report.summary.report_is_complete);
         assert_eq!(report.summary.missing_approximate_hits, 1);
         assert_eq!(report.summary.excess_annotated_hits, 0);
         assert!(report.summary.completeness_note.is_some());
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(false));
     }
 
     #[test]
@@ -2388,14 +2697,208 @@ mod tests {
         };
 
         let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
         observer.on_event(&SearchEvent::Roots(vec![root]));
         observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
 
         let report = observer.build_report(&request, &result, &telemetry);
         assert!(!report.summary.report_is_complete);
         assert_eq!(report.summary.missing_approximate_hits, 0);
         assert_eq!(report.summary.excess_annotated_hits, 1);
         assert!(report.summary.completeness_note.is_some());
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(false));
+    }
+
+    #[test]
+    fn approximate_hit_parity_report_attributes_nested_endpoint_scope_hits() {
+        let mut request = identity_request();
+        request.stage = SearchStage::GuidedRefinement;
+        let result = SearchRunResult::Unknown;
+        let telemetry = SearchTelemetry {
+            approximate_other_side_hits: 1,
+            ..Default::default()
+        };
+        let mut segment_request = request.clone();
+        segment_request.stage = SearchStage::EndpointSearch;
+        segment_request.source =
+            DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0]);
+        segment_request.target =
+            DynMatrix::new(4, 4, vec![1, 12, 0, 1, 1, 1, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let segment_telemetry = SearchTelemetry {
+            approximate_other_side_hits: 1,
+            ..Default::default()
+        };
+        let root = SearchRootRecord {
+            direction: sse_core::types::SearchDirection::Backward,
+            canonical: rank4_counterpart_matrix().canonical_perm(),
+            orig: rank4_counterpart_matrix(),
+            depth: 3,
+        };
+        let edge = SearchEdgeRecord {
+            layer_index: 2,
+            direction: sse_core::types::SearchDirection::Forward,
+            move_family: "diagonal_refactorization_4x4",
+            from_canonical: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            from_orig: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            to_canonical: rank4_to_matrix().canonical_perm(),
+            to_orig: rank4_to_matrix(),
+            from_depth: 2,
+            to_depth: 3,
+            step: EsseStep {
+                u: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+                v: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            },
+            status: SearchEdgeStatus::Discovered,
+            approximate_other_side_hit: true,
+            enqueued: true,
+        };
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
+        observer.on_event(&search_started_event(&segment_request));
+        observer.on_event(&SearchEvent::Roots(vec![root]));
+        observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(
+            &segment_request,
+            &SearchRunResult::Unknown,
+            &segment_telemetry,
+        ));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
+
+        let report = observer.build_report(&request, &result, &telemetry);
+        assert!(report.summary.report_is_complete);
+        assert_eq!(report.summary.search_scopes_observed, 2);
+        assert_eq!(report.summary.nested_search_scopes_observed, 1);
+        assert_eq!(report.summary.complete_search_scopes, 2);
+        assert_eq!(report.summary.incomplete_search_scopes, 0);
+        assert_eq!(report.search_scopes.len(), 2);
+        assert_eq!(report.search_scopes[0].stage, SearchStage::GuidedRefinement);
+        assert_eq!(
+            report.search_scopes[0].inclusive_approximate_other_side_hits,
+            Some(1)
+        );
+        assert_eq!(
+            report.search_scopes[0].exclusive_approximate_other_side_hits,
+            Some(0)
+        );
+        assert_eq!(report.search_scopes[0].child_search_scope_ids, vec![2]);
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(true));
+        assert_eq!(report.search_scopes[1].stage, SearchStage::EndpointSearch);
+        assert_eq!(
+            report.search_scopes[1].inclusive_approximate_other_side_hits,
+            Some(1)
+        );
+        assert_eq!(
+            report.search_scopes[1].exclusive_approximate_other_side_hits,
+            Some(1)
+        );
+        assert_eq!(report.search_scopes[1].report_is_complete, Some(true));
+        assert_eq!(report.annotated_hits.len(), 1);
+        assert_eq!(report.annotated_hits[0].search_scope_id, 2);
+        assert_eq!(
+            report.annotated_hits[0].search_scope_stage,
+            SearchStage::EndpointSearch
+        );
+        assert_eq!(report.annotated_hits[0].search_scope_nesting_depth, 1);
+    }
+
+    #[test]
+    fn approximate_hit_parity_report_ignores_unmatched_nested_finish() {
+        let mut request = identity_request();
+        request.stage = SearchStage::GuidedRefinement;
+        let result = SearchRunResult::Unknown;
+        let telemetry = SearchTelemetry::default();
+        let mut segment_request = request.clone();
+        segment_request.stage = SearchStage::EndpointSearch;
+        segment_request.config.max_lag = 1;
+        segment_request.source = rank4_to_matrix();
+        segment_request.target = rank4_counterpart_matrix();
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
+        observer.on_event(&search_finished_event(
+            &segment_request,
+            &SearchRunResult::Unknown,
+            &SearchTelemetry::default(),
+        ));
+        observer.on_event(&search_finished_event(&request, &result, &telemetry));
+
+        let report = observer.build_report(&request, &result, &telemetry);
+        assert_eq!(report.search_scopes.len(), 1);
+        assert_eq!(report.search_scopes[0].stage, SearchStage::GuidedRefinement);
+        assert_eq!(report.search_scopes[0].result.as_deref(), Some("unknown"));
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(true));
+        assert!(report.annotated_hits.is_empty());
+        assert!(report.summary.report_is_complete);
+    }
+
+    #[test]
+    fn approximate_hit_parity_scope_flags_child_overflow_instead_of_clamping_complete() {
+        let mut request = identity_request();
+        request.stage = SearchStage::GuidedRefinement;
+        let parent_result = SearchRunResult::Unknown;
+        let parent_telemetry = SearchTelemetry::default();
+        let mut segment_request = request.clone();
+        segment_request.stage = SearchStage::EndpointSearch;
+        let segment_telemetry = SearchTelemetry {
+            approximate_other_side_hits: 1,
+            ..Default::default()
+        };
+        let root = SearchRootRecord {
+            direction: sse_core::types::SearchDirection::Backward,
+            canonical: rank4_counterpart_matrix().canonical_perm(),
+            orig: rank4_counterpart_matrix(),
+            depth: 3,
+        };
+        let edge = SearchEdgeRecord {
+            layer_index: 2,
+            direction: sse_core::types::SearchDirection::Forward,
+            move_family: "diagonal_refactorization_4x4",
+            from_canonical: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            from_orig: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            to_canonical: rank4_to_matrix().canonical_perm(),
+            to_orig: rank4_to_matrix(),
+            from_depth: 2,
+            to_depth: 3,
+            step: EsseStep {
+                u: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+                v: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            },
+            status: SearchEdgeStatus::Discovered,
+            approximate_other_side_hit: true,
+            enqueued: true,
+        };
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
+        observer.on_event(&search_started_event(&segment_request));
+        observer.on_event(&SearchEvent::Roots(vec![root]));
+        observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(
+            &segment_request,
+            &SearchRunResult::Unknown,
+            &segment_telemetry,
+        ));
+        observer.on_event(&search_finished_event(
+            &request,
+            &parent_result,
+            &parent_telemetry,
+        ));
+
+        let report = observer.build_report(&request, &parent_result, &parent_telemetry);
+        assert_eq!(report.search_scopes[0].stage, SearchStage::GuidedRefinement);
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(false));
+        assert_eq!(
+            report.search_scopes[0].exclusive_approximate_other_side_hits,
+            None
+        );
+        assert_eq!(
+            report.search_scopes[0].accounting_inconsistency,
+            Some(
+                "child_approximate_other_side_hits exceeded inclusive_approximate_other_side_hits",
+            )
+        );
     }
 
     #[test]
@@ -2904,6 +3407,97 @@ mod tests {
         cleanup_sqlite_artifacts(&output_path);
     }
 
+    #[test]
+    fn run_with_args_guided_refinement_visited_db_preserves_parent_and_child_runs() {
+        let guide_path = temp_output_path("guided-refinement-guide");
+        let output_path = temp_sqlite_path("guided-refinement-visited-db");
+        fs::write(
+            &guide_path,
+            r#"{
+  "artifact_id": "two-step-identity",
+  "endpoints": {
+    "source": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+    "target": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+  },
+  "kind": "full_path",
+  "path": {
+    "matrices": [
+      {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+      {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+      {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+    ],
+    "steps": [
+      {
+        "u": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+        "v": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+      },
+      {
+        "u": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]},
+        "v": {"rows": 2, "cols": 2, "data": [1, 0, 0, 1]}
+      }
+    ]
+  },
+  "compatibility": {
+    "supported_stages": ["guided_refinement"]
+  },
+  "quality": {
+    "lag": 2,
+    "cost": 2
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let exit_code = run_with_args(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--stage".to_string(),
+                "guided-refinement".to_string(),
+                "--guide-artifacts".to_string(),
+                guide_path.display().to_string(),
+                "--visited-db".to_string(),
+                output_path.display().to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
+
+        let conn = Connection::open(&output_path).unwrap();
+        let runs: Vec<(String, Option<String>, Option<i64>, Option<i64>)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT stage, outcome, path_steps, finished_unix_ms
+                     FROM search_runs
+                     ORDER BY id",
+                )
+                .unwrap();
+            stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect()
+        };
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].0, "guided_refinement");
+        assert_eq!(runs[0].1.as_deref(), Some("equivalent"));
+        assert_eq!(runs[0].2, Some(0));
+        assert!(runs[0].3.is_some());
+        assert_eq!(runs[1].0, "endpoint_search");
+        assert_eq!(runs[1].1.as_deref(), Some("equivalent"));
+        assert_eq!(runs[1].2, Some(0));
+        assert!(runs[1].3.is_some());
+
+        drop(conn);
+        let _ = fs::remove_file(&guide_path);
+        cleanup_sqlite_artifacts(&output_path);
+    }
+
     fn temp_output_path(label: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2926,6 +3520,26 @@ mod tests {
             guided_refinement: GuidedRefinementConfig::default(),
             shortcut_search: ShortcutSearchConfig::default(),
         }
+    }
+
+    fn search_started_event(request: &SearchRequest) -> SearchEvent {
+        SearchEvent::Started(SearchStartRecord {
+            request: request.clone(),
+            source_canonical: request.source.canonical_perm(),
+            target_canonical: request.target.canonical_perm(),
+        })
+    }
+
+    fn search_finished_event(
+        request: &SearchRequest,
+        result: &SearchRunResult,
+        telemetry: &SearchTelemetry,
+    ) -> SearchEvent {
+        SearchEvent::Finished(SearchFinishedRecord {
+            request: request.clone(),
+            result: result.clone(),
+            telemetry: telemetry.clone(),
+        })
     }
 
     fn k3_overlap_square() -> DynMatrix {
