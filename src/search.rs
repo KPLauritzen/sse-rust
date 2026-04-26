@@ -608,7 +608,7 @@ pub fn search_sse_with_telemetry_dyn(
     b: &DynMatrix,
     config: &SearchConfig,
 ) -> (DynSseResult, SearchTelemetry) {
-    search_sse_with_telemetry_dyn_with_deadline_and_observer(a, b, config, None, None)
+    search_sse_with_telemetry_dyn_with_deadline(a, b, config, None)
 }
 
 fn search_sse_with_telemetry_dyn_with_deadline(
@@ -5546,6 +5546,11 @@ mod tests {
         first_layer_matrices: Vec<DynMatrix>,
     }
 
+    #[derive(Default)]
+    struct StartedStageProbe {
+        stages: Vec<SearchStage>,
+    }
+
     impl SearchObserver for FirstLayerMatrixProbe {
         fn on_event(&mut self, event: &SearchEvent) {
             if let SearchEvent::Layer(edges) = event {
@@ -5553,6 +5558,14 @@ mod tests {
                     self.first_layer_matrices =
                         edges.iter().map(|edge| edge.to_orig.clone()).collect();
                 }
+            }
+        }
+    }
+
+    impl SearchObserver for StartedStageProbe {
+        fn on_event(&mut self, event: &SearchEvent) {
+            if let SearchEvent::Started(started) = event {
+                self.stages.push(started.request.stage);
             }
         }
     }
@@ -6340,6 +6353,63 @@ mod tests {
     }
 
     #[test]
+    fn test_guided_refinement_stage_forwards_observer_into_nested_segment_search() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid.clone(), b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &mid).unwrap(),
+                permutation_step_between(&mid, &b).unwrap(),
+            ],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                beam_width: None,
+                beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
+            },
+            stage: SearchStage::GuidedRefinement,
+            guide_artifacts: vec![full_path_artifact("two-hop-guide", guide)],
+            guided_refinement: GuidedRefinementConfig {
+                max_shortcut_lag: 1,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            shortcut_search: ShortcutSearchConfig::default(),
+        };
+        let mut observer = StartedStageProbe::default();
+
+        let (result, telemetry) =
+            execute_search_request_and_observer(&request, Some(&mut observer)).unwrap();
+
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from guided refinement, got {other:?}"),
+        }
+        assert_eq!(telemetry.guided_segments_considered, 1);
+        assert_eq!(
+            observer.stages,
+            vec![SearchStage::GuidedRefinement, SearchStage::EndpointSearch]
+        );
+    }
+
+    #[test]
     fn test_guided_refinement_segment_timeout_preserves_guide_when_search_times_out() {
         let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
         let a = base.conjugate_by_perm(&[1, 0, 2]);
@@ -6430,6 +6500,7 @@ mod tests {
         let mut telemetry = SearchTelemetry::default();
         let mut remaining_segment_attempts = 4usize;
         let mut segment_cache = GuidedSegmentCache::default();
+        let mut observer = None;
         segment_cache.insert(
             GuidedSegmentCacheKey {
                 source: a.clone(),
@@ -6444,6 +6515,7 @@ mod tests {
             &config,
             &guided,
             &mut telemetry,
+            &mut observer,
             &mut remaining_segment_attempts,
             &mut segment_cache,
         );
@@ -6500,6 +6572,7 @@ mod tests {
         let mut telemetry = SearchTelemetry::default();
         let mut remaining_segment_attempts = 4usize;
         let mut segment_cache = GuidedSegmentCache::default();
+        let mut observer = None;
         segment_cache.insert(
             GuidedSegmentCacheKey {
                 source: a.clone(),
@@ -6514,6 +6587,7 @@ mod tests {
             &config,
             &guided,
             &mut telemetry,
+            &mut observer,
             &mut remaining_segment_attempts,
             &mut segment_cache,
         );
@@ -6582,6 +6656,60 @@ mod tests {
         assert_eq!(
             telemetry.shortcut_search.stop_reason,
             Some(ShortcutSearchStopReason::GuidePoolExhausted)
+        );
+    }
+
+    #[test]
+    fn test_shortcut_search_stage_forwards_observer_into_nested_segment_search() {
+        let base = DynMatrix::new(3, 3, vec![1, 2, 0, 0, 1, 1, 1, 0, 2]);
+        let a = base.conjugate_by_perm(&[1, 0, 2]);
+        let mid = base.conjugate_by_perm(&[2, 0, 1]);
+        let b = base.conjugate_by_perm(&[2, 1, 0]);
+        let guide = DynSsePath {
+            matrices: vec![a.clone(), mid, b.clone()],
+            steps: vec![
+                permutation_step_between(&a, &base.conjugate_by_perm(&[2, 0, 1])).unwrap(),
+                permutation_step_between(&base.conjugate_by_perm(&[2, 0, 1]), &b).unwrap(),
+            ],
+        };
+        let request = SearchRequest {
+            source: a.clone(),
+            target: b.clone(),
+            config: SearchConfig {
+                max_lag: 2,
+                max_intermediate_dim: 3,
+                max_entry: 6,
+                frontier_mode: FrontierMode::Bfs,
+                move_family_policy: MoveFamilyPolicy::GraphOnly,
+                beam_width: None,
+                beam_bfs_handoff_depth: None,
+                beam_bfs_handoff_deferred_cap: None,
+                endpoint_multi_meet_cap: None,
+            },
+            stage: SearchStage::ShortcutSearch,
+            guide_artifacts: vec![full_path_artifact("legacy-guided", guide)],
+            guided_refinement: GuidedRefinementConfig::default(),
+            shortcut_search: ShortcutSearchConfig {
+                max_total_segment_attempts: 1,
+                ..ShortcutSearchConfig::default()
+            },
+        };
+        let mut observer = StartedStageProbe::default();
+
+        let (result, telemetry) =
+            execute_search_request_and_observer(&request, Some(&mut observer)).unwrap();
+
+        match result {
+            SearchRunResult::Equivalent(path) => {
+                assert_eq!(path.steps.len(), 1);
+                validate_sse_path_dyn(&a, &b, &path).unwrap();
+            }
+            other => panic!("expected Equivalent from shortcut search, got {other:?}"),
+        }
+        assert_eq!(telemetry.shortcut_search.segment_attempts, 1);
+        assert_eq!(
+            observer.stages,
+            vec![SearchStage::ShortcutSearch, SearchStage::EndpointSearch]
         );
     }
 

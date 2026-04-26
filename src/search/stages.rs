@@ -5,7 +5,7 @@ use ahash::AHashMap as HashMap;
 
 use super::dispatch::{emit_finished, emit_started};
 use super::path::{reanchor_dyn_sse_path, reverse_dyn_sse_path};
-use super::{search_sse_with_telemetry_dyn_with_deadline, validate_sse_path_dyn};
+use super::{search_sse_with_telemetry_dyn_with_deadline_and_observer, validate_sse_path_dyn};
 use crate::matrix::DynMatrix;
 use crate::search_observer::SearchObserver;
 use crate::types::{
@@ -257,6 +257,7 @@ pub(super) fn search_shortcut_search_with_observer(
                 request,
                 &guide.path,
                 &mut telemetry,
+                &mut observer,
                 &mut remaining_segment_attempts,
                 &mut segment_cache,
             );
@@ -349,7 +350,7 @@ pub(super) fn search_guided_refinement_with_observer(
 
     let mut best: Option<DynSsePath> = None;
     for path in prepared_guides {
-        let refined = refine_guide_path(request, &path, &mut telemetry);
+        let refined = refine_guide_path(request, &path, &mut telemetry, &mut observer);
         if refined.steps.len() < best.as_ref().map_or(usize::MAX, |path| path.steps.len())
             || (best.is_some()
                 && refined.steps.len() == best.as_ref().unwrap().steps.len()
@@ -601,6 +602,7 @@ fn refine_guide_path(
     request: &SearchRequest,
     initial: &DynSsePath,
     telemetry: &mut SearchTelemetry,
+    observer: &mut Option<&mut dyn SearchObserver>,
 ) -> DynSsePath {
     let mut remaining_segment_attempts = usize::MAX;
     let mut segment_cache = GuidedSegmentCache::default();
@@ -608,6 +610,7 @@ fn refine_guide_path(
         request,
         initial,
         telemetry,
+        observer,
         &mut remaining_segment_attempts,
         &mut segment_cache,
     )
@@ -617,6 +620,7 @@ fn refine_guide_path_with_budget(
     request: &SearchRequest,
     initial: &DynSsePath,
     telemetry: &mut SearchTelemetry,
+    observer: &mut Option<&mut dyn SearchObserver>,
     remaining_segment_attempts: &mut usize,
     segment_cache: &mut GuidedSegmentCache,
 ) -> DynSsePath {
@@ -631,6 +635,7 @@ fn refine_guide_path_with_budget(
             &request.config,
             &request.guided_refinement,
             telemetry,
+            observer,
             remaining_segment_attempts,
             segment_cache,
         );
@@ -647,6 +652,7 @@ pub(super) fn refine_guide_path_once(
     base_config: &SearchConfig,
     guided_config: &GuidedRefinementConfig,
     telemetry: &mut SearchTelemetry,
+    observer: &mut Option<&mut dyn SearchObserver>,
     remaining_segment_attempts: &mut usize,
     segment_cache: &mut GuidedSegmentCache,
 ) -> DynSsePath {
@@ -702,12 +708,24 @@ pub(super) fn refine_guide_path_once(
                     .segment_timeout_secs
                     .map(Duration::from_secs)
                     .map(|timeout| Instant::now() + timeout);
-                let (result, segment_telemetry) = search_sse_with_telemetry_dyn_with_deadline(
-                    &guide.matrices[start],
-                    &guide.matrices[end],
-                    &config,
-                    deadline,
-                );
+                let (result, segment_telemetry) = match observer {
+                    Some(inner_observer) => {
+                        search_sse_with_telemetry_dyn_with_deadline_and_observer(
+                            &guide.matrices[start],
+                            &guide.matrices[end],
+                            &config,
+                            Some(&mut **inner_observer),
+                            deadline,
+                        )
+                    }
+                    None => search_sse_with_telemetry_dyn_with_deadline_and_observer(
+                        &guide.matrices[start],
+                        &guide.matrices[end],
+                        &config,
+                        None,
+                        deadline,
+                    ),
+                };
                 merge_search_telemetry(telemetry, &segment_telemetry);
                 let can_cache_unknown = guided_config.segment_timeout_secs.is_none();
                 if !matches!(result, DynSseResult::Unknown) || can_cache_unknown {
