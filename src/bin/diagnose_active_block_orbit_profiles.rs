@@ -748,4 +748,24 @@ mod tests {
         assert!(report.weighted_transporter_count > 0);
         assert_eq!(report.min_weighted_l1_over_all_row_col_perms, Some(0));
     }
+
+    #[test]
+    fn baker_same_size_control_has_no_active_block_transporter() {
+        let samples = selected_samples();
+        let report = build_pair_report(
+            &Pair {
+                id: "baker",
+                label: "baker",
+                pair_kind: "known_local_transfer_not_one_current_family",
+                left_id: "baker_a4",
+                right_id: "baker_a5",
+            },
+            &samples,
+        )
+        .expect("Baker A4 -> A5 pair should be present");
+
+        assert_eq!(report.support_transporter_count, 0);
+        assert_eq!(report.weighted_transporter_count, 0);
+        assert_eq!(report.min_weighted_l1_over_all_row_col_perms, Some(5));
+    }
 }
