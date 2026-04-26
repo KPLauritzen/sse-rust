@@ -34,6 +34,9 @@ For each paired comparison it records:
 5. the recommended future-layer action.
 
 The helper does not touch solver behavior. It only writes JSON diagnostics.
+Witness identity now keys off the full input guide path rather than basename
+alone, and emitted `pair_id` values use stable per-sample hashed identities
+instead of lossy slugged labels.
 
 ## Sample Set
 
@@ -136,7 +139,7 @@ All top `8` retained `k = 4` stuck/counterpart pairs behave the opposite way:
 
 Representative retained pair:
 
-- pair id: `k4_stuck_rank4_diagonal_refactorization_4x4`
+- pair class: retained `rank 4` / `diagonal_refactorization_4x4`
 - coarse signal:
   rows `0/0/10/14`, cols `2/4/5/13`, same support profile on both sides
 - frontier trimmed window:

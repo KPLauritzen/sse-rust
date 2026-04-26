@@ -32,7 +32,7 @@ fn run() -> Result<(), String> {
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or("guide");
-        let guide_label = guide_artifact.display().to_string();
+        let guide_identity = guide_artifact.display().to_string();
         for (artifact_index, artifact) in load_guide_artifacts_from_path(guide_artifact)?
             .into_iter()
             .enumerate()
@@ -40,7 +40,7 @@ fn run() -> Result<(), String> {
             samples.extend(extract_endpoint_samples(
                 &artifact,
                 guide_tag,
-                &guide_label,
+                &guide_identity,
                 artifact_index,
                 cli.endpoint_radius,
             ));
@@ -217,7 +217,8 @@ struct SampleState {
 #[derive(Clone)]
 enum SampleOrigin {
     Witness {
-        guide_tag: String,
+        guide_identity: String,
+        artifact_index: usize,
         step_index: usize,
     },
     Stuck {
@@ -237,7 +238,7 @@ enum StuckRole {
 fn extract_endpoint_samples(
     artifact: &GuideArtifact,
     guide_tag: &str,
-    guide_label: &str,
+    guide_identity: &str,
     artifact_index: usize,
     endpoint_radius: usize,
 ) -> Vec<SampleState> {
@@ -258,9 +259,9 @@ fn extract_endpoint_samples(
             let artifact_id = artifact
                 .artifact_id
                 .clone()
-                .unwrap_or_else(|| fallback_artifact_id(guide_tag, guide_label, artifact_index));
+                .unwrap_or_else(|| fallback_artifact_id(guide_tag, guide_identity, artifact_index));
             Some(SampleState {
-                label: format!("{guide_tag}:{artifact_id}:step{}", idx),
+                label: format!("{guide_identity}:{artifact_id}:step{}", idx),
                 sample_kind: format!("k3_witness:{guide_tag}"),
                 dim: matrix.rows,
                 endpoint_side: match (near_start, near_end) {
@@ -271,7 +272,8 @@ fn extract_endpoint_samples(
                 },
                 matrix: matrix.clone(),
                 origin: SampleOrigin::Witness {
-                    guide_tag: guide_tag.to_string(),
+                    guide_identity: guide_identity.to_string(),
+                    artifact_index,
                     step_index: idx,
                 },
             })
@@ -406,12 +408,13 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
     let mut grouped = BTreeMap::<(usize, String, usize), Vec<&SampleState>>::new();
     for sample in samples {
         if let SampleOrigin::Witness {
-            guide_tag,
+            guide_identity,
             step_index,
+            ..
         } = &sample.origin
         {
             grouped
-                .entry((*step_index, guide_tag.clone(), sample.dim))
+                .entry((*step_index, guide_identity.clone(), sample.dim))
                 .or_default()
                 .push(sample);
         }
@@ -436,15 +439,17 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
             for right_index in (left_index + 1)..grouped_samples.len() {
                 let left = grouped_samples[left_index];
                 let right = grouped_samples[right_index];
-                if witness_guide_tag(left) == witness_guide_tag(right) {
+                if witness_guide_identity(left) == witness_guide_identity(right) {
                     continue;
                 }
-                let mut pair_labels = [slugify(&left.label), slugify(&right.label)];
-                pair_labels.sort_unstable();
                 reports.push(build_pair_report(
-                    format!(
-                        "k3_witness_step{}_{}_{}x{}_{}_{}",
-                        step_index, endpoint_side, dim, dim, pair_labels[0], pair_labels[1]
+                    pair_id_for_samples(
+                        &format!(
+                            "k3_witness_step{}_{}_{}x{}",
+                            step_index, endpoint_side, dim, dim
+                        ),
+                        left,
+                        right,
                     ),
                     "k3_witness_replay_overlap".to_string(),
                     format!("step {} / {}", step_index, endpoint_side),
@@ -488,12 +493,11 @@ fn build_stuck_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
         else {
             continue;
         };
-        let mut pair_labels = [slugify(&left.label), slugify(&right.label)];
-        pair_labels.sort_unstable();
         reports.push(build_pair_report(
-            format!(
-                "k4_stuck_hit{}_rank{}_{}_{}_{}",
-                hit_index, rank, move_family, pair_labels[0], pair_labels[1]
+            pair_id_for_samples(
+                &format!("k4_stuck_hit{}_rank{}_{}", hit_index, rank, move_family),
+                left,
+                right,
             ),
             "k4_stuck_vs_counterpart".to_string(),
             format!("rank {} / {}", rank, move_family),
@@ -588,18 +592,59 @@ fn classify_parity_signal(
     }
 }
 
-fn witness_guide_tag(sample: &SampleState) -> &str {
+fn witness_guide_identity(sample: &SampleState) -> &str {
     match &sample.origin {
-        SampleOrigin::Witness { guide_tag, .. } => guide_tag,
+        SampleOrigin::Witness { guide_identity, .. } => guide_identity,
         SampleOrigin::Stuck { .. } => "",
     }
 }
 
-fn slugify(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect()
+fn pair_id_for_samples(prefix: &str, left: &SampleState, right: &SampleState) -> String {
+    let mut member_ids = [sample_identity_token(left), sample_identity_token(right)];
+    member_ids.sort_unstable();
+    format!("{prefix}:{}:{}", member_ids[0], member_ids[1])
+}
+
+fn sample_identity_token(sample: &SampleState) -> String {
+    match &sample.origin {
+        SampleOrigin::Witness {
+            guide_identity,
+            artifact_index,
+            step_index,
+            ..
+        } => format!(
+            "w{}a{}s{}l{}",
+            stable_hash_hex(guide_identity),
+            artifact_index,
+            step_index,
+            stable_hash_hex(&sample.label)
+        ),
+        SampleOrigin::Stuck {
+            hit_index,
+            rank,
+            move_family,
+            role,
+        } => format!(
+            "h{}r{}f{}{}l{}",
+            hit_index,
+            rank,
+            stable_hash_hex(move_family),
+            match role {
+                StuckRole::Frontier => "f",
+                StuckRole::Counterpart => "c",
+            },
+            stable_hash_hex(&sample.label)
+        ),
+    }
+}
+
+fn stable_hash_hex(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[derive(Serialize)]
@@ -871,7 +916,7 @@ mod tests {
         assert_eq!(samples.len(), 1);
         assert_eq!(
             samples[0].label,
-            "guide_alpha:guide_alpha@fixtures/a.json#2:step0"
+            "fixtures/a.json:guide_alpha@fixtures/a.json#2:step0"
         );
     }
 
@@ -885,7 +930,7 @@ mod tests {
         let samples = extract_endpoint_samples(&artifact, "guide_alpha", "fixtures/a.json", 0, 3);
 
         assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].label, "guide_alpha:demo:step0");
+        assert_eq!(samples[0].label, "fixtures/a.json:demo:step0");
     }
 
     #[test]
@@ -962,7 +1007,8 @@ mod tests {
             endpoint_side: "source".to_string(),
             matrix: shared.clone(),
             origin: SampleOrigin::Witness {
-                guide_tag: "left".to_string(),
+                guide_identity: "left/path.json".to_string(),
+                artifact_index: 0,
                 step_index: 1,
             },
         };
@@ -973,7 +1019,8 @@ mod tests {
             endpoint_side: "source".to_string(),
             matrix: shared,
             origin: SampleOrigin::Witness {
-                guide_tag: "right".to_string(),
+                guide_identity: "right/path.json".to_string(),
+                artifact_index: 0,
                 step_index: 1,
             },
         };
@@ -1047,7 +1094,8 @@ mod tests {
                 endpoint_side: "source".to_string(),
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
-                    guide_tag: "guide_a".to_string(),
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_index: 0,
                     step_index: 2,
                 },
             },
@@ -1058,7 +1106,8 @@ mod tests {
                 endpoint_side: "source".to_string(),
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
-                    guide_tag: "guide_b".to_string(),
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_index: 0,
                     step_index: 2,
                 },
             },
@@ -1069,7 +1118,8 @@ mod tests {
                 endpoint_side: "source".to_string(),
                 matrix: shared,
                 origin: SampleOrigin::Witness {
-                    guide_tag: "guide_c".to_string(),
+                    guide_identity: "guide_c.json".to_string(),
+                    artifact_index: 0,
                     step_index: 2,
                 },
             },
@@ -1083,9 +1133,103 @@ mod tests {
 
         assert_eq!(reports.len(), 3);
         assert_eq!(ids.len(), 3);
-        assert!(ids.contains("k3_witness_step2_source_3x3_a_b"));
-        assert!(ids.contains("k3_witness_step2_source_3x3_a_c"));
-        assert!(ids.contains("k3_witness_step2_source_3x3_b_c"));
+    }
+
+    #[test]
+    fn witness_pair_builder_allows_distinct_guides_with_same_basename() {
+        let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
+        let samples = vec![
+            SampleState {
+                label: "dir_a/shared.json:demo:step2".to_string(),
+                sample_kind: "k3_witness:shared".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "dir_a/shared.json".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "dir_b/shared.json:demo:step2".to_string(),
+                sample_kind: "k3_witness:shared".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "dir_b/shared.json".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+        ];
+
+        let reports = build_witness_parity_pairs(&samples);
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].parity_signal, "exact_trimmed_window_match");
+    }
+
+    #[test]
+    fn witness_pair_builder_pair_ids_survive_old_slug_collision() {
+        let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
+        let samples = vec![
+            SampleState {
+                label: "dir/a.json:demo:step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "dir/a.json".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "dir_a.json:demo:step2".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "dir_a.json".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "peer.json:demo:step2".to_string(),
+                sample_kind: "k3_witness:c".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "peer.json".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+        ];
+
+        let reports = build_witness_parity_pairs(&samples);
+        let ids = reports
+            .iter()
+            .map(|report| report.pair_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(reports.len(), 3);
+        assert_eq!(ids.len(), 3);
+        let collision_reports = reports
+            .iter()
+            .filter(|report| {
+                report.left.label == "peer.json:demo:step2"
+                    || report.right.label == "peer.json:demo:step2"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(collision_reports.len(), 2);
+        assert_ne!(collision_reports[0].pair_id, collision_reports[1].pair_id);
     }
 
     #[test]
@@ -1152,8 +1296,12 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
 
         assert_eq!(reports.len(), 2);
-        assert!(ids.contains("k4_stuck_hit1_rank4_conj_rank4_conj_counterpart_rank4_conj_to"));
-        assert!(ids.contains("k4_stuck_hit0_rank4_diag_rank4_diag_counterpart_rank4_diag_to"));
+        assert!(ids
+            .iter()
+            .any(|id| id.starts_with("k4_stuck_hit1_rank4_conj:")));
+        assert!(ids
+            .iter()
+            .any(|id| id.starts_with("k4_stuck_hit0_rank4_diag:")));
     }
 
     #[test]
@@ -1220,7 +1368,11 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
 
         assert_eq!(reports.len(), 2);
-        assert!(ids.contains("k4_stuck_hit0_rank4_diag_hit0_counterpart_hit0_to"));
-        assert!(ids.contains("k4_stuck_hit1_rank4_diag_hit1_counterpart_hit1_to"));
+        assert!(ids
+            .iter()
+            .any(|id| id.starts_with("k4_stuck_hit0_rank4_diag:")));
+        assert!(ids
+            .iter()
+            .any(|id| id.starts_with("k4_stuck_hit1_rank4_diag:")));
     }
 }
