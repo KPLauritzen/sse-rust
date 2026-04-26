@@ -218,6 +218,7 @@ struct SampleState {
 enum SampleOrigin {
     Witness {
         guide_identity: String,
+        artifact_identity: String,
         artifact_index: usize,
         step_index: usize,
     },
@@ -256,6 +257,10 @@ fn extract_endpoint_samples(
             if !near_start && !near_end {
                 return None;
             }
+            let artifact_identity = artifact
+                .artifact_id
+                .clone()
+                .unwrap_or_else(|| format!("{guide_identity}#artifact{}", artifact_index));
             let artifact_id = artifact
                 .artifact_id
                 .clone()
@@ -273,6 +278,7 @@ fn extract_endpoint_samples(
                 matrix: matrix.clone(),
                 origin: SampleOrigin::Witness {
                     guide_identity: guide_identity.to_string(),
+                    artifact_identity,
                     artifact_index,
                     step_index: idx,
                 },
@@ -291,7 +297,10 @@ fn extract_stuck_samples(report: &StuckStateReport, top_stuck: usize) -> Vec<Sam
             continue;
         }
         if !hit.counterpart_matrix.as_ref().is_some_and(|counterpart| {
-            counterpart.rows == counterpart.cols && matches!(counterpart.rows, 3 | 4)
+            counterpart.rows == counterpart.cols
+                && counterpart.rows == hit.to_matrix.rows
+                && counterpart.cols == hit.to_matrix.cols
+                && matches!(counterpart.rows, 3 | 4)
         }) {
             continue;
         }
@@ -405,33 +414,41 @@ fn build_parity_pair_reports(samples: &[SampleState]) -> Vec<ParityPairReport> {
 }
 
 fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
-    let mut grouped = BTreeMap::<(usize, String, usize), Vec<&SampleState>>::new();
+    let mut unique_samples =
+        BTreeMap::<(String, String, usize, String, usize), &SampleState>::new();
     for sample in samples {
         if let SampleOrigin::Witness {
             guide_identity,
+            artifact_identity,
             step_index,
             ..
         } = &sample.origin
         {
-            grouped
-                .entry((*step_index, guide_identity.clone(), sample.dim))
-                .or_default()
-                .push(sample);
+            unique_samples
+                .entry((
+                    guide_identity.clone(),
+                    artifact_identity.clone(),
+                    *step_index,
+                    sample.endpoint_side.clone(),
+                    sample.dim,
+                ))
+                .or_insert(sample);
         }
     }
 
-    let mut by_step_side_dim = BTreeMap::<(usize, String, usize), Vec<&SampleState>>::new();
-    for ((step_index, _, dim), grouped_samples) in grouped {
-        for sample in grouped_samples {
-            by_step_side_dim
-                .entry((step_index, sample.endpoint_side.clone(), dim))
-                .or_default()
-                .push(sample);
-        }
+    let mut by_artifact_step_side_dim =
+        BTreeMap::<(String, usize, String, usize), Vec<&SampleState>>::new();
+    for ((_, artifact_identity, step_index, endpoint_side, dim), sample) in unique_samples {
+        by_artifact_step_side_dim
+            .entry((artifact_identity, step_index, endpoint_side, dim))
+            .or_default()
+            .push(sample);
     }
 
     let mut reports = Vec::new();
-    for ((step_index, endpoint_side, dim), grouped_samples) in by_step_side_dim {
+    for ((artifact_identity, step_index, endpoint_side, dim), grouped_samples) in
+        by_artifact_step_side_dim
+    {
         if grouped_samples.len() < 2 {
             continue;
         }
@@ -445,8 +462,12 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
                 reports.push(build_pair_report(
                     pair_id_for_samples(
                         &format!(
-                            "k3_witness_step{}_{}_{}x{}",
-                            step_index, endpoint_side, dim, dim
+                            "k3_witness_art{}_step{}_{}_{}x{}",
+                            stable_hash_hex(&artifact_identity),
+                            step_index,
+                            endpoint_side,
+                            dim,
+                            dim
                         ),
                         left,
                         right,
@@ -609,12 +630,14 @@ fn sample_identity_token(sample: &SampleState) -> String {
     match &sample.origin {
         SampleOrigin::Witness {
             guide_identity,
+            artifact_identity,
             artifact_index,
             step_index,
             ..
         } => format!(
-            "w{}a{}s{}l{}",
+            "w{}i{}a{}s{}l{}",
             stable_hash_hex(guide_identity),
+            stable_hash_hex(artifact_identity),
             artifact_index,
             step_index,
             stable_hash_hex(&sample.label)
@@ -998,6 +1021,26 @@ mod tests {
     }
 
     #[test]
+    fn extract_stuck_samples_skips_mixed_dimension_counterparts() {
+        let report = StuckStateReport {
+            ranked_approximate_hits: vec![ApproximateHit {
+                rank: 2,
+                move_family: "keep".to_string(),
+                to_matrix: DynMatrix::new(
+                    4,
+                    4,
+                    vec![0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0],
+                ),
+                counterpart_matrix: Some(DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])),
+            }],
+        };
+
+        let samples = extract_stuck_samples(&report, 8);
+
+        assert!(samples.is_empty());
+    }
+
+    #[test]
     fn witness_pair_report_marks_exact_trimmed_window_match() {
         let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
         let left = SampleState {
@@ -1008,6 +1051,7 @@ mod tests {
             matrix: shared.clone(),
             origin: SampleOrigin::Witness {
                 guide_identity: "left/path.json".to_string(),
+                artifact_identity: "demo".to_string(),
                 artifact_index: 0,
                 step_index: 1,
             },
@@ -1020,6 +1064,7 @@ mod tests {
             matrix: shared,
             origin: SampleOrigin::Witness {
                 guide_identity: "right/path.json".to_string(),
+                artifact_identity: "demo".to_string(),
                 artifact_index: 0,
                 step_index: 1,
             },
@@ -1095,6 +1140,7 @@ mod tests {
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
                     guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1107,6 +1153,7 @@ mod tests {
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
                     guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1119,6 +1166,7 @@ mod tests {
                 matrix: shared,
                 origin: SampleOrigin::Witness {
                     guide_identity: "guide_c.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1147,6 +1195,7 @@ mod tests {
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
                     guide_identity: "dir_a/shared.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1159,6 +1208,7 @@ mod tests {
                 matrix: shared,
                 origin: SampleOrigin::Witness {
                     guide_identity: "dir_b/shared.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1169,6 +1219,72 @@ mod tests {
 
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].parity_signal, "exact_trimmed_window_match");
+    }
+
+    #[test]
+    fn witness_pair_builder_does_not_cross_pair_different_artifacts() {
+        let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
+        let samples = vec![
+            SampleState {
+                label: "guide_a.json:alpha:step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "alpha".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_a.json:beta:step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "beta".to_string(),
+                    artifact_index: 1,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_b.json:alpha:step2".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "alpha".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_b.json:beta:step2".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "beta".to_string(),
+                    artifact_index: 1,
+                    step_index: 2,
+                },
+            },
+        ];
+
+        let reports = build_witness_parity_pairs(&samples);
+
+        assert_eq!(reports.len(), 2);
+        assert!(reports
+            .iter()
+            .all(|report| report.parity_signal == "exact_trimmed_window_match"));
     }
 
     #[test]
@@ -1183,6 +1299,7 @@ mod tests {
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
                     guide_identity: "dir/a.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1195,6 +1312,7 @@ mod tests {
                 matrix: shared.clone(),
                 origin: SampleOrigin::Witness {
                     guide_identity: "dir_a.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
@@ -1207,6 +1325,7 @@ mod tests {
                 matrix: shared,
                 origin: SampleOrigin::Witness {
                     guide_identity: "peer.json".to_string(),
+                    artifact_identity: "demo".to_string(),
                     artifact_index: 0,
                     step_index: 2,
                 },
