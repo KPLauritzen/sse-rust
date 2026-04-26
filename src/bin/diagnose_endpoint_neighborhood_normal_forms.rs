@@ -56,6 +56,7 @@ fn run() -> Result<(), String> {
         return Err("no samples found".to_string());
     }
 
+    let parity_pair_reports = build_parity_pair_reports(&samples);
     let report = EndpointNeighborhoodReport {
         endpoint_radius: cli.endpoint_radius,
         top_stuck: cli.top_stuck,
@@ -66,6 +67,8 @@ fn run() -> Result<(), String> {
             .collect(),
         stuck_report: cli.stuck_report.map(|path| path.display().to_string()),
         sample_summary: build_sample_summary(&samples),
+        parity_pair_summary: build_parity_pair_summary(&parity_pair_reports),
+        parity_pair_reports,
         candidate_results: vec![
             analyze_candidate(
                 "mass_support_signature",
@@ -201,13 +204,33 @@ struct ApproximateHit {
     counterpart_matrix: Option<DynMatrix>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone)]
 struct SampleState {
     label: String,
     sample_kind: String,
     dim: usize,
     endpoint_side: String,
     matrix: DynMatrix,
+    origin: SampleOrigin,
+}
+
+#[derive(Clone)]
+enum SampleOrigin {
+    Witness {
+        guide_tag: String,
+        step_index: usize,
+    },
+    Stuck {
+        rank: usize,
+        move_family: String,
+        role: StuckRole,
+    },
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum StuckRole {
+    Frontier,
+    Counterpart,
 }
 
 fn extract_endpoint_samples(
@@ -246,6 +269,10 @@ fn extract_endpoint_samples(
                     (false, false) => unreachable!(),
                 },
                 matrix: matrix.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_tag: guide_tag.to_string(),
+                    step_index: idx,
+                },
             })
         })
         .collect()
@@ -269,6 +296,11 @@ fn extract_stuck_samples(report: &StuckStateReport, top_stuck: usize) -> Vec<Sam
             dim: hit.to_matrix.rows,
             endpoint_side: "frontier".to_string(),
             matrix: hit.to_matrix.clone(),
+            origin: SampleOrigin::Stuck {
+                rank: hit.rank,
+                move_family: hit.move_family.clone(),
+                role: StuckRole::Frontier,
+            },
         });
         if let Some(counterpart) = &hit.counterpart_matrix {
             samples.push(SampleState {
@@ -277,6 +309,11 @@ fn extract_stuck_samples(report: &StuckStateReport, top_stuck: usize) -> Vec<Sam
                 dim: counterpart.rows,
                 endpoint_side: "opposite_frontier".to_string(),
                 matrix: counterpart.clone(),
+                origin: SampleOrigin::Stuck {
+                    rank: hit.rank,
+                    move_family: hit.move_family.clone(),
+                    role: StuckRole::Counterpart,
+                },
             });
         }
         if samples.len() / 2 >= top_stuck {
@@ -293,6 +330,8 @@ struct EndpointNeighborhoodReport {
     guide_artifacts: Vec<String>,
     stuck_report: Option<String>,
     sample_summary: SampleSummary,
+    parity_pair_summary: ParityPairSummary,
+    parity_pair_reports: Vec<ParityPairReport>,
     candidate_results: Vec<CandidateReport>,
 }
 
@@ -301,6 +340,40 @@ struct SampleSummary {
     total_samples: usize,
     by_kind: BTreeMap<String, usize>,
     by_dim: BTreeMap<usize, usize>,
+}
+
+#[derive(Serialize)]
+struct ParityPairSummary {
+    total_pairs: usize,
+    by_kind: BTreeMap<String, usize>,
+    by_signal: BTreeMap<String, usize>,
+    by_action: BTreeMap<String, usize>,
+}
+
+#[derive(Serialize)]
+struct ParityPairReport {
+    pair_id: String,
+    pair_kind: String,
+    dimension: usize,
+    endpoint_context: String,
+    coarse_signature_match: bool,
+    trimmed_active_window_match: bool,
+    parity_signal: String,
+    recommended_action: String,
+    left: ParitySampleReport,
+    right: ParitySampleReport,
+}
+
+#[derive(Serialize)]
+struct ParitySampleReport {
+    label: String,
+    sample_kind: String,
+    endpoint_side: String,
+    matrix: DynMatrix,
+    canonical_matrix: DynMatrix,
+    coarse_signature: String,
+    trimmed_active_window: DynMatrix,
+    trimmed_active_window_signature: String,
 }
 
 fn build_sample_summary(samples: &[SampleState]) -> SampleSummary {
@@ -314,6 +387,191 @@ fn build_sample_summary(samples: &[SampleState]) -> SampleSummary {
         total_samples: samples.len(),
         by_kind,
         by_dim,
+    }
+}
+
+fn build_parity_pair_reports(samples: &[SampleState]) -> Vec<ParityPairReport> {
+    let mut reports = build_witness_parity_pairs(samples);
+    reports.extend(build_stuck_parity_pairs(samples));
+    reports.sort_by(|left, right| left.pair_id.cmp(&right.pair_id));
+    reports
+}
+
+fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
+    let mut grouped = BTreeMap::<(usize, String, usize), Vec<&SampleState>>::new();
+    for sample in samples {
+        if let SampleOrigin::Witness {
+            guide_tag,
+            step_index,
+        } = &sample.origin
+        {
+            grouped
+                .entry((*step_index, guide_tag.clone(), sample.dim))
+                .or_default()
+                .push(sample);
+        }
+    }
+
+    let mut by_step_side_dim = BTreeMap::<(usize, String, usize), Vec<&SampleState>>::new();
+    for ((step_index, _, dim), grouped_samples) in grouped {
+        for sample in grouped_samples {
+            by_step_side_dim
+                .entry((step_index, sample.endpoint_side.clone(), dim))
+                .or_default()
+                .push(sample);
+        }
+    }
+
+    let mut reports = Vec::new();
+    for ((step_index, endpoint_side, dim), grouped_samples) in by_step_side_dim {
+        if grouped_samples.len() < 2 {
+            continue;
+        }
+        let left = grouped_samples[0];
+        for right in grouped_samples.iter().skip(1) {
+            if witness_guide_tag(left) == witness_guide_tag(right) {
+                continue;
+            }
+            reports.push(build_pair_report(
+                format!(
+                    "k3_witness_step{}_{}_{}x{}",
+                    step_index, endpoint_side, dim, dim
+                ),
+                "k3_witness_replay_overlap".to_string(),
+                format!("step {} / {}", step_index, endpoint_side),
+                left,
+                right,
+            ));
+        }
+    }
+    reports
+}
+
+fn build_stuck_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
+    let mut pairs = BTreeMap::<usize, (Option<&SampleState>, Option<&SampleState>)>::new();
+    for sample in samples {
+        let SampleOrigin::Stuck { rank, role, .. } = &sample.origin else {
+            continue;
+        };
+        let entry = pairs.entry(*rank).or_default();
+        match role {
+            StuckRole::Frontier => entry.0 = Some(sample),
+            StuckRole::Counterpart => entry.1 = Some(sample),
+        }
+    }
+
+    let mut reports = Vec::new();
+    for (rank, (left, right)) in pairs {
+        let (Some(left), Some(right)) = (left, right) else {
+            continue;
+        };
+        let move_family = stuck_move_family(left);
+        reports.push(build_pair_report(
+            format!("k4_stuck_rank{}_{}", rank, move_family),
+            "k4_stuck_vs_counterpart".to_string(),
+            format!("rank {} / {}", rank, move_family),
+            left,
+            right,
+        ));
+    }
+    reports
+}
+
+fn build_pair_report(
+    pair_id: String,
+    pair_kind: String,
+    endpoint_context: String,
+    left: &SampleState,
+    right: &SampleState,
+) -> ParityPairReport {
+    let left_report = build_parity_sample_report(left);
+    let right_report = build_parity_sample_report(right);
+    let coarse_signature_match = left_report.coarse_signature == right_report.coarse_signature;
+    let trimmed_active_window_match =
+        left_report.trimmed_active_window_signature == right_report.trimmed_active_window_signature;
+    let (parity_signal, recommended_action) =
+        classify_parity_signal(coarse_signature_match, trimmed_active_window_match);
+
+    ParityPairReport {
+        pair_id,
+        pair_kind,
+        dimension: left.dim,
+        endpoint_context,
+        coarse_signature_match,
+        trimmed_active_window_match,
+        parity_signal: parity_signal.to_string(),
+        recommended_action: recommended_action.to_string(),
+        left: left_report,
+        right: right_report,
+    }
+}
+
+fn build_parity_sample_report(sample: &SampleState) -> ParitySampleReport {
+    let canonical_matrix = sample.matrix.canonical_perm();
+    let trimmed_active_window = trim_zero_rows_and_cols(&canonical_matrix);
+    ParitySampleReport {
+        label: sample.label.clone(),
+        sample_kind: sample.sample_kind.clone(),
+        endpoint_side: sample.endpoint_side.clone(),
+        matrix: sample.matrix.clone(),
+        canonical_matrix,
+        coarse_signature: mass_support_signature(&sample.matrix),
+        trimmed_active_window_signature: format!(
+            "{}x{}|{}",
+            trimmed_active_window.rows,
+            trimmed_active_window.cols,
+            join_u32(&trimmed_active_window.data)
+        ),
+        trimmed_active_window,
+    }
+}
+
+fn build_parity_pair_summary(reports: &[ParityPairReport]) -> ParityPairSummary {
+    let mut by_kind = BTreeMap::new();
+    let mut by_signal = BTreeMap::new();
+    let mut by_action = BTreeMap::new();
+    for report in reports {
+        *by_kind.entry(report.pair_kind.clone()).or_insert(0) += 1;
+        *by_signal.entry(report.parity_signal.clone()).or_insert(0) += 1;
+        *by_action
+            .entry(report.recommended_action.clone())
+            .or_insert(0) += 1;
+    }
+
+    ParityPairSummary {
+        total_pairs: reports.len(),
+        by_kind,
+        by_signal,
+        by_action,
+    }
+}
+
+fn classify_parity_signal(
+    coarse_signature_match: bool,
+    trimmed_active_window_match: bool,
+) -> (&'static str, &'static str) {
+    match (coarse_signature_match, trimmed_active_window_match) {
+        (true, true) => ("exact_trimmed_window_match", "reuse_endpoint_local_parity"),
+        (true, false) => (
+            "coarse_only_layout_mismatch",
+            "rank_or_propose_inside_coarse_bucket",
+        ),
+        (false, true) => ("trimmed_match_without_coarse_match", "diagnose_only"),
+        (false, false) => ("no_endpoint_local_overlap", "ignore"),
+    }
+}
+
+fn witness_guide_tag(sample: &SampleState) -> &str {
+    match &sample.origin {
+        SampleOrigin::Witness { guide_tag, .. } => guide_tag,
+        SampleOrigin::Stuck { .. } => "",
+    }
+}
+
+fn stuck_move_family(sample: &SampleState) -> &str {
+    match &sample.origin {
+        SampleOrigin::Stuck { move_family, .. } => move_family,
+        SampleOrigin::Witness { .. } => "",
     }
 }
 
@@ -465,17 +723,21 @@ fn trimmed_entry_bag_signature(matrix: &DynMatrix) -> String {
 
 fn trimmed_active_window(matrix: &DynMatrix) -> DynMatrix {
     let canonical = matrix.canonical_perm();
-    let active_rows = (0..canonical.rows)
-        .filter(|&row| (0..canonical.cols).any(|col| canonical.get(row, col) != 0))
+    trim_zero_rows_and_cols(&canonical)
+}
+
+fn trim_zero_rows_and_cols(matrix: &DynMatrix) -> DynMatrix {
+    let active_rows = (0..matrix.rows)
+        .filter(|&row| (0..matrix.cols).any(|col| matrix.get(row, col) != 0))
         .collect::<Vec<_>>();
-    let active_cols = (0..canonical.cols)
-        .filter(|&col| (0..canonical.rows).any(|row| canonical.get(row, col) != 0))
+    let active_cols = (0..matrix.cols)
+        .filter(|&col| (0..matrix.rows).any(|row| matrix.get(row, col) != 0))
         .collect::<Vec<_>>();
 
     let mut data = Vec::with_capacity(active_rows.len() * active_cols.len());
     for &row in &active_rows {
         for &col in &active_cols {
-            data.push(canonical.get(row, col));
+            data.push(matrix.get(row, col));
         }
     }
 
@@ -661,5 +923,87 @@ mod tests {
         let samples = extract_stuck_samples(&report, 0);
 
         assert!(samples.is_empty());
+    }
+
+    #[test]
+    fn witness_pair_report_marks_exact_trimmed_window_match() {
+        let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
+        let left = SampleState {
+            label: "left".to_string(),
+            sample_kind: "k3_witness:left".to_string(),
+            dim: 3,
+            endpoint_side: "source".to_string(),
+            matrix: shared.clone(),
+            origin: SampleOrigin::Witness {
+                guide_tag: "left".to_string(),
+                step_index: 1,
+            },
+        };
+        let right = SampleState {
+            label: "right".to_string(),
+            sample_kind: "k3_witness:right".to_string(),
+            dim: 3,
+            endpoint_side: "source".to_string(),
+            matrix: shared,
+            origin: SampleOrigin::Witness {
+                guide_tag: "right".to_string(),
+                step_index: 1,
+            },
+        };
+
+        let report = build_pair_report(
+            "pair".to_string(),
+            "k3_witness_replay_overlap".to_string(),
+            "step 1 / source".to_string(),
+            &left,
+            &right,
+        );
+
+        assert_eq!(report.parity_signal, "exact_trimmed_window_match");
+        assert_eq!(report.recommended_action, "reuse_endpoint_local_parity");
+    }
+
+    #[test]
+    fn stuck_pair_report_marks_coarse_only_layout_mismatch() {
+        let left = SampleState {
+            label: "rank4_to".to_string(),
+            sample_kind: "k4_stuck:diag".to_string(),
+            dim: 4,
+            endpoint_side: "frontier".to_string(),
+            matrix: rank4_to_matrix(),
+            origin: SampleOrigin::Stuck {
+                rank: 4,
+                move_family: "diag".to_string(),
+                role: StuckRole::Frontier,
+            },
+        };
+        let right = SampleState {
+            label: "rank4_counterpart".to_string(),
+            sample_kind: "k4_counterpart:diag".to_string(),
+            dim: 4,
+            endpoint_side: "opposite_frontier".to_string(),
+            matrix: rank4_counterpart_matrix(),
+            origin: SampleOrigin::Stuck {
+                rank: 4,
+                move_family: "diag".to_string(),
+                role: StuckRole::Counterpart,
+            },
+        };
+
+        let report = build_pair_report(
+            "pair".to_string(),
+            "k4_stuck_vs_counterpart".to_string(),
+            "rank 4 / diag".to_string(),
+            &left,
+            &right,
+        );
+
+        assert!(report.coarse_signature_match);
+        assert!(!report.trimmed_active_window_match);
+        assert_eq!(report.parity_signal, "coarse_only_layout_mismatch");
+        assert_eq!(
+            report.recommended_action,
+            "rank_or_propose_inside_coarse_bucket"
+        );
     }
 }
