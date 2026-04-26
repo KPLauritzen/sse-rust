@@ -180,7 +180,8 @@ where
 
 #[derive(Deserialize)]
 struct GuideArtifact {
-    artifact_id: String,
+    #[serde(default)]
+    artifact_id: Option<String>,
     path: GuidePath,
 }
 
@@ -231,8 +232,9 @@ fn extract_endpoint_samples(
             if !near_start && !near_end {
                 return None;
             }
+            let artifact_id = artifact.artifact_id.as_deref().unwrap_or("unknown");
             Some(SampleState {
-                label: format!("{guide_tag}:{}:step{}", artifact.artifact_id, idx),
+                label: format!("{guide_tag}:{artifact_id}:step{}", idx),
                 sample_kind: format!("k3_witness:{guide_tag}"),
                 dim: matrix.rows,
                 endpoint_side: match (near_start, near_end) {
@@ -528,5 +530,40 @@ mod tests {
             trimmed_entry_bag_signature(&rank4_to_matrix()),
             trimmed_entry_bag_signature(&rank4_counterpart_matrix())
         );
+    }
+
+    #[test]
+    fn guide_artifact_deserializes_with_present_artifact_id() {
+        let artifact = serde_json::from_str::<GuideArtifact>(
+            r#"{
+                "artifact_id": "demo",
+                "path": {
+                    "matrices": [
+                        {"rows": 3, "cols": 3, "data": [0,1,0,1,0,1,0,1,0]}
+                    ]
+                }
+            }"#,
+        )
+        .expect("artifact with id should deserialize");
+
+        assert_eq!(artifact.artifact_id.as_deref(), Some("demo"));
+        assert_eq!(artifact.path.matrices.len(), 1);
+    }
+
+    #[test]
+    fn guide_artifact_deserializes_with_missing_artifact_id() {
+        let artifact = serde_json::from_str::<GuideArtifact>(
+            r#"{
+                "path": {
+                    "matrices": [
+                        {"rows": 4, "cols": 4, "data": [0,1,0,0,1,0,1,0,0,1,0,1,0,0,1,0]}
+                    ]
+                }
+            }"#,
+        )
+        .expect("artifact without id should deserialize");
+
+        assert_eq!(artifact.artifact_id, None);
+        assert_eq!(artifact.path.matrices.len(), 1);
     }
 }
