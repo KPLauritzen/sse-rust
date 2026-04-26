@@ -23,9 +23,7 @@ use crate::invariants::{
     check_square_power_trace_invariants,
 };
 use crate::matrix::{DynMatrix, SqMatrix};
-use crate::search_observer::{
-    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver, SearchRootRecord,
-};
+use crate::search_observer::{SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver};
 use crate::types::{
     DynSsePath, DynSseResult, EndpointExactMeetSurface, EndpointExactMeetWitness, EsseStep,
     FrontierMode, MoveFamilyPolicy, SameFuturePastDiversityLayerSample, SearchConfig,
@@ -53,7 +51,7 @@ use self::beam::{
     BeamFrontier, BeamScoringMode, StratifiedBeamRefillFrontier, StratifiedBeamRefillReason,
 };
 use self::dispatch::{
-    emit_layer, emit_roots, emit_started, endpoint_search_request, finish_search_2x2,
+    emit_layer, emit_started_and_roots, endpoint_search_request, finish_search_2x2,
     finish_search_dyn,
 };
 use self::frontier::{
@@ -813,24 +811,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     let b_canon = b.canonical_perm();
 
     if a == b {
-        emit_started(&mut observer, &request, &a_canon, &b_canon);
-        emit_roots(
-            &mut observer,
-            &[
-                SearchRootRecord {
-                    direction: SearchDirection::Forward,
-                    canonical: a_canon.clone(),
-                    orig: a.clone(),
-                    depth: 0,
-                },
-                SearchRootRecord {
-                    direction: SearchDirection::Backward,
-                    canonical: b_canon.clone(),
-                    orig: b.clone(),
-                    depth: 0,
-                },
-            ],
-        );
+        emit_started_and_roots(&mut observer, &request, &a_canon, a, &b_canon, b);
         return finish_search_dyn(
             observer,
             &request,
@@ -847,24 +828,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
         if a != b {
             telemetry.permutation_shortcut = true;
         }
-        emit_started(&mut observer, &request, &a_canon, &b_canon);
-        emit_roots(
-            &mut observer,
-            &[
-                SearchRootRecord {
-                    direction: SearchDirection::Forward,
-                    canonical: a_canon.clone(),
-                    orig: a.clone(),
-                    depth: 0,
-                },
-                SearchRootRecord {
-                    direction: SearchDirection::Backward,
-                    canonical: b_canon.clone(),
-                    orig: b.clone(),
-                    depth: 0,
-                },
-            ],
-        );
+        emit_started_and_roots(&mut observer, &request, &a_canon, a, &b_canon, b);
         return finish_search_dyn(
             observer,
             &request,
@@ -981,24 +945,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
     let mut retained_exact_meets: Option<ExactMeetRetention<DynMatrix>> =
         ExactMeetRetention::from_config(config);
 
-    emit_started(&mut observer, &request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a.clone(),
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b.clone(),
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, &request, &a_canon, a, &b_canon, b);
 
     if config.move_family_policy == MoveFamilyPolicy::GraphOnly {
         return search_graph_only_dyn_with_telemetry(a, b, config, observer, &request, deadline);
@@ -1510,24 +1457,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
         return finish_search_2x2(observer, &request, result, telemetry);
     }
 
-    emit_started(&mut observer, &request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a_dyn.clone(),
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b_dyn.clone(),
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, &request, &a_canon, &a_dyn, &b_canon, &b_dyn);
 
     // Quick check: are they already equal?
     if a == b {
@@ -2679,24 +2609,7 @@ fn search_beam_2x2_with_telemetry_and_observer(
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
-    emit_started(&mut observer, request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a_dyn,
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b_dyn,
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, request, &a_canon, &a_dyn, &b_canon, &b_dyn);
 
     let mut layer_index = 0usize;
     loop {
@@ -3111,24 +3024,7 @@ fn search_beam_bfs_handoff_2x2_with_telemetry_and_observer(
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
-    emit_started(&mut observer, request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a_dyn,
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b_dyn,
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, request, &a_canon, &a_dyn, &b_canon, &b_dyn);
 
     let mut beam_phase = true;
     let mut best_exact_meet: Option<BeamBfsHandoffExactMeet> = None;
@@ -3566,24 +3462,7 @@ fn search_beam_dyn_with_telemetry(
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
-    emit_started(&mut observer, request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a.clone(),
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b.clone(),
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, request, &a_canon, a, &b_canon, b);
 
     let mut layer_index = 0usize;
     loop {
@@ -3997,24 +3876,7 @@ fn search_stratified_beam_refill_dyn_with_telemetry(
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
-    emit_started(&mut observer, request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a.clone(),
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b.clone(),
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, request, &a_canon, a, &b_canon, b);
 
     let mut layer_index = 0usize;
     loop {
@@ -4444,24 +4306,7 @@ fn search_beam_bfs_handoff_dyn_with_telemetry(
     telemetry.max_frontier_size = 1;
     telemetry.total_visited_nodes = visited_union_size(&fwd_parent, &bwd_parent);
 
-    emit_started(&mut observer, request, &a_canon, &b_canon);
-    emit_roots(
-        &mut observer,
-        &[
-            SearchRootRecord {
-                direction: SearchDirection::Forward,
-                canonical: a_canon.clone(),
-                orig: a.clone(),
-                depth: 0,
-            },
-            SearchRootRecord {
-                direction: SearchDirection::Backward,
-                canonical: b_canon.clone(),
-                orig: b.clone(),
-                depth: 0,
-            },
-        ],
-    );
+    emit_started_and_roots(&mut observer, request, &a_canon, a, &b_canon, b);
 
     let mut beam_phase = true;
     let mut best_exact_meet: Option<BeamBfsHandoffExactMeet> = None;

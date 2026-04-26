@@ -4,8 +4,8 @@ use crate::search_observer::{
     SearchStartRecord,
 };
 use crate::types::{
-    DynSseResult, FrontierMode, GuidedRefinementConfig, SearchConfig, SearchRequest,
-    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
+    DynSseResult, FrontierMode, GuidedRefinementConfig, SearchConfig, SearchDirection,
+    SearchRequest, SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig, SseResult,
 };
 
 use super::stages::{search_guided_refinement_with_observer, search_shortcut_search_with_observer};
@@ -85,6 +85,34 @@ pub(super) fn emit_roots(
     }
 }
 
+pub(super) fn emit_started_and_roots(
+    observer: &mut Option<&mut dyn SearchObserver>,
+    request: &SearchRequest,
+    source_canonical: &DynMatrix,
+    source_orig: &DynMatrix,
+    target_canonical: &DynMatrix,
+    target_orig: &DynMatrix,
+) {
+    emit_started(observer, request, source_canonical, target_canonical);
+    emit_roots(
+        observer,
+        &[
+            SearchRootRecord {
+                direction: SearchDirection::Forward,
+                canonical: source_canonical.clone(),
+                orig: source_orig.clone(),
+                depth: 0,
+            },
+            SearchRootRecord {
+                direction: SearchDirection::Backward,
+                canonical: target_canonical.clone(),
+                orig: target_orig.clone(),
+                depth: 0,
+            },
+        ],
+    );
+}
+
 pub(super) fn emit_layer(
     observer: &mut Option<&mut dyn SearchObserver>,
     records: &[SearchEdgeRecord],
@@ -157,5 +185,63 @@ fn execute_endpoint_search_request(
             observer,
         );
         (result.into(), telemetry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct EventProbe {
+        events: Vec<SearchEvent>,
+    }
+
+    impl SearchObserver for EventProbe {
+        fn on_event(&mut self, event: &SearchEvent) {
+            self.events.push(event.clone());
+        }
+    }
+
+    #[test]
+    fn emit_started_and_roots_emits_endpoint_start_bundle() {
+        let source = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+        let target = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let request = endpoint_search_request(&source, &target, &SearchConfig::default());
+        let source_canonical = source.canonical_perm();
+        let target_canonical = target.canonical_perm();
+        let mut probe = EventProbe::default();
+        let mut observer: Option<&mut dyn SearchObserver> = Some(&mut probe);
+
+        emit_started_and_roots(
+            &mut observer,
+            &request,
+            &source_canonical,
+            &source,
+            &target_canonical,
+            &target,
+        );
+
+        assert_eq!(probe.events.len(), 2);
+        let SearchEvent::Started(started) = &probe.events[0] else {
+            panic!("expected first event to be Started");
+        };
+        assert_eq!(started.request.source, request.source);
+        assert_eq!(started.request.target, request.target);
+        assert_eq!(started.request.config, request.config);
+        assert_eq!(started.request.stage, request.stage);
+        assert_eq!(started.source_canonical, source_canonical);
+        assert_eq!(started.target_canonical, target_canonical);
+
+        let SearchEvent::Roots(roots) = &probe.events[1] else {
+            panic!("expected second event to be Roots");
+        };
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].direction, SearchDirection::Forward);
+        assert_eq!(roots[0].canonical, source_canonical);
+        assert_eq!(roots[0].orig, source);
+        assert_eq!(roots[1].direction, SearchDirection::Backward);
+        assert_eq!(roots[1].canonical, target_canonical);
+        assert_eq!(roots[1].orig, target);
     }
 }
