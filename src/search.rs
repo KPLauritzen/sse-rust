@@ -491,7 +491,50 @@ fn enumerate_graph_only_policy_successors_with_step_mode(
 /// SSE steps (A = UV, B = VU). Searching from both ends reduces complexity
 /// from O(branching^L) to O(2 * branching^(L/2)).
 pub fn search_sse_2x2(a: &SqMatrix<2>, b: &SqMatrix<2>, config: &SearchConfig) -> SseResult<2> {
+    if let Some(result) = search_sse_2x2_result_only_shortcut(a, b, config) {
+        return result;
+    }
     search_sse_2x2_with_telemetry(a, b, config).0
+}
+
+fn search_sse_2x2_result_only_shortcut(
+    a: &SqMatrix<2>,
+    b: &SqMatrix<2>,
+    config: &SearchConfig,
+) -> Option<SseResult<2>> {
+    if invalid_endpoint_multi_meet_signal(config).is_some() {
+        return Some(SseResult::Unknown);
+    }
+
+    if config.frontier_mode == FrontierMode::StratifiedBeamRefill {
+        if config.max_intermediate_dim > 2 {
+            return Some(SseResult::Unknown);
+        }
+        return None;
+    }
+
+    if a == b {
+        return Some(SseResult::Equivalent(SsePath {
+            matrices: vec![a.clone()],
+            steps: vec![],
+        }));
+    }
+
+    if let Some(reason) = check_invariants_2x2(a, b) {
+        return Some(SseResult::NotEquivalent(reason));
+    }
+
+    if a.canonical() == b.canonical() {
+        let p = DynMatrix::new(2, 2, vec![0, 1, 1, 0]);
+        let ap = DynMatrix::from_sq(a).mul(&p);
+        let step = EsseStep { u: ap, v: p };
+        return Some(SseResult::Equivalent(SsePath {
+            matrices: vec![a.clone(), b.clone()],
+            steps: vec![step],
+        }));
+    }
+
+    None
 }
 
 /// Search for a strong shift equivalence path between arbitrary square endpoints.
