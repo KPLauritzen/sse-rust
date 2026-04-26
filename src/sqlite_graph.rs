@@ -337,13 +337,24 @@ impl SqliteGraphRecorder {
     }
 
     fn finish_run(&mut self, finished: &SearchFinishedRecord) -> Result<(), String> {
-        let Some(scope) = self.run_scope_stack.last() else {
+        let Some(top_scope) = self.run_scope_stack.last() else {
             return Ok(());
         };
-        if !requests_match(&scope.request, &finished.request) {
+        if !requests_match(&top_scope.request, &finished.request) {
+            if self
+                .run_scope_stack
+                .iter()
+                .any(|scope| requests_match(&scope.request, &finished.request))
+            {
+                return Err(
+                    "received out-of-order sqlite finished event for a non-top active search run"
+                        .to_string(),
+                );
+            }
+            // Controlled recovery for nested searches that returned before emitting Started.
             return Ok(());
         }
-        let run_id = scope.run_id;
+        let run_id = top_scope.run_id;
         let (outcome, reason, path_steps) = match &finished.result {
             SearchRunResult::Equivalent(path) => {
                 ("equivalent", None, Some(path.steps.len() as i64))
@@ -677,6 +688,9 @@ fn requests_match(left: &crate::types::SearchRequest, right: &crate::types::Sear
         && left.source == right.source
         && left.target == right.target
         && left.config == right.config
+        && left.guide_artifacts == right.guide_artifacts
+        && left.guided_refinement == right.guided_refinement
+        && left.shortcut_search == right.shortcut_search
 }
 
 #[cfg(test)]
@@ -913,6 +927,61 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, "equivalent_by_concrete_shift");
         assert_eq!(reason.as_deref(), Some("compatible concrete-shift witness"));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sqlite_graph_ignores_unmatched_nested_finished_without_corrupting_parent_run() {
+        let path = temp_db_path();
+        {
+            let mut recorder = SqliteGraphRecorder::new(&path).unwrap();
+            let matrix = DynMatrix::new(2, 2, vec![1, 0, 0, 1]);
+            let parent_request = crate::types::SearchRequest {
+                source: matrix.clone(),
+                target: matrix.clone(),
+                config: SearchConfig::default(),
+                stage: SearchStage::GuidedRefinement,
+                guide_artifacts: Vec::new(),
+                guided_refinement: crate::types::GuidedRefinementConfig::default(),
+                shortcut_search: crate::types::ShortcutSearchConfig::default(),
+            };
+            let unmatched_child_request = crate::types::SearchRequest {
+                stage: SearchStage::EndpointSearch,
+                ..parent_request.clone()
+            };
+            recorder.on_event(&SearchEvent::Started(SearchStartRecord {
+                request: parent_request.clone(),
+                source_canonical: matrix.clone(),
+                target_canonical: matrix.clone(),
+            }));
+            recorder.on_event(&SearchEvent::Finished(SearchFinishedRecord {
+                request: unmatched_child_request,
+                result: SearchRunResult::Unknown,
+                telemetry: crate::types::SearchTelemetry::default(),
+            }));
+            recorder.on_event(&SearchEvent::Finished(SearchFinishedRecord {
+                request: parent_request,
+                result: SearchRunResult::Unknown,
+                telemetry: crate::types::SearchTelemetry::default(),
+            }));
+            assert_eq!(recorder.error(), None);
+        }
+
+        let conn = Connection::open(&path).unwrap();
+        let runs: Vec<(String, Option<String>, Option<i64>)> = {
+            let mut stmt = conn
+                .prepare("SELECT stage, outcome, finished_unix_ms FROM search_runs ORDER BY id")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .map(|row| row.unwrap())
+                .collect()
+        };
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, "guided_refinement");
+        assert_eq!(runs[0].1.as_deref(), Some("unknown"));
+        assert!(runs[0].2.is_some());
 
         let _ = fs::remove_file(&path);
     }

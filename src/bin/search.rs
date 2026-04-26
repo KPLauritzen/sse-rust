@@ -933,15 +933,33 @@ impl ApproximateHitParityObserver {
         child_search_scope_ids: Vec<usize>,
         child_approximate_other_side_hits: usize,
     ) -> ApproximateHitParitySearchScope {
-        let exclusive_approximate_other_side_hits = scope
-            .inclusive_approximate_other_side_hits
-            .map(|inclusive| inclusive.saturating_sub(child_approximate_other_side_hits));
-        let missing_approximate_hits = exclusive_approximate_other_side_hits
-            .map(|exclusive| exclusive.saturating_sub(scope.annotated_hit_records));
-        let excess_annotated_hits = exclusive_approximate_other_side_hits
-            .map(|exclusive| scope.annotated_hit_records.saturating_sub(exclusive));
-        let report_is_complete = exclusive_approximate_other_side_hits
-            .map(|exclusive| scope.annotated_hit_records == exclusive);
+        let (
+            exclusive_approximate_other_side_hits,
+            missing_approximate_hits,
+            excess_annotated_hits,
+            report_is_complete,
+            accounting_inconsistency,
+        ) = match scope.inclusive_approximate_other_side_hits {
+            Some(inclusive) => match inclusive.checked_sub(child_approximate_other_side_hits) {
+                Some(exclusive) => (
+                    Some(exclusive),
+                    Some(exclusive.saturating_sub(scope.annotated_hit_records)),
+                    Some(scope.annotated_hit_records.saturating_sub(exclusive)),
+                    Some(scope.annotated_hit_records == exclusive),
+                    None,
+                ),
+                None => (
+                    None,
+                    None,
+                    None,
+                    Some(false),
+                    Some(
+                        "child_approximate_other_side_hits exceeded inclusive_approximate_other_side_hits",
+                    ),
+                ),
+            },
+            None => (None, None, None, None, None),
+        };
 
         ApproximateHitParitySearchScope {
             search_scope_id: scope.search_scope_id,
@@ -962,6 +980,7 @@ impl ApproximateHitParityObserver {
             missing_approximate_hits,
             excess_annotated_hits,
             report_is_complete,
+            accounting_inconsistency,
         }
     }
 
@@ -1211,6 +1230,8 @@ struct ApproximateHitParitySearchScope {
     excess_annotated_hits: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     report_is_complete: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accounting_inconsistency: Option<&'static str>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -1687,6 +1708,9 @@ fn requests_match(left: &SearchRequest, right: &SearchRequest) -> bool {
         && left.source == right.source
         && left.target == right.target
         && left.config == right.config
+        && left.guide_artifacts == right.guide_artifacts
+        && left.guided_refinement == right.guided_refinement
+        && left.shortcut_search == right.shortcut_search
 }
 
 fn status_label(status: SearchEdgeStatus) -> &'static str {
@@ -2807,6 +2831,74 @@ mod tests {
         assert_eq!(report.search_scopes[0].report_is_complete, Some(true));
         assert!(report.annotated_hits.is_empty());
         assert!(report.summary.report_is_complete);
+    }
+
+    #[test]
+    fn approximate_hit_parity_scope_flags_child_overflow_instead_of_clamping_complete() {
+        let mut request = identity_request();
+        request.stage = SearchStage::GuidedRefinement;
+        let parent_result = SearchRunResult::Unknown;
+        let parent_telemetry = SearchTelemetry::default();
+        let mut segment_request = request.clone();
+        segment_request.stage = SearchStage::EndpointSearch;
+        let segment_telemetry = SearchTelemetry {
+            approximate_other_side_hits: 1,
+            ..Default::default()
+        };
+        let root = SearchRootRecord {
+            direction: sse_core::types::SearchDirection::Backward,
+            canonical: rank4_counterpart_matrix().canonical_perm(),
+            orig: rank4_counterpart_matrix(),
+            depth: 3,
+        };
+        let edge = SearchEdgeRecord {
+            layer_index: 2,
+            direction: sse_core::types::SearchDirection::Forward,
+            move_family: "diagonal_refactorization_4x4",
+            from_canonical: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            from_orig: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            to_canonical: rank4_to_matrix().canonical_perm(),
+            to_orig: rank4_to_matrix(),
+            from_depth: 2,
+            to_depth: 3,
+            step: EsseStep {
+                u: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+                v: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            },
+            status: SearchEdgeStatus::Discovered,
+            approximate_other_side_hit: true,
+            enqueued: true,
+        };
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&search_started_event(&request));
+        observer.on_event(&search_started_event(&segment_request));
+        observer.on_event(&SearchEvent::Roots(vec![root]));
+        observer.on_event(&SearchEvent::Layer(vec![edge]));
+        observer.on_event(&search_finished_event(
+            &segment_request,
+            &SearchRunResult::Unknown,
+            &segment_telemetry,
+        ));
+        observer.on_event(&search_finished_event(
+            &request,
+            &parent_result,
+            &parent_telemetry,
+        ));
+
+        let report = observer.build_report(&request, &parent_result, &parent_telemetry);
+        assert_eq!(report.search_scopes[0].stage, SearchStage::GuidedRefinement);
+        assert_eq!(report.search_scopes[0].report_is_complete, Some(false));
+        assert_eq!(
+            report.search_scopes[0].exclusive_approximate_other_side_hits,
+            None
+        );
+        assert_eq!(
+            report.search_scopes[0].accounting_inconsistency,
+            Some(
+                "child_approximate_other_side_hits exceeded inclusive_approximate_other_side_hits",
+            )
+        );
     }
 
     #[test]
