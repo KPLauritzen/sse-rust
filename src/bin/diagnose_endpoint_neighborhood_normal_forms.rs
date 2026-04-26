@@ -253,6 +253,9 @@ fn extract_endpoint_samples(
 }
 
 fn extract_stuck_samples(report: &StuckStateReport, top_stuck: usize) -> Vec<SampleState> {
+    if top_stuck == 0 {
+        return Vec::new();
+    }
     let mut samples = Vec::new();
     for hit in report.ranked_approximate_hits.iter().filter(|hit| {
         hit.to_matrix.rows == hit.to_matrix.cols
@@ -632,5 +635,29 @@ mod tests {
         assert_eq!(samples.len(), 4);
         assert_eq!(samples[0].label, "k4_stuck_rank2_to");
         assert_eq!(samples[2].label, "k4_stuck_rank3_to");
+    }
+
+    #[test]
+    fn extract_stuck_samples_respects_zero_top_stuck() {
+        let report = StuckStateReport {
+            ranked_approximate_hits: vec![ApproximateHit {
+                rank: 2,
+                move_family: "keep".to_string(),
+                to_matrix: DynMatrix::new(
+                    4,
+                    4,
+                    vec![0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0],
+                ),
+                counterpart_matrix: Some(DynMatrix::new(
+                    4,
+                    4,
+                    vec![0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0],
+                )),
+            }],
+        };
+
+        let samples = extract_stuck_samples(&report, 0);
+
+        assert!(samples.is_empty());
     }
 }
