@@ -232,7 +232,10 @@ fn extract_endpoint_samples(
             if !near_start && !near_end {
                 return None;
             }
-            let artifact_id = artifact.artifact_id.as_deref().unwrap_or("unknown");
+            let artifact_id = artifact
+                .artifact_id
+                .as_deref()
+                .unwrap_or_else(|| fallback_artifact_id(guide_tag));
             Some(SampleState {
                 label: format!("{guide_tag}:{artifact_id}:step{}", idx),
                 sample_kind: format!("k3_witness:{guide_tag}"),
@@ -251,26 +254,31 @@ fn extract_endpoint_samples(
 
 fn extract_stuck_samples(report: &StuckStateReport, top_stuck: usize) -> Vec<SampleState> {
     let mut samples = Vec::new();
-    for hit in report.ranked_approximate_hits.iter().take(top_stuck) {
-        if hit.to_matrix.rows == hit.to_matrix.cols && matches!(hit.to_matrix.rows, 3 | 4) {
+    for hit in report.ranked_approximate_hits.iter().filter(|hit| {
+        hit.to_matrix.rows == hit.to_matrix.cols
+            && matches!(hit.to_matrix.rows, 3 | 4)
+            && hit.counterpart_matrix.as_ref().is_some_and(|counterpart| {
+                counterpart.rows == counterpart.cols && matches!(counterpart.rows, 3 | 4)
+            })
+    }) {
+        samples.push(SampleState {
+            label: format!("k4_stuck_rank{}_to", hit.rank),
+            sample_kind: format!("k4_stuck:{}", hit.move_family),
+            dim: hit.to_matrix.rows,
+            endpoint_side: "frontier".to_string(),
+            matrix: hit.to_matrix.clone(),
+        });
+        if let Some(counterpart) = &hit.counterpart_matrix {
             samples.push(SampleState {
-                label: format!("k4_stuck_rank{}_to", hit.rank),
-                sample_kind: format!("k4_stuck:{}", hit.move_family),
-                dim: hit.to_matrix.rows,
-                endpoint_side: "frontier".to_string(),
-                matrix: hit.to_matrix.clone(),
+                label: format!("k4_stuck_rank{}_counterpart", hit.rank),
+                sample_kind: format!("k4_counterpart:{}", hit.move_family),
+                dim: counterpart.rows,
+                endpoint_side: "opposite_frontier".to_string(),
+                matrix: counterpart.clone(),
             });
         }
-        if let Some(counterpart) = &hit.counterpart_matrix {
-            if counterpart.rows == counterpart.cols && matches!(counterpart.rows, 3 | 4) {
-                samples.push(SampleState {
-                    label: format!("k4_stuck_rank{}_counterpart", hit.rank),
-                    sample_kind: format!("k4_counterpart:{}", hit.move_family),
-                    dim: counterpart.rows,
-                    endpoint_side: "opposite_frontier".to_string(),
-                    matrix: counterpart.clone(),
-                });
-            }
+        if samples.len() / 2 >= top_stuck {
+            break;
         }
     }
     samples
@@ -472,6 +480,10 @@ fn trimmed_active_window(matrix: &DynMatrix) -> DynMatrix {
     DynMatrix::new(active_rows.len(), active_cols.len(), data)
 }
 
+fn fallback_artifact_id(guide_tag: &str) -> &str {
+    guide_tag
+}
+
 fn join_u8(values: &[u8]) -> String {
     values
         .iter()
@@ -565,5 +577,60 @@ mod tests {
 
         assert_eq!(artifact.artifact_id, None);
         assert_eq!(artifact.path.matrices.len(), 1);
+    }
+
+    #[test]
+    fn extract_endpoint_samples_uses_guide_specific_fallback_artifact_id() {
+        let artifact = GuideArtifact {
+            artifact_id: None,
+            path: GuidePath {
+                matrices: vec![DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])],
+            },
+        };
+
+        let samples = extract_endpoint_samples(&artifact, "guide_alpha", 3);
+
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].label, "guide_alpha:guide_alpha:step0");
+    }
+
+    #[test]
+    fn extract_stuck_samples_counts_eligible_hits_before_stopping() {
+        let report = StuckStateReport {
+            ranked_approximate_hits: vec![
+                ApproximateHit {
+                    rank: 1,
+                    move_family: "skip".to_string(),
+                    to_matrix: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+                    counterpart_matrix: Some(DynMatrix::new(2, 2, vec![1, 0, 0, 1])),
+                },
+                ApproximateHit {
+                    rank: 2,
+                    move_family: "keep".to_string(),
+                    to_matrix: DynMatrix::new(
+                        4,
+                        4,
+                        vec![0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0],
+                    ),
+                    counterpart_matrix: Some(DynMatrix::new(
+                        4,
+                        4,
+                        vec![0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0],
+                    )),
+                },
+                ApproximateHit {
+                    rank: 3,
+                    move_family: "keep".to_string(),
+                    to_matrix: DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0]),
+                    counterpart_matrix: Some(DynMatrix::new(3, 3, vec![0, 0, 1, 1, 0, 1, 0, 1, 0])),
+                },
+            ],
+        };
+
+        let samples = extract_stuck_samples(&report, 2);
+
+        assert_eq!(samples.len(), 4);
+        assert_eq!(samples[0].label, "k4_stuck_rank2_to");
+        assert_eq!(samples[2].label, "k4_stuck_rank3_to");
     }
 }
