@@ -15,6 +15,11 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let cli = parse_cli(std::env::args().skip(1))?;
+    if cli.help {
+        println!("{}", usage());
+        return Ok(());
+    }
+
     let samples = selected_samples();
     let pairs = selected_pairs(&samples);
     let report = OrbitReport {
@@ -52,6 +57,7 @@ fn run() -> Result<(), String> {
 #[derive(Debug)]
 struct Cli {
     json_out: Option<PathBuf>,
+    help: bool,
 }
 
 fn parse_cli<I>(mut args: I) -> Result<Cli, String>
@@ -68,15 +74,23 @@ where
                 ));
             }
             "--help" | "-h" => {
-                return Err(
-                    "usage: diagnose_active_block_orbit_profiles [--json-out PATH]".to_string(),
-                );
+                return Ok(Cli {
+                    json_out: None,
+                    help: true,
+                });
             }
             _ => return Err(format!("unknown argument: {arg}")),
         }
     }
 
-    Ok(Cli { json_out })
+    Ok(Cli {
+        json_out,
+        help: false,
+    })
+}
+
+fn usage() -> String {
+    "usage: diagnose_active_block_orbit_profiles [--json-out PATH]".to_string()
 }
 
 #[derive(Serialize)]

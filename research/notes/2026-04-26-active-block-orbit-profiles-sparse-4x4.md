@@ -178,7 +178,7 @@ timeout -k 20s 60s cargo run -q --features research-tools \
 Observed result:
 
 - formatting passed;
-- helper tests passed (`3` tests);
+- helper tests passed (`4` tests);
 - the bounded diagnostic emitted
   `tmp/sse-rust-nw7-11-active-block-orbit-profiles.json`; and
 - the pair table above is reproduced from that JSON.
