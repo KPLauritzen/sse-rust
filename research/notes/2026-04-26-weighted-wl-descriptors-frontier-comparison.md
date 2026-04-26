@@ -163,7 +163,7 @@ timeout -k 20s 60s cargo run -q --features research-tools \
 Observed result:
 
 - formatting passed;
-- helper tests passed (`6` tests);
+- helper tests passed (`7` tests);
 - the bounded diagnostic emitted
   `tmp/sse-rust-nw7-10-weighted-wl-descriptors.json`; and
 - the comparison table above is reproduced from that JSON.

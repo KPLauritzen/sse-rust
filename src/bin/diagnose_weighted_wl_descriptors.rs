@@ -23,7 +23,10 @@ fn run() -> Result<(), String> {
     }
 
     let samples = selected_samples();
-    let sample_reports = samples.iter().map(build_sample_report).collect::<Vec<_>>();
+    let sample_reports = samples
+        .iter()
+        .map(build_sample_report)
+        .collect::<Result<Vec<_>, _>>()?;
     let pairs = selected_pairs()
         .iter()
         .map(|pair| build_pair_report(pair, &sample_reports))
@@ -308,9 +311,9 @@ fn selected_pairs() -> Vec<Pair> {
     ]
 }
 
-fn build_sample_report(sample: &Sample) -> SampleReport {
+fn build_sample_report(sample: &Sample) -> Result<SampleReport, String> {
     let active = active_block(&sample.matrix);
-    SampleReport {
+    Ok(SampleReport {
         id: sample.id.to_string(),
         label: sample.label.to_string(),
         source: sample.source.to_string(),
@@ -327,8 +330,8 @@ fn build_sample_report(sample: &Sample) -> SampleReport {
         directed_weighted_matrix_wl: ROUNDS
             .iter()
             .map(|&round| directed_weighted_matrix_wl(&sample.matrix, round))
-            .collect(),
-    }
+            .collect::<Result<Vec<_>, _>>()?,
+    })
 }
 
 fn build_pair_report(pair: &Pair, samples: &[SampleReport]) -> Result<PairReport, String> {
@@ -447,11 +450,18 @@ fn weighted_active_bipartite_wl(matrix: &DynMatrix, rounds: usize) -> BipartiteW
                 for (col, col_color) in col_colors.iter().enumerate() {
                     let value = active.get(row, col);
                     if value != 0 {
-                        incidents.push(format!("{value}:{col_color}"));
+                        incidents.push(WeightedColorRef {
+                            weight: value,
+                            color: col_color.clone(),
+                        });
                     }
                 }
                 incidents.sort();
-                format!("R({})[{}]", row_colors[row], join_strings(&incidents))
+                canonical_json(&BipartiteColorKey {
+                    role: "row",
+                    previous_color: row_colors[row].clone(),
+                    incidents,
+                })
             })
             .collect::<Vec<_>>();
         let next_col_colors = (0..active.cols)
@@ -460,11 +470,18 @@ fn weighted_active_bipartite_wl(matrix: &DynMatrix, rounds: usize) -> BipartiteW
                 for (row, row_color) in row_colors.iter().enumerate() {
                     let value = active.get(row, col);
                     if value != 0 {
-                        incidents.push(format!("{value}:{row_color}"));
+                        incidents.push(WeightedColorRef {
+                            weight: value,
+                            color: row_color.clone(),
+                        });
                     }
                 }
                 incidents.sort();
-                format!("C({})[{}]", col_colors[col], join_strings(&incidents))
+                canonical_json(&BipartiteColorKey {
+                    role: "column",
+                    previous_color: col_colors[col].clone(),
+                    incidents,
+                })
             })
             .collect::<Vec<_>>();
         row_colors = next_row_colors;
@@ -473,21 +490,30 @@ fn weighted_active_bipartite_wl(matrix: &DynMatrix, rounds: usize) -> BipartiteW
 
     let row_color_histogram = color_histogram(&row_colors);
     let column_color_histogram = color_histogram(&col_colors);
+    let signature = canonical_json(&BipartiteSignatureKey {
+        active_shape: [active.rows, active.cols],
+        row_color_histogram: row_color_histogram.clone(),
+        column_color_histogram: column_color_histogram.clone(),
+    });
     BipartiteWlRoundReport {
         round: rounds,
-        signature: format!(
-            "active_shape={}|rows={}|cols={}",
-            shape_label(&active),
-            histogram_signature(&row_color_histogram),
-            histogram_signature(&column_color_histogram)
-        ),
+        signature,
         row_color_histogram,
         column_color_histogram,
     }
 }
 
-fn directed_weighted_matrix_wl(matrix: &DynMatrix, rounds: usize) -> DirectedWlRoundReport {
-    assert!(matrix.is_square());
+fn directed_weighted_matrix_wl(
+    matrix: &DynMatrix,
+    rounds: usize,
+) -> Result<DirectedWlRoundReport, String> {
+    if !matrix.is_square() {
+        return Err(format!(
+            "directed weighted matrix WL requires a square matrix, got {}",
+            shape_label(matrix)
+        ));
+    }
+
     let mut colors = vec!["V".to_string(); matrix.rows];
 
     for _ in 0..rounds {
@@ -498,36 +524,41 @@ fn directed_weighted_matrix_wl(matrix: &DynMatrix, rounds: usize) -> DirectedWlR
                 for (other, other_color) in colors.iter().enumerate() {
                     let out_value = matrix.get(vertex, other);
                     if out_value != 0 {
-                        outgoing.push(format!("{out_value}:{other_color}"));
+                        outgoing.push(WeightedColorRef {
+                            weight: out_value,
+                            color: other_color.clone(),
+                        });
                     }
                     let in_value = matrix.get(other, vertex);
                     if in_value != 0 {
-                        incoming.push(format!("{in_value}:{other_color}"));
+                        incoming.push(WeightedColorRef {
+                            weight: in_value,
+                            color: other_color.clone(),
+                        });
                     }
                 }
                 outgoing.sort();
                 incoming.sort();
-                format!(
-                    "V({})|out[{}]|in[{}]",
-                    colors[vertex],
-                    join_strings(&outgoing),
-                    join_strings(&incoming)
-                )
+                canonical_json(&DirectedColorKey {
+                    previous_color: colors[vertex].clone(),
+                    outgoing,
+                    incoming,
+                })
             })
             .collect::<Vec<_>>();
         colors = next_colors;
     }
 
     let vertex_color_histogram = color_histogram(&colors);
-    DirectedWlRoundReport {
+    let signature = canonical_json(&DirectedSignatureKey {
+        dimension: matrix.rows,
+        vertex_color_histogram: vertex_color_histogram.clone(),
+    });
+    Ok(DirectedWlRoundReport {
         round: rounds,
-        signature: format!(
-            "dim={}|vertices={}",
-            matrix.rows,
-            histogram_signature(&vertex_color_histogram)
-        ),
+        signature,
         vertex_color_histogram,
-    }
+    })
 }
 
 fn active_block(matrix: &DynMatrix) -> DynMatrix {
@@ -557,16 +588,41 @@ fn color_histogram(colors: &[String]) -> Vec<ColorBucket> {
         .collect()
 }
 
-fn histogram_signature(histogram: &[ColorBucket]) -> String {
-    histogram
-        .iter()
-        .map(|bucket| format!("{}*{}", bucket.count, bucket.color))
-        .collect::<Vec<_>>()
-        .join(";")
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+struct WeightedColorRef {
+    weight: u32,
+    color: String,
 }
 
-fn join_strings(values: &[String]) -> String {
-    values.join(",")
+#[derive(Serialize)]
+struct BipartiteColorKey {
+    role: &'static str,
+    previous_color: String,
+    incidents: Vec<WeightedColorRef>,
+}
+
+#[derive(Serialize)]
+struct DirectedColorKey {
+    previous_color: String,
+    outgoing: Vec<WeightedColorRef>,
+    incoming: Vec<WeightedColorRef>,
+}
+
+#[derive(Serialize)]
+struct BipartiteSignatureKey {
+    active_shape: [usize; 2],
+    row_color_histogram: Vec<ColorBucket>,
+    column_color_histogram: Vec<ColorBucket>,
+}
+
+#[derive(Serialize)]
+struct DirectedSignatureKey {
+    dimension: usize,
+    vertex_color_histogram: Vec<ColorBucket>,
+}
+
+fn canonical_json<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("WL descriptor keys should serialize")
 }
 
 fn shape_label(matrix: &DynMatrix) -> String {
@@ -633,8 +689,12 @@ mod tests {
 
         for round in ROUNDS {
             assert_eq!(
-                directed_weighted_matrix_wl(left, round).signature,
-                directed_weighted_matrix_wl(right, round).signature
+                directed_weighted_matrix_wl(left, round)
+                    .expect("left directed WL")
+                    .signature,
+                directed_weighted_matrix_wl(right, round)
+                    .expect("right directed WL")
+                    .signature
             );
         }
     }
@@ -647,8 +707,12 @@ mod tests {
 
         for round in ROUNDS {
             assert_eq!(
-                directed_weighted_matrix_wl(matrix, round).signature,
-                directed_weighted_matrix_wl(&conjugated, round).signature
+                directed_weighted_matrix_wl(matrix, round)
+                    .expect("matrix directed WL")
+                    .signature,
+                directed_weighted_matrix_wl(&conjugated, round)
+                    .expect("conjugated directed WL")
+                    .signature
             );
         }
     }
@@ -665,10 +729,26 @@ mod tests {
                 weighted_active_bipartite_wl(right, round).signature
             );
             assert_ne!(
-                directed_weighted_matrix_wl(left, round).signature,
-                directed_weighted_matrix_wl(right, round).signature
+                directed_weighted_matrix_wl(left, round)
+                    .expect("left directed WL")
+                    .signature,
+                directed_weighted_matrix_wl(right, round)
+                    .expect("right directed WL")
+                    .signature
             );
         }
+    }
+
+    #[test]
+    fn directed_matrix_wl_rejects_non_square_matrix() {
+        let err =
+            match directed_weighted_matrix_wl(&DynMatrix::new(2, 3, vec![1, 0, 2, 0, 3, 1]), 1) {
+                Ok(_) => panic!("non-square matrix should be rejected"),
+                Err(err) => err,
+            };
+
+        assert!(err.contains("requires a square matrix"));
+        assert!(err.contains("2x3"));
     }
 
     fn sample_map() -> BTreeMap<&'static str, Sample> {
