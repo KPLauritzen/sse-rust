@@ -3,7 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
+use sse_core::types::{GuideArtifact, GuideArtifactPayload};
 
 const DEFAULT_ENDPOINT_RADIUS: usize = 3;
 const DEFAULT_TOP_STUCK: usize = 8;
@@ -26,15 +28,23 @@ fn run() -> Result<(), String> {
     let mut samples = Vec::new();
 
     for guide_artifact in &cli.guide_artifacts {
-        let artifact = read_json::<GuideArtifact>(guide_artifact)?;
-        samples.extend(extract_endpoint_samples(
-            &artifact,
-            guide_artifact
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("guide"),
-            cli.endpoint_radius,
-        ));
+        let guide_tag = guide_artifact
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("guide");
+        let guide_label = guide_artifact.display().to_string();
+        for (artifact_index, artifact) in load_guide_artifacts_from_path(guide_artifact)?
+            .into_iter()
+            .enumerate()
+        {
+            samples.extend(extract_endpoint_samples(
+                &artifact,
+                guide_tag,
+                &guide_label,
+                artifact_index,
+                cli.endpoint_radius,
+            ));
+        }
     }
 
     if let Some(stuck_report) = &cli.stuck_report {
@@ -179,18 +189,6 @@ where
 }
 
 #[derive(Deserialize)]
-struct GuideArtifact {
-    #[serde(default)]
-    artifact_id: Option<String>,
-    path: GuidePath,
-}
-
-#[derive(Deserialize)]
-struct GuidePath {
-    matrices: Vec<DynMatrix>,
-}
-
-#[derive(Deserialize)]
 struct StuckStateReport {
     ranked_approximate_hits: Vec<ApproximateHit>,
 }
@@ -215,12 +213,13 @@ struct SampleState {
 fn extract_endpoint_samples(
     artifact: &GuideArtifact,
     guide_tag: &str,
+    guide_label: &str,
+    artifact_index: usize,
     endpoint_radius: usize,
 ) -> Vec<SampleState> {
-    let last = artifact.path.matrices.len().saturating_sub(1);
-    artifact
-        .path
-        .matrices
+    let GuideArtifactPayload::FullPath { path } = &artifact.payload;
+    let last = path.matrices.len().saturating_sub(1);
+    path.matrices
         .iter()
         .enumerate()
         .filter(|(_, matrix)| matrix.rows == matrix.cols && matches!(matrix.rows, 3 | 4))
@@ -234,8 +233,8 @@ fn extract_endpoint_samples(
             }
             let artifact_id = artifact
                 .artifact_id
-                .as_deref()
-                .unwrap_or_else(|| fallback_artifact_id(guide_tag));
+                .clone()
+                .unwrap_or_else(|| fallback_artifact_id(guide_tag, guide_label, artifact_index));
             Some(SampleState {
                 label: format!("{guide_tag}:{artifact_id}:step{}", idx),
                 sample_kind: format!("k3_witness:{guide_tag}"),
@@ -483,8 +482,8 @@ fn trimmed_active_window(matrix: &DynMatrix) -> DynMatrix {
     DynMatrix::new(active_rows.len(), active_cols.len(), data)
 }
 
-fn fallback_artifact_id(guide_tag: &str) -> &str {
-    guide_tag
+fn fallback_artifact_id(guide_tag: &str, guide_label: &str, artifact_index: usize) -> String {
+    format!("{guide_tag}@{guide_label}#{}", artifact_index)
 }
 
 fn join_u8(values: &[u8]) -> String {
@@ -514,6 +513,8 @@ fn join_u64(values: &[u64]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sse_core::search::build_full_path_guide_artifact;
+    use sse_core::types::DynSsePath;
 
     fn rank4_to_matrix() -> DynMatrix {
         DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -547,54 +548,55 @@ mod tests {
         );
     }
 
-    #[test]
-    fn guide_artifact_deserializes_with_present_artifact_id() {
-        let artifact = serde_json::from_str::<GuideArtifact>(
-            r#"{
-                "artifact_id": "demo",
-                "path": {
-                    "matrices": [
-                        {"rows": 3, "cols": 3, "data": [0,1,0,1,0,1,0,1,0]}
-                    ]
-                }
-            }"#,
-        )
-        .expect("artifact with id should deserialize");
-
-        assert_eq!(artifact.artifact_id.as_deref(), Some("demo"));
-        assert_eq!(artifact.path.matrices.len(), 1);
-    }
-
-    #[test]
-    fn guide_artifact_deserializes_with_missing_artifact_id() {
-        let artifact = serde_json::from_str::<GuideArtifact>(
-            r#"{
-                "path": {
-                    "matrices": [
-                        {"rows": 4, "cols": 4, "data": [0,1,0,0,1,0,1,0,0,1,0,1,0,0,1,0]}
-                    ]
-                }
-            }"#,
-        )
-        .expect("artifact without id should deserialize");
-
-        assert_eq!(artifact.artifact_id, None);
-        assert_eq!(artifact.path.matrices.len(), 1);
+    fn guide_artifact_fixture(
+        artifact_id: Option<&str>,
+        matrices: Vec<DynMatrix>,
+    ) -> GuideArtifact {
+        let source = matrices
+            .first()
+            .cloned()
+            .expect("fixture needs at least one matrix");
+        let target = matrices
+            .last()
+            .cloned()
+            .expect("fixture needs at least one matrix");
+        let path = DynSsePath {
+            matrices,
+            steps: Vec::new(),
+        };
+        let mut artifact =
+            build_full_path_guide_artifact(&source, &target, &path).expect("fixture should build");
+        artifact.artifact_id = artifact_id.map(str::to_string);
+        artifact
     }
 
     #[test]
     fn extract_endpoint_samples_uses_guide_specific_fallback_artifact_id() {
-        let artifact = GuideArtifact {
-            artifact_id: None,
-            path: GuidePath {
-                matrices: vec![DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])],
-            },
-        };
+        let artifact = guide_artifact_fixture(
+            None,
+            vec![DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])],
+        );
 
-        let samples = extract_endpoint_samples(&artifact, "guide_alpha", 3);
+        let samples = extract_endpoint_samples(&artifact, "guide_alpha", "fixtures/a.json", 2, 3);
 
         assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].label, "guide_alpha:guide_alpha:step0");
+        assert_eq!(
+            samples[0].label,
+            "guide_alpha:guide_alpha@fixtures/a.json#2:step0"
+        );
+    }
+
+    #[test]
+    fn extract_endpoint_samples_uses_present_artifact_id() {
+        let artifact = guide_artifact_fixture(
+            Some("demo"),
+            vec![DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])],
+        );
+
+        let samples = extract_endpoint_samples(&artifact, "guide_alpha", "fixtures/a.json", 0, 3);
+
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].label, "guide_alpha:demo:step0");
     }
 
     #[test]
