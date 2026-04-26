@@ -414,9 +414,14 @@ fn diagnostic_reading(
     let directed_all_match = directed_matches.iter().all(|round| round.same_signature);
 
     match pair_kind {
-        "coarse_only_near_miss" if same_coarse_signature && !bipartite_any_match => {
-            "weighted active bipartite WL separates this false coarse-bucket match from round 1; this agrees with trimmed_active_window separation and is more graded than the rejected singleton weighted-orbit profile".to_string()
-        }
+        "coarse_only_near_miss" if same_coarse_signature && !bipartite_any_match => format!(
+            "weighted active bipartite WL separates this false coarse-bucket match from round 1; {}; it is more graded than the rejected singleton weighted-orbit profile",
+            if same_trimmed_active_window_signature {
+                "trimmed_active_window still matches this pair"
+            } else {
+                "this agrees with trimmed_active_window separation"
+            }
+        ),
         "known_reuse_calibration" if bipartite_all_match && directed_all_match => {
             "both WL descriptors preserve this literal k3 replay overlap for rounds 1-3".to_string()
         }
@@ -607,6 +612,20 @@ mod tests {
     }
 
     #[test]
+    fn active_bipartite_wl_is_independent_row_column_permutation_invariant() {
+        let samples = sample_map();
+        let matrix = &samples["baker_a4"].matrix;
+        let permuted = permute_rows_cols(matrix, &[2, 0, 3, 1], &[1, 3, 0, 2]);
+
+        for round in ROUNDS {
+            assert_eq!(
+                weighted_active_bipartite_wl(matrix, round).signature,
+                weighted_active_bipartite_wl(&permuted, round).signature
+            );
+        }
+    }
+
+    #[test]
     fn directed_matrix_wl_preserves_k3_replay_overlap() {
         let samples = sample_map();
         let left = &samples["k3_baker_step2"].matrix;
@@ -616,6 +635,20 @@ mod tests {
             assert_eq!(
                 directed_weighted_matrix_wl(left, round).signature,
                 directed_weighted_matrix_wl(right, round).signature
+            );
+        }
+    }
+
+    #[test]
+    fn directed_matrix_wl_is_permutation_similarity_invariant() {
+        let samples = sample_map();
+        let matrix = &samples["baker_a4"].matrix;
+        let conjugated = matrix.conjugate_by_perm(&[2, 0, 3, 1]);
+
+        for round in ROUNDS {
+            assert_eq!(
+                directed_weighted_matrix_wl(matrix, round).signature,
+                directed_weighted_matrix_wl(&conjugated, round).signature
             );
         }
     }
@@ -643,5 +676,18 @@ mod tests {
             .into_iter()
             .map(|sample| (sample.id, sample))
             .collect()
+    }
+
+    fn permute_rows_cols(matrix: &DynMatrix, row_perm: &[usize], col_perm: &[usize]) -> DynMatrix {
+        assert_eq!(matrix.rows, row_perm.len());
+        assert_eq!(matrix.cols, col_perm.len());
+
+        let mut data = Vec::with_capacity(matrix.rows * matrix.cols);
+        for &row in row_perm {
+            for &col in col_perm {
+                data.push(matrix.get(row, col));
+            }
+        }
+        DynMatrix::new(matrix.rows, matrix.cols, data)
     }
 }
