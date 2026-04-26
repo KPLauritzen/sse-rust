@@ -427,21 +427,26 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
         if grouped_samples.len() < 2 {
             continue;
         }
-        let left = grouped_samples[0];
-        for right in grouped_samples.iter().skip(1) {
-            if witness_guide_tag(left) == witness_guide_tag(right) {
-                continue;
+        for left_index in 0..grouped_samples.len() {
+            for right_index in (left_index + 1)..grouped_samples.len() {
+                let left = grouped_samples[left_index];
+                let right = grouped_samples[right_index];
+                if witness_guide_tag(left) == witness_guide_tag(right) {
+                    continue;
+                }
+                let mut pair_guides = [witness_guide_tag(left), witness_guide_tag(right)];
+                pair_guides.sort_unstable();
+                reports.push(build_pair_report(
+                    format!(
+                        "k3_witness_step{}_{}_{}x{}_{}_{}",
+                        step_index, endpoint_side, dim, dim, pair_guides[0], pair_guides[1]
+                    ),
+                    "k3_witness_replay_overlap".to_string(),
+                    format!("step {} / {}", step_index, endpoint_side),
+                    left,
+                    right,
+                ));
             }
-            reports.push(build_pair_report(
-                format!(
-                    "k3_witness_step{}_{}_{}x{}",
-                    step_index, endpoint_side, dim, dim
-                ),
-                "k3_witness_replay_overlap".to_string(),
-                format!("step {} / {}", step_index, endpoint_side),
-                left,
-                right,
-            ));
         }
     }
     reports
@@ -1005,5 +1010,57 @@ mod tests {
             report.recommended_action,
             "rank_or_propose_inside_coarse_bucket"
         );
+    }
+
+    #[test]
+    fn witness_pair_builder_emits_all_cross_guide_pairs_with_unique_ids() {
+        let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
+        let samples = vec![
+            SampleState {
+                label: "a".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_tag: "guide_a".to_string(),
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "b".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_tag: "guide_b".to_string(),
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "c".to_string(),
+                sample_kind: "k3_witness:c".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared,
+                origin: SampleOrigin::Witness {
+                    guide_tag: "guide_c".to_string(),
+                    step_index: 2,
+                },
+            },
+        ];
+
+        let reports = build_witness_parity_pairs(&samples);
+        let ids = reports
+            .iter()
+            .map(|report| report.pair_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(reports.len(), 3);
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains("k3_witness_step2_source_3x3_guide_a_guide_b"));
+        assert!(ids.contains("k3_witness_step2_source_3x3_guide_a_guide_c"));
+        assert!(ids.contains("k3_witness_step2_source_3x3_guide_b_guide_c"));
     }
 }
