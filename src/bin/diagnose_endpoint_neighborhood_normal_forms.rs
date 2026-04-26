@@ -650,12 +650,13 @@ fn sample_identity_token(sample: &SampleState) -> String {
             step_index,
             ..
         } => format!(
-            "w{}i{}a{}s{}l{}",
+            "w{}i{}a{}s{}e{}d{}",
             stable_hash_hex(guide_identity),
             stable_hash_hex(artifact_identity),
             artifact_index,
             step_index,
-            stable_hash_hex(&sample.label)
+            stable_hash_hex(&sample.endpoint_side),
+            sample.dim
         ),
         SampleOrigin::Stuck {
             hit_index,
@@ -663,7 +664,7 @@ fn sample_identity_token(sample: &SampleState) -> String {
             move_family,
             role,
         } => format!(
-            "h{}r{}f{}{}l{}",
+            "h{}r{}f{}{}e{}d{}",
             hit_index,
             rank,
             stable_hash_hex(move_family),
@@ -671,7 +672,8 @@ fn sample_identity_token(sample: &SampleState) -> String {
                 StuckRole::Frontier => "f",
                 StuckRole::Counterpart => "c",
             },
-            stable_hash_hex(&sample.label)
+            stable_hash_hex(&sample.endpoint_side),
+            sample.dim
         ),
     }
 }
