@@ -874,6 +874,9 @@ impl ApproximateHitParityObserver {
         let mut supported_square_hits = 0usize;
         let mut unsupported_hits = 0usize;
         let mut multi_candidate_buckets = 0usize;
+        let unattributed_approximate_hits = telemetry
+            .approximate_other_side_hits
+            .saturating_sub(annotated_hits.len());
 
         for hit in &annotated_hits {
             *hits_by_best_action
@@ -903,6 +906,11 @@ impl ApproximateHitParityObserver {
             telemetry_approximate_other_side_hits: telemetry.approximate_other_side_hits,
             summary: ApproximateHitParitySummary {
                 discovered_approximate_hit_records: annotated_hits.len(),
+                unattributed_approximate_hits,
+                report_is_complete: unattributed_approximate_hits == 0,
+                completeness_note: (unattributed_approximate_hits > 0).then_some(
+                    "top-level observer records only the current request surface; nested guided or shortcut segment searches can contribute additional approximate hits to telemetry",
+                ),
                 supported_square_hits,
                 unsupported_hits,
                 multi_candidate_buckets,
@@ -936,6 +944,10 @@ struct ApproximateHitParityReport {
 #[derive(Clone, serde::Serialize)]
 struct ApproximateHitParitySummary {
     discovered_approximate_hit_records: usize,
+    unattributed_approximate_hits: usize,
+    report_is_complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    completeness_note: Option<&'static str>,
     supported_square_hits: usize,
     unsupported_hits: usize,
     multi_candidate_buckets: usize,
@@ -2228,6 +2240,8 @@ mod tests {
 
         let report = observer.build_report(&request, &result, &telemetry);
         assert_eq!(report.summary.supported_square_hits, 1);
+        assert!(report.summary.report_is_complete);
+        assert_eq!(report.summary.unattributed_approximate_hits, 0);
         assert_eq!(report.annotated_hits.len(), 1);
         assert_eq!(
             report.annotated_hits[0].best_action,
@@ -2278,6 +2292,8 @@ mod tests {
 
         let report = observer.build_report(&request, &result, &telemetry);
         assert_eq!(report.summary.supported_square_hits, 1);
+        assert!(report.summary.report_is_complete);
+        assert_eq!(report.summary.unattributed_approximate_hits, 0);
         assert_eq!(report.annotated_hits.len(), 1);
         assert_eq!(
             report.annotated_hits[0].best_action,
@@ -2287,6 +2303,49 @@ mod tests {
             report.annotated_hits[0].bucket_candidates[0].action,
             EndpointLocalParityAction::RankOrProposeInsideCoarseBucket
         );
+    }
+
+    #[test]
+    fn approximate_hit_parity_report_flags_unattributed_hits() {
+        let request = identity_request();
+        let result = SearchRunResult::Unknown;
+        let telemetry = SearchTelemetry {
+            approximate_other_side_hits: 2,
+            ..Default::default()
+        };
+        let root = SearchRootRecord {
+            direction: sse_core::types::SearchDirection::Backward,
+            canonical: rank4_counterpart_matrix().canonical_perm(),
+            orig: rank4_counterpart_matrix(),
+            depth: 3,
+        };
+        let edge = SearchEdgeRecord {
+            layer_index: 2,
+            direction: sse_core::types::SearchDirection::Forward,
+            move_family: "diagonal_refactorization_4x4",
+            from_canonical: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            from_orig: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            to_canonical: rank4_to_matrix().canonical_perm(),
+            to_orig: rank4_to_matrix(),
+            from_depth: 2,
+            to_depth: 3,
+            step: EsseStep {
+                u: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+                v: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            },
+            status: SearchEdgeStatus::Discovered,
+            approximate_other_side_hit: true,
+            enqueued: true,
+        };
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&SearchEvent::Roots(vec![root]));
+        observer.on_event(&SearchEvent::Layer(vec![edge]));
+
+        let report = observer.build_report(&request, &result, &telemetry);
+        assert!(!report.summary.report_is_complete);
+        assert_eq!(report.summary.unattributed_approximate_hits, 1);
+        assert!(report.summary.completeness_note.is_some());
     }
 
     #[test]

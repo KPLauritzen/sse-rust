@@ -35,6 +35,12 @@ Default search behavior is unchanged:
 - the core frontier logic still only records the existing
   `approximate_other_side_hit` boolean.
 
+The report now also carries an explicit completeness check:
+
+- `unattributed_approximate_hits`
+- `report_is_complete`
+- `completeness_note` when the observer only saw part of the run
+
 The report annotates each discovered `approximate_other_side_hit` record
 against the opposite-side coarse bucket currently visible to the observer:
 
@@ -121,6 +127,8 @@ Observed summary:
 
 - `telemetry_approximate_other_side_hits = 113`
 - `discovered_approximate_hit_records = 113`
+- `unattributed_approximate_hits = 0`
+- `report_is_complete = true`
 - `supported_square_hits = 113`
 - `hits_by_best_action = { rank_or_propose_inside_coarse_bucket: 113 }`
 - `candidate_actions = { rank_or_propose_inside_coarse_bucket: 125 }`
@@ -148,6 +156,8 @@ Observed summary:
 
 - `telemetry_approximate_other_side_hits = 184`
 - `discovered_approximate_hit_records = 184`
+- `unattributed_approximate_hits = 0`
+- `report_is_complete = true`
 - `supported_square_hits = 184`
 - `multi_candidate_buckets = 80`
 - `hits_by_best_action = { rank_or_propose_inside_coarse_bucket: 184 }`
@@ -179,6 +189,8 @@ Observed summary:
 
 - top-level telemetry reported `approximate_other_side_hits = 796`
 - the opt-in report recorded `discovered_approximate_hit_records = 0`
+- `unattributed_approximate_hits = 796`
+- `report_is_complete = false`
 
 Reading:
 
