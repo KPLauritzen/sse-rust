@@ -32,7 +32,8 @@ fn run() -> Result<(), String> {
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or("guide");
-        let guide_identity = guide_artifact.display().to_string();
+        let guide_identity = normalized_path_identity(guide_artifact);
+        let guide_display = guide_artifact.display().to_string();
         for (artifact_index, artifact) in load_guide_artifacts_from_path(guide_artifact)?
             .into_iter()
             .enumerate()
@@ -41,6 +42,7 @@ fn run() -> Result<(), String> {
                 &artifact,
                 guide_tag,
                 &guide_identity,
+                &guide_display,
                 artifact_index,
                 cli.endpoint_radius,
             ));
@@ -240,6 +242,7 @@ fn extract_endpoint_samples(
     artifact: &GuideArtifact,
     guide_tag: &str,
     guide_identity: &str,
+    guide_display: &str,
     artifact_index: usize,
     endpoint_radius: usize,
 ) -> Vec<SampleState> {
@@ -266,7 +269,10 @@ fn extract_endpoint_samples(
                 .clone()
                 .unwrap_or_else(|| fallback_artifact_id(guide_tag, guide_identity, artifact_index));
             Some(SampleState {
-                label: format!("{guide_identity}:{artifact_id}:step{}", idx),
+                label: format!(
+                    "{guide_display}:artifact{}:{}:step{}",
+                    artifact_index, artifact_id, idx
+                ),
                 sample_kind: format!("k3_witness:{guide_tag}"),
                 dim: matrix.rows,
                 endpoint_side: match (near_start, near_end) {
@@ -415,11 +421,12 @@ fn build_parity_pair_reports(samples: &[SampleState]) -> Vec<ParityPairReport> {
 
 fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
     let mut unique_samples =
-        BTreeMap::<(String, String, usize, String, usize), &SampleState>::new();
+        BTreeMap::<(String, String, usize, usize, String, usize), &SampleState>::new();
     for sample in samples {
         if let SampleOrigin::Witness {
             guide_identity,
             artifact_identity,
+            artifact_index,
             step_index,
             ..
         } = &sample.origin
@@ -428,6 +435,7 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
                 .entry((
                     guide_identity.clone(),
                     artifact_identity.clone(),
+                    *artifact_index,
                     *step_index,
                     sample.endpoint_side.clone(),
                     sample.dim,
@@ -438,7 +446,7 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
 
     let mut by_artifact_step_side_dim =
         BTreeMap::<(String, usize, String, usize), Vec<&SampleState>>::new();
-    for ((_, artifact_identity, step_index, endpoint_side, dim), sample) in unique_samples {
+    for ((_, artifact_identity, _, step_index, endpoint_side, dim), sample) in unique_samples {
         by_artifact_step_side_dim
             .entry((artifact_identity, step_index, endpoint_side, dim))
             .or_default()
@@ -624,6 +632,13 @@ fn pair_id_for_samples(prefix: &str, left: &SampleState, right: &SampleState) ->
     let mut member_ids = [sample_identity_token(left), sample_identity_token(right)];
     member_ids.sort_unstable();
     format!("{prefix}:{}:{}", member_ids[0], member_ids[1])
+}
+
+fn normalized_path_identity(path: &PathBuf) -> String {
+    fs::canonicalize(path)
+        .unwrap_or_else(|_| path.clone())
+        .display()
+        .to_string()
 }
 
 fn sample_identity_token(sample: &SampleState) -> String {
@@ -934,12 +949,19 @@ mod tests {
             vec![DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])],
         );
 
-        let samples = extract_endpoint_samples(&artifact, "guide_alpha", "fixtures/a.json", 2, 3);
+        let samples = extract_endpoint_samples(
+            &artifact,
+            "guide_alpha",
+            "fixtures/a.json",
+            "fixtures/a.json",
+            2,
+            3,
+        );
 
         assert_eq!(samples.len(), 1);
         assert_eq!(
             samples[0].label,
-            "fixtures/a.json:guide_alpha@fixtures/a.json#2:step0"
+            "fixtures/a.json:artifact2:guide_alpha@fixtures/a.json#2:step0"
         );
     }
 
@@ -950,10 +972,17 @@ mod tests {
             vec![DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])],
         );
 
-        let samples = extract_endpoint_samples(&artifact, "guide_alpha", "fixtures/a.json", 0, 3);
+        let samples = extract_endpoint_samples(
+            &artifact,
+            "guide_alpha",
+            "fixtures/a.json",
+            "fixtures/a.json",
+            0,
+            3,
+        );
 
         assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].label, "fixtures/a.json:demo:step0");
+        assert_eq!(samples[0].label, "fixtures/a.json:artifact0:demo:step0");
     }
 
     #[test]
@@ -1038,6 +1067,14 @@ mod tests {
         let samples = extract_stuck_samples(&report, 8);
 
         assert!(samples.is_empty());
+    }
+
+    #[test]
+    fn normalized_path_identity_collapses_relative_aliases() {
+        let direct = normalized_path_identity(&PathBuf::from("Cargo.toml"));
+        let dotted = normalized_path_identity(&PathBuf::from("./Cargo.toml"));
+
+        assert_eq!(direct, dotted);
     }
 
     #[test]
@@ -1285,6 +1322,56 @@ mod tests {
         assert!(reports
             .iter()
             .all(|report| report.parity_signal == "exact_trimmed_window_match"));
+    }
+
+    #[test]
+    fn witness_pair_builder_keeps_duplicate_artifact_ids_separate_by_index() {
+        let shared = DynMatrix::new(3, 3, vec![1, 0, 1, 0, 1, 0, 1, 0, 0]);
+        let samples = vec![
+            SampleState {
+                label: "guide_a.json:artifact0:dup:step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "dup".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_a.json:artifact1:dup:step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared.clone(),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "dup".to_string(),
+                    artifact_index: 1,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_b.json:artifact0:dup:step2".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: shared,
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "dup".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+        ];
+
+        let reports = build_witness_parity_pairs(&samples);
+
+        assert_eq!(reports.len(), 2);
     }
 
     #[test]
