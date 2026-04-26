@@ -434,12 +434,12 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
                 if witness_guide_tag(left) == witness_guide_tag(right) {
                     continue;
                 }
-                let mut pair_guides = [witness_guide_tag(left), witness_guide_tag(right)];
-                pair_guides.sort_unstable();
+                let mut pair_labels = [slugify(&left.label), slugify(&right.label)];
+                pair_labels.sort_unstable();
                 reports.push(build_pair_report(
                     format!(
                         "k3_witness_step{}_{}_{}x{}_{}_{}",
-                        step_index, endpoint_side, dim, dim, pair_guides[0], pair_guides[1]
+                        step_index, endpoint_side, dim, dim, pair_labels[0], pair_labels[1]
                     ),
                     "k3_witness_replay_overlap".to_string(),
                     format!("step {} / {}", step_index, endpoint_side),
@@ -453,31 +453,44 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
 }
 
 fn build_stuck_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
-    let mut pairs = BTreeMap::<usize, (Option<&SampleState>, Option<&SampleState>)>::new();
+    let mut pairs = BTreeMap::<(usize, String), (Vec<&SampleState>, Vec<&SampleState>)>::new();
     for sample in samples {
-        let SampleOrigin::Stuck { rank, role, .. } = &sample.origin else {
+        let SampleOrigin::Stuck {
+            rank,
+            move_family,
+            role,
+        } = &sample.origin
+        else {
             continue;
         };
-        let entry = pairs.entry(*rank).or_default();
+        let entry = pairs.entry((*rank, move_family.clone())).or_default();
         match role {
-            StuckRole::Frontier => entry.0 = Some(sample),
-            StuckRole::Counterpart => entry.1 = Some(sample),
+            StuckRole::Frontier => entry.0.push(sample),
+            StuckRole::Counterpart => entry.1.push(sample),
         }
     }
 
     let mut reports = Vec::new();
-    for (rank, (left, right)) in pairs {
-        let (Some(left), Some(right)) = (left, right) else {
+    for ((rank, move_family), (left_samples, right_samples)) in pairs {
+        if left_samples.is_empty() || right_samples.is_empty() {
             continue;
-        };
-        let move_family = stuck_move_family(left);
-        reports.push(build_pair_report(
-            format!("k4_stuck_rank{}_{}", rank, move_family),
-            "k4_stuck_vs_counterpart".to_string(),
-            format!("rank {} / {}", rank, move_family),
-            left,
-            right,
-        ));
+        }
+        for left in &left_samples {
+            for right in &right_samples {
+                let mut pair_labels = [slugify(&left.label), slugify(&right.label)];
+                pair_labels.sort_unstable();
+                reports.push(build_pair_report(
+                    format!(
+                        "k4_stuck_rank{}_{}_{}_{}",
+                        rank, move_family, pair_labels[0], pair_labels[1]
+                    ),
+                    "k4_stuck_vs_counterpart".to_string(),
+                    format!("rank {} / {}", rank, move_family),
+                    left,
+                    right,
+                ));
+            }
+        }
     }
     reports
 }
@@ -573,11 +586,11 @@ fn witness_guide_tag(sample: &SampleState) -> &str {
     }
 }
 
-fn stuck_move_family(sample: &SampleState) -> &str {
-    match &sample.origin {
-        SampleOrigin::Stuck { move_family, .. } => move_family,
-        SampleOrigin::Witness { .. } => "",
-    }
+fn slugify(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -1059,8 +1072,72 @@ mod tests {
 
         assert_eq!(reports.len(), 3);
         assert_eq!(ids.len(), 3);
-        assert!(ids.contains("k3_witness_step2_source_3x3_guide_a_guide_b"));
-        assert!(ids.contains("k3_witness_step2_source_3x3_guide_a_guide_c"));
-        assert!(ids.contains("k3_witness_step2_source_3x3_guide_b_guide_c"));
+        assert!(ids.contains("k3_witness_step2_source_3x3_a_b"));
+        assert!(ids.contains("k3_witness_step2_source_3x3_a_c"));
+        assert!(ids.contains("k3_witness_step2_source_3x3_b_c"));
+    }
+
+    #[test]
+    fn stuck_pair_builder_keys_by_rank_and_family() {
+        let samples = vec![
+            SampleState {
+                label: "rank4_diag_to".to_string(),
+                sample_kind: "k4_stuck:diag".to_string(),
+                dim: 4,
+                endpoint_side: "frontier".to_string(),
+                matrix: rank4_to_matrix(),
+                origin: SampleOrigin::Stuck {
+                    rank: 4,
+                    move_family: "diag".to_string(),
+                    role: StuckRole::Frontier,
+                },
+            },
+            SampleState {
+                label: "rank4_diag_counterpart".to_string(),
+                sample_kind: "k4_counterpart:diag".to_string(),
+                dim: 4,
+                endpoint_side: "opposite_frontier".to_string(),
+                matrix: rank4_counterpart_matrix(),
+                origin: SampleOrigin::Stuck {
+                    rank: 4,
+                    move_family: "diag".to_string(),
+                    role: StuckRole::Counterpart,
+                },
+            },
+            SampleState {
+                label: "rank4_conj_to".to_string(),
+                sample_kind: "k4_stuck:conj".to_string(),
+                dim: 4,
+                endpoint_side: "frontier".to_string(),
+                matrix: rank4_to_matrix(),
+                origin: SampleOrigin::Stuck {
+                    rank: 4,
+                    move_family: "conj".to_string(),
+                    role: StuckRole::Frontier,
+                },
+            },
+            SampleState {
+                label: "rank4_conj_counterpart".to_string(),
+                sample_kind: "k4_counterpart:conj".to_string(),
+                dim: 4,
+                endpoint_side: "opposite_frontier".to_string(),
+                matrix: rank4_counterpart_matrix(),
+                origin: SampleOrigin::Stuck {
+                    rank: 4,
+                    move_family: "conj".to_string(),
+                    role: StuckRole::Counterpart,
+                },
+            },
+        ];
+
+        let reports = build_stuck_parity_pairs(&samples);
+        let ids = reports
+            .iter()
+            .map(|report| report.pair_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(reports.len(), 2);
+        assert!(ids.contains("k4_stuck_rank4_conj_rank4_conj_counterpart_rank4_conj_to"));
+        assert!(ids.contains("k4_stuck_rank4_diag_rank4_diag_counterpart_rank4_diag_to"));
     }
 }
