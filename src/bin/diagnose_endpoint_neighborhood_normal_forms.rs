@@ -421,8 +421,11 @@ fn build_parity_pair_reports(samples: &[SampleState]) -> Vec<ParityPairReport> {
 
 fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> {
     let mut unique_samples =
-        BTreeMap::<(String, String, usize, usize, String, usize), &SampleState>::new();
+        BTreeMap::<(String, String, usize, usize, String, usize, usize), &SampleState>::new();
     for sample in samples {
+        if sample.matrix.rows != sample.matrix.cols || !matches!(sample.matrix.rows, 3 | 4) {
+            continue;
+        }
         if let SampleOrigin::Witness {
             guide_identity,
             artifact_identity,
@@ -438,23 +441,25 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
                     *artifact_index,
                     *step_index,
                     sample.endpoint_side.clone(),
-                    sample.dim,
+                    sample.matrix.rows,
+                    sample.matrix.cols,
                 ))
                 .or_insert(sample);
         }
     }
 
     let mut by_artifact_step_side_dim =
-        BTreeMap::<(String, usize, String, usize), Vec<&SampleState>>::new();
-    for ((_, artifact_identity, _, step_index, endpoint_side, dim), sample) in unique_samples {
+        BTreeMap::<(String, usize, String, usize, usize), Vec<&SampleState>>::new();
+    for ((_, artifact_identity, _, step_index, endpoint_side, rows, cols), sample) in unique_samples
+    {
         by_artifact_step_side_dim
-            .entry((artifact_identity, step_index, endpoint_side, dim))
+            .entry((artifact_identity, step_index, endpoint_side, rows, cols))
             .or_default()
             .push(sample);
     }
 
     let mut reports = Vec::new();
-    for ((artifact_identity, step_index, endpoint_side, dim), grouped_samples) in
+    for ((artifact_identity, step_index, endpoint_side, rows, cols), grouped_samples) in
         by_artifact_step_side_dim
     {
         if grouped_samples.len() < 2 {
@@ -474,8 +479,8 @@ fn build_witness_parity_pairs(samples: &[SampleState]) -> Vec<ParityPairReport> 
                             stable_hash_hex(&artifact_identity),
                             step_index,
                             endpoint_side,
-                            dim,
-                            dim
+                            rows,
+                            cols
                         ),
                         left,
                         right,
@@ -635,8 +640,23 @@ fn pair_id_for_samples(prefix: &str, left: &SampleState, right: &SampleState) ->
 }
 
 fn normalized_path_identity(path: &PathBuf) -> String {
-    fs::canonicalize(path)
-        .unwrap_or_else(|_| path.clone())
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|dir| fs::canonicalize(dir).ok());
+    let canonical = fs::canonicalize(path).ok();
+    if let (Some(cwd), Some(canonical)) = (cwd, canonical) {
+        if let Ok(relative) = canonical.strip_prefix(&cwd) {
+            return relative.display().to_string();
+        }
+        return canonical.display().to_string();
+    }
+
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::CurDir => None,
+            other => Some(other.as_os_str().to_owned()),
+        })
+        .collect::<PathBuf>()
         .display()
         .to_string()
 }
@@ -1374,6 +1394,42 @@ mod tests {
         let reports = build_witness_parity_pairs(&samples);
 
         assert_eq!(reports.len(), 2);
+    }
+
+    #[test]
+    fn witness_pair_builder_ignores_non_square_samples() {
+        let samples = vec![
+            SampleState {
+                label: "guide_a.json:artifact0:demo:step2".to_string(),
+                sample_kind: "k3_witness:a".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: DynMatrix::new(3, 4, vec![1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_a.json".to_string(),
+                    artifact_identity: "demo".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+            SampleState {
+                label: "guide_b.json:artifact0:demo:step2".to_string(),
+                sample_kind: "k3_witness:b".to_string(),
+                dim: 3,
+                endpoint_side: "source".to_string(),
+                matrix: DynMatrix::new(3, 4, vec![1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]),
+                origin: SampleOrigin::Witness {
+                    guide_identity: "guide_b.json".to_string(),
+                    artifact_identity: "demo".to_string(),
+                    artifact_index: 0,
+                    step_index: 2,
+                },
+            },
+        ];
+
+        let reports = build_witness_parity_pairs(&samples);
+
+        assert!(reports.is_empty());
     }
 
     #[test]
