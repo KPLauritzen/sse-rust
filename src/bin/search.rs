@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
@@ -7,10 +7,17 @@ use std::process::ExitCode;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
+use sse_core::endpoint_local_parity::{
+    endpoint_local_parity_action, mass_support_signature, supports_square_endpoint_local_parity,
+    trimmed_active_window_signature, EndpointLocalParityAction,
+};
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::search::{
     build_full_path_guide_artifact, execute_search_request, execute_search_request_and_observer,
+};
+use sse_core::search_observer::{
+    SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver, SearchRootRecord,
 };
 use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
@@ -36,6 +43,7 @@ struct Cli {
     dhat: bool,
     visited_db: Option<String>,
     write_guide_artifact: Option<String>,
+    approximate_hit_parity_report: Option<String>,
     endpoint_witness_inventory: Option<String>,
     endpoint_witness_control_guides: Vec<ControlGuideSpec>,
     endpoint_witness_guide_dir: Option<String>,
@@ -157,21 +165,43 @@ where
     let cpu_profile = start_cpu_profile(cli.pprof)?;
     let _heap_profile = start_heap_profile(cli.dhat)?;
 
-    let (result, telemetry) = if let Some(path) = cli.visited_db.as_deref() {
-        let mut recorder = SqliteGraphRecorder::new(path)?;
-        let profiled_result = execute_search_request_and_observer(&request, Some(&mut recorder))?;
-        if let Some(err) = recorder.error() {
-            return Err(format!("failed to persist visited graph to {path}: {err}"));
-        }
-        profiled_result
+    let mut recorder = if let Some(path) = cli.visited_db.as_deref() {
+        Some(SqliteGraphRecorder::new(path)?)
     } else {
-        execute_search_request(&request)?
+        None
     };
+    let mut approximate_hit_parity_observer = cli
+        .approximate_hit_parity_report
+        .as_ref()
+        .map(|_| ApproximateHitParityObserver::default());
+    let (result, telemetry) = if recorder.is_none() && approximate_hit_parity_observer.is_none() {
+        execute_search_request(&request)?
+    } else {
+        let mut combined_observer = CombinedSearchObserver {
+            recorder: recorder.as_mut(),
+            approximate_hit_parity: approximate_hit_parity_observer.as_mut(),
+        };
+        execute_search_request_and_observer(&request, Some(&mut combined_observer))?
+    };
+    if let Some(path) = cli.visited_db.as_deref() {
+        if let Some(recorder) = recorder.as_ref() {
+            if let Some(err) = recorder.error() {
+                return Err(format!("failed to persist visited graph to {path}: {err}"));
+            }
+        }
+    }
     maybe_write_guide_artifact(
         &request,
         cli.stage,
         &result,
         cli.write_guide_artifact.as_deref(),
+    )?;
+    maybe_write_approximate_hit_parity_report(
+        &request,
+        &result,
+        &telemetry,
+        approximate_hit_parity_observer.as_ref(),
+        cli.approximate_hit_parity_report.as_deref(),
     )?;
     maybe_write_endpoint_witness_inventory(&request, &telemetry, &cli)?;
     if cli.json {
@@ -226,6 +256,7 @@ where
     let mut dhat = false;
     let mut visited_db = None;
     let mut write_guide_artifact = None;
+    let mut approximate_hit_parity_report = None;
     let mut endpoint_witness_inventory = None;
     let mut endpoint_witness_control_guides = Vec::new();
     let mut endpoint_witness_guide_dir = None;
@@ -274,6 +305,8 @@ where
                        --visited-db PATH        write visited nodes and SSE edges to a sqlite db\n\
                        --write-guide-artifact PATH\n\
                                                write a reusable full_path guide artifact JSON file\n\
+                       --approximate-hit-parity-report PATH\n\
+                                              write an opt-in report that annotates approximate_other_side_hits with endpoint-local parity actions\n\
                        --endpoint-witness-inventory PATH\n\
                                                write a compact retained exact-meet witness inventory JSON file\n\
                        --endpoint-witness-control-guide CLASS=PATH[#ARTIFACT_ID]\n\
@@ -384,6 +417,12 @@ where
                 write_guide_artifact = Some(
                     args.next()
                         .ok_or("--write-guide-artifact requires a path")?,
+                );
+            }
+            "--approximate-hit-parity-report" => {
+                approximate_hit_parity_report = Some(
+                    args.next()
+                        .ok_or("--approximate-hit-parity-report requires a path")?,
                 );
             }
             "--endpoint-witness-inventory" => {
@@ -503,6 +542,7 @@ where
         dhat,
         visited_db,
         write_guide_artifact,
+        approximate_hit_parity_report,
         endpoint_witness_inventory,
         endpoint_witness_control_guides,
         endpoint_witness_guide_dir,
@@ -671,6 +711,385 @@ fn start_heap_profile(enabled: bool) -> Result<Option<HeapProfiler>, String> {
     {
         Err("--dhat requires building with --features dhat-profile".to_string())
     }
+}
+
+struct CombinedSearchObserver<'a> {
+    recorder: Option<&'a mut SqliteGraphRecorder>,
+    approximate_hit_parity: Option<&'a mut ApproximateHitParityObserver>,
+}
+
+impl SearchObserver for CombinedSearchObserver<'_> {
+    fn on_event(&mut self, event: &SearchEvent) {
+        if let Some(recorder) = self.recorder.as_mut() {
+            recorder.on_event(event);
+        }
+        if let Some(observer) = self.approximate_hit_parity.as_mut() {
+            observer.on_event(event);
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ApproximateHitVisit {
+    depth: usize,
+    canonical: DynMatrix,
+    orig: DynMatrix,
+}
+
+#[derive(Default)]
+struct ApproximateHitParityObserver {
+    visits_by_direction: BTreeMap<DirectionLabel, BTreeMap<DynMatrix, ApproximateHitVisit>>,
+    visits_by_signature: BTreeMap<DirectionLabel, BTreeMap<String, Vec<ApproximateHitVisit>>>,
+    annotated_hits: Vec<ApproximateHitParityAnnotatedHit>,
+}
+
+impl SearchObserver for ApproximateHitParityObserver {
+    fn on_event(&mut self, event: &SearchEvent) {
+        match event {
+            SearchEvent::Roots(records) => {
+                for record in records {
+                    self.record_root(record);
+                }
+            }
+            SearchEvent::Layer(edges) => {
+                for edge in edges {
+                    self.record_edge(edge);
+                }
+                for edge in edges {
+                    if !matches!(edge.status, SearchEdgeStatus::SeenCollision) {
+                        self.record_visit(
+                            direction_label(edge.direction),
+                            edge.to_depth,
+                            edge.to_canonical.clone(),
+                            edge.to_orig.clone(),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl ApproximateHitParityObserver {
+    fn record_root(&mut self, record: &SearchRootRecord) {
+        self.record_visit(
+            direction_label(record.direction),
+            record.depth,
+            record.canonical.clone(),
+            record.orig.clone(),
+        );
+    }
+
+    fn record_visit(
+        &mut self,
+        direction: DirectionLabel,
+        depth: usize,
+        canonical: DynMatrix,
+        orig: DynMatrix,
+    ) {
+        let by_direction = self.visits_by_direction.entry(direction).or_default();
+        if by_direction.contains_key(&canonical) {
+            return;
+        }
+
+        let signature = mass_support_signature(&canonical);
+        let visit = ApproximateHitVisit {
+            depth,
+            canonical: canonical.clone(),
+            orig,
+        };
+        by_direction.insert(canonical, visit.clone());
+        self.visits_by_signature
+            .entry(direction)
+            .or_default()
+            .entry(signature)
+            .or_default()
+            .push(visit);
+    }
+
+    fn record_edge(&mut self, edge: &SearchEdgeRecord) {
+        if !edge.approximate_other_side_hit || !matches!(edge.status, SearchEdgeStatus::Discovered)
+        {
+            return;
+        }
+
+        let direction = direction_label(edge.direction);
+        let opposite = opposite_direction(direction);
+        let coarse_signature = mass_support_signature(&edge.to_canonical);
+        let mut bucket_candidates = self
+            .visits_by_signature
+            .get(&opposite)
+            .and_then(|by_signature| by_signature.get(&coarse_signature))
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|candidate| annotate_bucket_candidate(&edge.to_canonical, candidate))
+            .collect::<Vec<_>>();
+        bucket_candidates.sort_by(compare_bucket_candidates);
+        let best_action = bucket_candidates
+            .first()
+            .map(|candidate| candidate.action)
+            .unwrap_or(EndpointLocalParityAction::Ignore);
+
+        let supported_square_state = supports_square_endpoint_local_parity(&edge.to_canonical);
+        let trimmed_signature =
+            supported_square_state.then(|| trimmed_active_window_signature(&edge.to_canonical));
+
+        self.annotated_hits.push(ApproximateHitParityAnnotatedHit {
+            rank: 0,
+            layer_index: edge.layer_index,
+            direction,
+            move_family: edge.move_family.to_string(),
+            from_depth: edge.from_depth,
+            to_depth: edge.to_depth,
+            enqueued: edge.enqueued,
+            status: status_label(edge.status).to_string(),
+            supported_square_state,
+            coarse_signature,
+            trimmed_active_window_signature: trimmed_signature,
+            from_matrix: edge.from_orig.clone(),
+            to_matrix: edge.to_orig.clone(),
+            to_canonical: edge.to_canonical.clone(),
+            bucket_candidate_count: bucket_candidates.len(),
+            best_action,
+            bucket_candidates,
+        });
+    }
+
+    fn build_report(
+        &self,
+        request: &SearchRequest,
+        result: &SearchRunResult,
+        telemetry: &SearchTelemetry,
+    ) -> ApproximateHitParityReport {
+        let mut annotated_hits = self.annotated_hits.clone();
+        annotated_hits.sort_by(compare_annotated_hits);
+        for (idx, hit) in annotated_hits.iter_mut().enumerate() {
+            hit.rank = idx + 1;
+        }
+
+        let mut hits_by_best_action = BTreeMap::new();
+        let mut candidate_actions = BTreeMap::new();
+        let mut supported_square_hits = 0usize;
+        let mut unsupported_hits = 0usize;
+        let mut multi_candidate_buckets = 0usize;
+
+        for hit in &annotated_hits {
+            *hits_by_best_action
+                .entry(hit.best_action.as_str().to_string())
+                .or_insert(0usize) += 1;
+            if hit.supported_square_state {
+                supported_square_hits += 1;
+            } else {
+                unsupported_hits += 1;
+            }
+            if hit.bucket_candidate_count > 1 {
+                multi_candidate_buckets += 1;
+            }
+            for candidate in &hit.bucket_candidates {
+                *candidate_actions
+                    .entry(candidate.action.as_str().to_string())
+                    .or_insert(0usize) += 1;
+            }
+        }
+
+        ApproximateHitParityReport {
+            source: request.source.clone(),
+            target: request.target.clone(),
+            config: request.config.clone(),
+            stage: request.stage,
+            result: result_label(result).to_string(),
+            telemetry_approximate_other_side_hits: telemetry.approximate_other_side_hits,
+            summary: ApproximateHitParitySummary {
+                discovered_approximate_hit_records: annotated_hits.len(),
+                supported_square_hits,
+                unsupported_hits,
+                multi_candidate_buckets,
+                hits_by_best_action,
+                candidate_actions,
+            },
+            annotated_hits,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DirectionLabel {
+    Forward,
+    Backward,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ApproximateHitParityReport {
+    source: DynMatrix,
+    target: DynMatrix,
+    config: SearchConfig,
+    stage: SearchStage,
+    result: String,
+    telemetry_approximate_other_side_hits: usize,
+    summary: ApproximateHitParitySummary,
+    annotated_hits: Vec<ApproximateHitParityAnnotatedHit>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ApproximateHitParitySummary {
+    discovered_approximate_hit_records: usize,
+    supported_square_hits: usize,
+    unsupported_hits: usize,
+    multi_candidate_buckets: usize,
+    hits_by_best_action: BTreeMap<String, usize>,
+    candidate_actions: BTreeMap<String, usize>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ApproximateHitParityAnnotatedHit {
+    rank: usize,
+    layer_index: usize,
+    direction: DirectionLabel,
+    move_family: String,
+    from_depth: usize,
+    to_depth: usize,
+    enqueued: bool,
+    status: String,
+    supported_square_state: bool,
+    coarse_signature: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trimmed_active_window_signature: Option<String>,
+    from_matrix: DynMatrix,
+    to_matrix: DynMatrix,
+    to_canonical: DynMatrix,
+    bucket_candidate_count: usize,
+    best_action: EndpointLocalParityAction,
+    bucket_candidates: Vec<ApproximateHitParityCandidate>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ApproximateHitParityCandidate {
+    action: EndpointLocalParityAction,
+    counterpart_depth: usize,
+    l1_distance: u64,
+    trimmed_active_window_signature: Option<String>,
+    counterpart_matrix: DynMatrix,
+    counterpart_canonical: DynMatrix,
+}
+
+fn annotate_bucket_candidate(
+    anchor: &DynMatrix,
+    candidate: ApproximateHitVisit,
+) -> ApproximateHitParityCandidate {
+    let action = endpoint_local_parity_action(anchor, &candidate.canonical);
+    let trimmed_signature = supports_square_endpoint_local_parity(&candidate.canonical)
+        .then(|| trimmed_active_window_signature(&candidate.canonical));
+    ApproximateHitParityCandidate {
+        action,
+        counterpart_depth: candidate.depth,
+        l1_distance: matrix_l1_distance(anchor, &candidate.canonical),
+        trimmed_active_window_signature: trimmed_signature,
+        counterpart_matrix: candidate.orig,
+        counterpart_canonical: candidate.canonical,
+    }
+}
+
+fn compare_bucket_candidates(
+    left: &ApproximateHitParityCandidate,
+    right: &ApproximateHitParityCandidate,
+) -> std::cmp::Ordering {
+    action_priority(left.action)
+        .cmp(&action_priority(right.action))
+        .then_with(|| left.l1_distance.cmp(&right.l1_distance))
+        .then_with(|| left.counterpart_depth.cmp(&right.counterpart_depth))
+        .then_with(|| {
+            left.counterpart_canonical
+                .data
+                .cmp(&right.counterpart_canonical.data)
+        })
+}
+
+fn compare_annotated_hits(
+    left: &ApproximateHitParityAnnotatedHit,
+    right: &ApproximateHitParityAnnotatedHit,
+) -> std::cmp::Ordering {
+    action_priority(left.best_action)
+        .cmp(&action_priority(right.best_action))
+        .then_with(|| {
+            right
+                .bucket_candidate_count
+                .cmp(&left.bucket_candidate_count)
+        })
+        .then_with(|| left.layer_index.cmp(&right.layer_index))
+        .then_with(|| left.direction.cmp(&right.direction))
+        .then_with(|| left.to_depth.cmp(&right.to_depth))
+        .then_with(|| left.to_canonical.data.cmp(&right.to_canonical.data))
+}
+
+fn action_priority(action: EndpointLocalParityAction) -> usize {
+    match action {
+        EndpointLocalParityAction::ReuseEndpointLocalParity => 0,
+        EndpointLocalParityAction::RankOrProposeInsideCoarseBucket => 1,
+        EndpointLocalParityAction::Ignore => 2,
+    }
+}
+
+fn matrix_l1_distance(left: &DynMatrix, right: &DynMatrix) -> u64 {
+    if left.rows != right.rows || left.cols != right.cols {
+        return u64::MAX;
+    }
+
+    left.data
+        .iter()
+        .zip(&right.data)
+        .map(|(left, right)| left.abs_diff(*right) as u64)
+        .sum()
+}
+
+fn direction_label(direction: sse_core::types::SearchDirection) -> DirectionLabel {
+    match direction {
+        sse_core::types::SearchDirection::Forward => DirectionLabel::Forward,
+        sse_core::types::SearchDirection::Backward => DirectionLabel::Backward,
+    }
+}
+
+fn opposite_direction(direction: DirectionLabel) -> DirectionLabel {
+    match direction {
+        DirectionLabel::Forward => DirectionLabel::Backward,
+        DirectionLabel::Backward => DirectionLabel::Forward,
+    }
+}
+
+fn maybe_write_approximate_hit_parity_report(
+    request: &SearchRequest,
+    result: &SearchRunResult,
+    telemetry: &SearchTelemetry,
+    observer: Option<&ApproximateHitParityObserver>,
+    output_path: Option<&str>,
+) -> Result<(), String> {
+    let Some(output_path) = output_path else {
+        return Ok(());
+    };
+    let observer = observer.ok_or_else(|| {
+        "approximate hit parity report requested, but the observer was not initialized".to_string()
+    })?;
+    let report = observer.build_report(request, result, telemetry);
+    let json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("failed to serialize approximate hit parity JSON: {err}"))?;
+    write_string_with_parent_dirs(output_path, &format!("{json}\n"), "approximate hit parity")
+}
+
+fn write_string_with_parent_dirs(
+    output_path: &str,
+    contents: &str,
+    label: &str,
+) -> Result<(), String> {
+    if let Some(parent) = Path::new(output_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+        }
+    }
+    fs::write(output_path, contents)
+        .map_err(|err| format!("failed to write {label} to {output_path}: {err}"))
 }
 
 fn maybe_write_guide_artifact(
@@ -979,6 +1398,23 @@ fn stable_signature_hash(signature: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+fn result_label(result: &SearchRunResult) -> &'static str {
+    match result {
+        SearchRunResult::Equivalent(_) => "equivalent",
+        SearchRunResult::EquivalentByStructuredProof(proof) => proof.outcome_label(),
+        SearchRunResult::NotEquivalent(_) => "not_equivalent",
+        SearchRunResult::Unknown => "unknown",
+    }
+}
+
+fn status_label(status: SearchEdgeStatus) -> &'static str {
+    match status {
+        SearchEdgeStatus::SeenCollision => "seen_collision",
+        SearchEdgeStatus::Discovered => "discovered",
+        SearchEdgeStatus::ExactMeet => "exact_meet",
+    }
 }
 
 fn search_stage_label(stage: SearchStage) -> &'static str {
@@ -1404,17 +1840,22 @@ mod tests {
     use super::{
         build_endpoint_witness_inventory, build_result_json, parse_cli, parse_matrix,
         run_with_args, stable_path_hash, witness_matrix_signature,
-        write_endpoint_witness_guide_artifacts, EndpointWitnessLoadedControl,
+        write_endpoint_witness_guide_artifacts, ApproximateHitParityObserver,
+        EndpointWitnessLoadedControl,
     };
     use rusqlite::Connection;
     use sse_core::concrete_shift::{
         canonical_module_shift_witness_2x2, ConcreteShiftRelation2x2, ShiftEquivalenceWitness2x2,
     };
+    use sse_core::endpoint_local_parity::EndpointLocalParityAction;
     use sse_core::guide_artifacts::load_guide_artifacts_from_path;
     use sse_core::matrix::{DynMatrix, SqMatrix};
+    use sse_core::search_observer::{
+        SearchEdgeRecord, SearchEdgeStatus, SearchEvent, SearchObserver, SearchRootRecord,
+    };
     use sse_core::types::{
         ConcreteShiftProof2x2, DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness,
-        FrontierMode, GuideArtifact, GuideArtifactPayload, GuidedRefinementConfig,
+        EsseStep, FrontierMode, GuideArtifact, GuideArtifactPayload, GuidedRefinementConfig,
         MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult, SearchStage,
         SearchTelemetry, ShortcutSearchConfig,
     };
@@ -1451,6 +1892,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.write_guide_artifact.as_deref(), Some("guide.json"));
+    }
+
+    #[test]
+    fn parse_cli_accepts_approximate_hit_parity_report_flag() {
+        let cli = parse_cli(
+            vec![
+                "1,0,0,1".to_string(),
+                "1,0,0,1".to_string(),
+                "--approximate-hit-parity-report".to_string(),
+                "approximate-hit-parity.json".to_string(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            cli.approximate_hit_parity_report.as_deref(),
+            Some("approximate-hit-parity.json")
+        );
     }
 
     #[test]
@@ -1726,6 +2186,106 @@ mod tests {
         assert_eq!(
             json["endpoint_exact_meets"]["retained"][0]["path"]["matrices"][0],
             serde_json::json!([[1, 0], [0, 1]])
+        );
+    }
+
+    #[test]
+    fn approximate_hit_parity_report_marks_trimmed_match_as_reuse() {
+        let request = identity_request();
+        let result = SearchRunResult::Unknown;
+        let telemetry = SearchTelemetry {
+            approximate_other_side_hits: 1,
+            ..Default::default()
+        };
+        let root = SearchRootRecord {
+            direction: sse_core::types::SearchDirection::Backward,
+            canonical: k3_overlap_square().canonical_perm(),
+            orig: k3_overlap_square(),
+            depth: 2,
+        };
+        let edge = SearchEdgeRecord {
+            layer_index: 1,
+            direction: sse_core::types::SearchDirection::Forward,
+            move_family: "square_factorisation_3x3",
+            from_canonical: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            from_orig: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            to_canonical: k3_overlap_square().canonical_perm(),
+            to_orig: k3_overlap_square(),
+            from_depth: 1,
+            to_depth: 2,
+            step: EsseStep {
+                u: DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]),
+                v: DynMatrix::new(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]),
+            },
+            status: SearchEdgeStatus::Discovered,
+            approximate_other_side_hit: true,
+            enqueued: true,
+        };
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&SearchEvent::Roots(vec![root]));
+        observer.on_event(&SearchEvent::Layer(vec![edge]));
+
+        let report = observer.build_report(&request, &result, &telemetry);
+        assert_eq!(report.summary.supported_square_hits, 1);
+        assert_eq!(report.annotated_hits.len(), 1);
+        assert_eq!(
+            report.annotated_hits[0].best_action,
+            EndpointLocalParityAction::ReuseEndpointLocalParity
+        );
+        assert_eq!(
+            report.annotated_hits[0].bucket_candidates[0].action,
+            EndpointLocalParityAction::ReuseEndpointLocalParity
+        );
+    }
+
+    #[test]
+    fn approximate_hit_parity_report_marks_coarse_only_square_match_as_rank() {
+        let request = identity_request();
+        let result = SearchRunResult::Unknown;
+        let telemetry = SearchTelemetry {
+            approximate_other_side_hits: 1,
+            ..Default::default()
+        };
+        let root = SearchRootRecord {
+            direction: sse_core::types::SearchDirection::Backward,
+            canonical: rank4_counterpart_matrix().canonical_perm(),
+            orig: rank4_counterpart_matrix(),
+            depth: 3,
+        };
+        let edge = SearchEdgeRecord {
+            layer_index: 2,
+            direction: sse_core::types::SearchDirection::Forward,
+            move_family: "diagonal_refactorization_4x4",
+            from_canonical: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            from_orig: DynMatrix::new(2, 2, vec![1, 0, 0, 1]),
+            to_canonical: rank4_to_matrix().canonical_perm(),
+            to_orig: rank4_to_matrix(),
+            from_depth: 2,
+            to_depth: 3,
+            step: EsseStep {
+                u: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+                v: DynMatrix::new(4, 4, vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            },
+            status: SearchEdgeStatus::Discovered,
+            approximate_other_side_hit: true,
+            enqueued: true,
+        };
+
+        let mut observer = ApproximateHitParityObserver::default();
+        observer.on_event(&SearchEvent::Roots(vec![root]));
+        observer.on_event(&SearchEvent::Layer(vec![edge]));
+
+        let report = observer.build_report(&request, &result, &telemetry);
+        assert_eq!(report.summary.supported_square_hits, 1);
+        assert_eq!(report.annotated_hits.len(), 1);
+        assert_eq!(
+            report.annotated_hits[0].best_action,
+            EndpointLocalParityAction::RankOrProposeInsideCoarseBucket
+        );
+        assert_eq!(
+            report.annotated_hits[0].bucket_candidates[0].action,
+            EndpointLocalParityAction::RankOrProposeInsideCoarseBucket
         );
     }
 
@@ -2257,6 +2817,18 @@ mod tests {
             guided_refinement: GuidedRefinementConfig::default(),
             shortcut_search: ShortcutSearchConfig::default(),
         }
+    }
+
+    fn k3_overlap_square() -> DynMatrix {
+        DynMatrix::new(3, 3, vec![0, 1, 0, 1, 0, 1, 0, 1, 0])
+    }
+
+    fn rank4_to_matrix() -> DynMatrix {
+        DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0])
+    }
+
+    fn rank4_counterpart_matrix() -> DynMatrix {
+        DynMatrix::new(4, 4, vec![1, 12, 0, 1, 1, 1, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0])
     }
 
     fn temp_sqlite_path(label: &str) -> std::path::PathBuf {

@@ -3,6 +3,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sse_core::endpoint_local_parity::{
+    mass_support_signature, trim_zero_rows_and_cols, trimmed_active_window,
+    trimmed_active_window_signature,
+};
 use sse_core::guide_artifacts::load_guide_artifacts_from_path;
 use sse_core::matrix::DynMatrix;
 use sse_core::types::{GuideArtifact, GuideArtifactPayload};
@@ -1167,52 +1171,6 @@ where
     }
 }
 
-fn mass_support_signature(matrix: &DynMatrix) -> String {
-    let mut row_sums = vec![0u64; matrix.rows];
-    let mut col_sums = vec![0u64; matrix.cols];
-    let mut row_supports = vec![0u8; matrix.rows];
-    let mut col_supports = vec![0u8; matrix.cols];
-    let mut entry_sum = 0u64;
-
-    for row in 0..matrix.rows {
-        for col in 0..matrix.cols {
-            let value = matrix.get(row, col);
-            row_sums[row] += value as u64;
-            col_sums[col] += value as u64;
-            entry_sum += value as u64;
-            if value != 0 {
-                row_supports[row] += 1;
-                col_supports[col] += 1;
-            }
-        }
-    }
-
-    row_sums.sort_unstable();
-    col_sums.sort_unstable();
-    row_supports.sort_unstable();
-    col_supports.sort_unstable();
-
-    format!(
-        "d{}|sum{}|rs{}|cs{}|rS{}|cS{}",
-        matrix.rows,
-        entry_sum,
-        join_u64(&row_sums),
-        join_u64(&col_sums),
-        join_u8(&row_supports),
-        join_u8(&col_supports),
-    )
-}
-
-fn trimmed_active_window_signature(matrix: &DynMatrix) -> String {
-    let trimmed = trimmed_active_window(matrix);
-    format!(
-        "{}x{}|{}",
-        trimmed.rows,
-        trimmed.cols,
-        join_u32(&trimmed.data)
-    )
-}
-
 fn trimmed_entry_bag_signature(matrix: &DynMatrix) -> String {
     let trimmed = trimmed_active_window(matrix);
     let mut row_sums = vec![0u64; trimmed.rows];
@@ -1250,29 +1208,6 @@ fn trimmed_entry_bag_signature(matrix: &DynMatrix) -> String {
         join_u8(&col_supports),
         join_u32(&positive_entries),
     )
-}
-
-fn trimmed_active_window(matrix: &DynMatrix) -> DynMatrix {
-    let canonical = matrix.canonical_perm();
-    trim_zero_rows_and_cols(&canonical)
-}
-
-fn trim_zero_rows_and_cols(matrix: &DynMatrix) -> DynMatrix {
-    let active_rows = (0..matrix.rows)
-        .filter(|&row| (0..matrix.cols).any(|col| matrix.get(row, col) != 0))
-        .collect::<Vec<_>>();
-    let active_cols = (0..matrix.cols)
-        .filter(|&col| (0..matrix.rows).any(|row| matrix.get(row, col) != 0))
-        .collect::<Vec<_>>();
-
-    let mut data = Vec::with_capacity(active_rows.len() * active_cols.len());
-    for &row in &active_rows {
-        for &col in &active_cols {
-            data.push(matrix.get(row, col));
-        }
-    }
-
-    DynMatrix::new(active_rows.len(), active_cols.len(), data)
 }
 
 fn fallback_artifact_id(guide_tag: &str, guide_label: &str, artifact_index: usize) -> String {

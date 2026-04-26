@@ -1,6 +1,7 @@
 pub mod balanced;
 pub mod concrete_shift;
 pub mod conjugacy;
+pub mod endpoint_local_parity;
 pub mod factorisation;
 pub mod graph_moves;
 pub mod guide_artifacts;
