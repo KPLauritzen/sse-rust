@@ -240,6 +240,11 @@ path = "src/bin/diagnose_support_incidence_descriptors.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "diagnose_spectral_walk_descriptors"
+path = "src/bin/diagnose_spectral_walk_descriptors.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "explain_witness_step"
 path = "src/bin/explain_witness_step.rs"
 required-features = ["research-tools"]
