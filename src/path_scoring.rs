@@ -713,12 +713,21 @@ mod tests {
             DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0]);
         let sparse_cols =
             DynMatrix::new(4, 4, vec![1, 3, 0, 0, 4, 1, 0, 0, 2, 0, 0, 0, 7, 6, 0, 0]);
+        let row_permuted_sparse =
+            DynMatrix::new(4, 4, vec![0, 0, 0, 0, 1, 4, 2, 7, 0, 0, 0, 0, 3, 1, 0, 6]);
+        let col_permuted_sparse =
+            DynMatrix::new(4, 4, vec![2, 1, 7, 4, 0, 3, 6, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
         let dense_witness_profile =
             DynMatrix::new(4, 4, vec![1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1]);
         let same_dim_miss =
             DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 1, 5, 0, 0, 0, 0, 0, 0, 0, 0]);
 
-        for profile in [sparse_rows, sparse_cols] {
+        for profile in [
+            sparse_rows,
+            sparse_cols,
+            row_permuted_sparse,
+            col_permuted_sparse,
+        ] {
             let bonus = score_node_with_sparse_k4_bridge_profile(&profile, &target)
                 - score_node(&profile, &target);
             assert_eq!(bonus, -48.0);
