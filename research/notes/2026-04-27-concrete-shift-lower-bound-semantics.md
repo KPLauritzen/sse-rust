@@ -117,6 +117,12 @@ to:
 bounded_exhausted
 ```
 
+Because `result_status` is part of the emitted JSON report surface, the
+proposal report schema was bumped from `schema_version = 1` to
+`schema_version = 2`. The rename applies to both the general concrete-shift
+proposal report surface and the restricted boolean-bridge aligned
+concrete-shift report surface.
+
 The same slice added enum documentation clarifying that concrete-shift
 `Exhausted` and profile `Exhausted` are bounded statuses. No solver behavior,
 ranking behavior, search ordering, move generation, deduplication, or

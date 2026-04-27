@@ -29,6 +29,10 @@ enum CliAction {
     Help,
 }
 
+/// Schema v2 renames negative bounded exhaustion from `exhausted` to
+/// `bounded_exhausted` in `result_status`.
+const REPORT_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Debug, Serialize)]
 struct Report {
     schema_version: u32,
@@ -118,7 +122,7 @@ fn main() -> Result<(), String> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     let report = Report {
-        schema_version: 1,
+        schema_version: REPORT_SCHEMA_VERSION,
         artifact_kind: cli.surface.artifact_kind(),
         relation: cli.relation.as_str(),
         witness_class: cli.surface.witness_class(),
@@ -343,7 +347,10 @@ fn run_case(
 
 #[cfg(test)]
 mod tests {
-    use super::{available_cases, parse_cli, run_case, CliAction, ControlCase2x2, ReportSurface};
+    use super::{
+        available_cases, parse_cli, run_case, CliAction, ControlCase2x2, ReportSurface,
+        REPORT_SCHEMA_VERSION,
+    };
     use sse_core::concrete_shift::{ConcreteShiftProposalBounds2x2, ConcreteShiftSearchConfig2x2};
     use sse_core::matrix::SqMatrix;
 
@@ -355,6 +362,11 @@ mod tests {
         assert_eq!(cli.case_ids, vec!["lag_one_shortcut_control"]);
         assert_eq!(cli.bridge_sample_limit, 2);
         assert_eq!(cli.bounds.max_lag, 1);
+    }
+
+    #[test]
+    fn report_schema_version_tracks_bounded_status_rename() {
+        assert_eq!(REPORT_SCHEMA_VERSION, 2);
     }
 
     #[test]
@@ -461,8 +473,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn general_surface_labels_negative_exhaustion_as_bounded() {
+    fn bounded_exhausted_control() -> (
+        ControlCase2x2,
+        ConcreteShiftProposalBounds2x2,
+        ConcreteShiftSearchConfig2x2,
+    ) {
         let case = ControlCase2x2 {
             id: "bounded_exhausted_control",
             description: "control with no bounded shift witness",
@@ -480,9 +495,32 @@ mod tests {
             max_entry: bounds.max_entry,
             max_witnesses: bounds.max_witnesses,
         };
+        (case, bounds, config)
+    }
+
+    #[test]
+    fn general_surface_labels_negative_exhaustion_as_bounded() {
+        let (case, bounds, config) = bounded_exhausted_control();
 
         let report = run_case(case, &config, &bounds, 1, ReportSurface::General)
             .expect("expected case report");
+
+        assert_eq!(report.result_status, "bounded_exhausted");
+        assert!(report.proposal.is_none());
+    }
+
+    #[test]
+    fn boolean_bridge_surface_labels_negative_exhaustion_as_bounded() {
+        let (case, bounds, config) = bounded_exhausted_control();
+
+        let report = run_case(
+            case,
+            &config,
+            &bounds,
+            1,
+            ReportSurface::BooleanBridgeAligned,
+        )
+        .expect("expected case report");
 
         assert_eq!(report.result_status, "bounded_exhausted");
         assert!(report.proposal.is_none());
