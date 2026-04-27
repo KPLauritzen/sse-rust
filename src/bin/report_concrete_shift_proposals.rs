@@ -1,8 +1,9 @@
 use serde::Serialize;
 use sse_core::concrete_shift::{
-    concrete_shift_proposal_data_2x2, search_concrete_shift_equivalence_2x2,
-    ConcreteShiftProposalBounds2x2, ConcreteShiftProposalData2x2, ConcreteShiftRelation2x2,
-    ConcreteShiftSearchConfig2x2, ConcreteShiftSearchResult2x2,
+    concrete_shift_profile_2x2, concrete_shift_proposal_data_2x2,
+    search_concrete_shift_equivalence_2x2, ConcreteShiftProfile2x2, ConcreteShiftProfileConfig2x2,
+    ConcreteShiftProfileStatus2x2, ConcreteShiftProposalBounds2x2, ConcreteShiftProposalData2x2,
+    ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2, ConcreteShiftSearchResult2x2,
 };
 use sse_core::matrix::SqMatrix;
 
@@ -20,6 +21,7 @@ struct Cli {
     surface: ReportSurface,
     relation: ConcreteShiftRelation2x2,
     bounds: ConcreteShiftProposalBounds2x2,
+    profile_config: ConcreteShiftProfileConfig2x2,
     bridge_sample_limit: usize,
 }
 
@@ -29,9 +31,11 @@ enum CliAction {
     Help,
 }
 
-/// Schema v2 renames negative bounded exhaustion from `exhausted` to
+/// Schema v3 adds per-case bounded concrete-shift profile telemetry.
+///
+/// Schema v2 renamed negative bounded exhaustion from `exhausted` to
 /// `bounded_exhausted` in `result_status`.
-const REPORT_SCHEMA_VERSION: u32 = 2;
+const REPORT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Serialize)]
 struct Report {
@@ -41,8 +45,29 @@ struct Report {
     witness_class: &'static str,
     search_restriction: &'static str,
     bounds: ConcreteShiftProposalBounds2x2,
+    profile_config: ProfileConfigReport,
     bridge_sample_limit: usize,
     cases: Vec<CaseReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProfileConfigReport {
+    relation: &'static str,
+    max_lag: u32,
+    max_entry: u32,
+    max_witnesses: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ProfileReport {
+    relation: &'static str,
+    max_lag: u32,
+    max_entry: u32,
+    max_witnesses: usize,
+    status: &'static str,
+    shift_witnesses: usize,
+    concrete_witness_lag: Option<u32>,
+    limit_reached: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +76,7 @@ struct CaseReport {
     description: &'static str,
     source: [[u32; 2]; 2],
     target: [[u32; 2]; 2],
+    profile: ProfileReport,
     result_status: &'static str,
     proposal: Option<ConcreteShiftProposalData2x2>,
 }
@@ -116,6 +142,7 @@ fn main() -> Result<(), String> {
                 case,
                 &config,
                 &cli.bounds,
+                &cli.profile_config,
                 cli.bridge_sample_limit,
                 cli.surface,
             )
@@ -128,6 +155,7 @@ fn main() -> Result<(), String> {
         witness_class: cli.surface.witness_class(),
         search_restriction: cli.surface.search_restriction(),
         bounds: cli.bounds,
+        profile_config: profile_config_report(&cli.profile_config),
         bridge_sample_limit: cli.bridge_sample_limit,
         cases,
     };
@@ -150,6 +178,7 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
         max_entry: 6,
         max_witnesses: 10_000,
     };
+    let mut profile_config = ConcreteShiftProfileConfig2x2::default();
     let mut max_entry_set = false;
     let mut bridge_sample_limit = 2usize;
     let mut args = args.peekable();
@@ -185,6 +214,22 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
             }
             "--max-witnesses" => {
                 bounds.max_witnesses = parse_usize_arg(&mut args, "--max-witnesses")?;
+            }
+            "--profile-relation" => {
+                let value = args
+                    .next()
+                    .ok_or("--profile-relation requires a value".to_string())?;
+                profile_config.relation = parse_relation(&value)?;
+            }
+            "--profile-max-lag" => {
+                profile_config.max_lag = parse_u32_arg(&mut args, "--profile-max-lag")?;
+            }
+            "--profile-max-entry" => {
+                profile_config.max_entry = parse_u32_arg(&mut args, "--profile-max-entry")?;
+            }
+            "--profile-max-witnesses" => {
+                profile_config.max_witnesses =
+                    parse_usize_arg(&mut args, "--profile-max-witnesses")?;
             }
             "--bridge-sample-limit" => {
                 bridge_sample_limit = parse_usize_arg(&mut args, "--bridge-sample-limit")?;
@@ -224,12 +269,19 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliAction, String> {
     if bounds.max_witnesses == 0 {
         return Err("--max-witnesses must be at least 1".to_string());
     }
+    if profile_config.max_lag == 0 {
+        return Err("--profile-max-lag must be at least 1".to_string());
+    }
+    if profile_config.max_witnesses == 0 {
+        return Err("--profile-max-witnesses must be at least 1".to_string());
+    }
 
     Ok(CliAction::Run(Cli {
         case_ids,
         surface,
         relation,
         bounds,
+        profile_config,
         bridge_sample_limit,
     }))
 }
@@ -238,7 +290,10 @@ fn usage() -> &'static str {
     "Usage: report_concrete_shift_proposals [--case CASE ...]\
 \n       [--boolean-bridge-aligned]\
 \n       [--relation aligned|balanced|compatible] [--max-lag N] [--max-entry N]\
-\n       [--max-witnesses N] [--bridge-sample-limit N] [--list-cases]"
+\n       [--max-witnesses N]\
+\n       [--profile-relation aligned|balanced|compatible] [--profile-max-lag N]\
+\n       [--profile-max-entry N] [--profile-max-witnesses N]\
+\n       [--bridge-sample-limit N] [--list-cases]"
 }
 
 fn parse_relation(value: &str) -> Result<ConcreteShiftRelation2x2, String> {
@@ -308,6 +363,25 @@ fn available_cases() -> Vec<ControlCase2x2> {
             source: SqMatrix::new([[0, 1], [1, 2]]),
             target: SqMatrix::new([[1, 1], [2, 1]]),
         },
+        ControlCase2x2 {
+            id: "brix_ruiz_k3",
+            description: "known Brix-Ruiz k=3 endpoint control from research/cases.json",
+            source: SqMatrix::new([[1, 3], [2, 1]]),
+            target: SqMatrix::new([[1, 6], [1, 1]]),
+        },
+        ControlCase2x2 {
+            id: "brix_ruiz_k3_seeded_start_transpose",
+            description:
+                "Brix-Ruiz k=3 source to first 2x2 seeded-guide waypoint from fixture data",
+            source: SqMatrix::new([[1, 3], [2, 1]]),
+            target: SqMatrix::new([[1, 2], [3, 1]]),
+        },
+        ControlCase2x2 {
+            id: "brix_ruiz_k4_probe",
+            description: "open Brix-Ruiz k=4 evidence lane from research/cases.json",
+            source: SqMatrix::new([[1, 4], [3, 1]]),
+            target: SqMatrix::new([[1, 12], [1, 1]]),
+        },
     ]
 }
 
@@ -315,9 +389,15 @@ fn run_case(
     case: ControlCase2x2,
     config: &ConcreteShiftSearchConfig2x2,
     bounds: &ConcreteShiftProposalBounds2x2,
+    profile_config: &ConcreteShiftProfileConfig2x2,
     bridge_sample_limit: usize,
     surface: ReportSurface,
 ) -> Result<CaseReport, String> {
+    let profile = profile_report(concrete_shift_profile_2x2(
+        &case.source,
+        &case.target,
+        profile_config,
+    ));
     let result = search_concrete_shift_equivalence_2x2(&case.source, &case.target, config);
     let (result_status, proposal) = match result {
         ConcreteShiftSearchResult2x2::Equivalent(witness) => (
@@ -340,18 +420,53 @@ fn run_case(
         description: case.description,
         source: case.source.data,
         target: case.target.data,
+        profile,
         result_status,
         proposal,
     })
 }
 
+fn profile_config_report(config: &ConcreteShiftProfileConfig2x2) -> ProfileConfigReport {
+    ProfileConfigReport {
+        relation: config.relation.as_str(),
+        max_lag: config.max_lag,
+        max_entry: config.max_entry,
+        max_witnesses: config.max_witnesses,
+    }
+}
+
+fn profile_report(profile: ConcreteShiftProfile2x2) -> ProfileReport {
+    ProfileReport {
+        relation: profile.relation.as_str(),
+        max_lag: profile.max_lag,
+        max_entry: profile.max_entry,
+        max_witnesses: profile.max_witnesses,
+        status: profile_status_label(profile.status),
+        shift_witnesses: profile.shift_witnesses,
+        concrete_witness_lag: profile.concrete_witness_lag,
+        limit_reached: profile.limit_reached,
+    }
+}
+
+fn profile_status_label(status: ConcreteShiftProfileStatus2x2) -> &'static str {
+    match status {
+        ConcreteShiftProfileStatus2x2::Equivalent => "equivalent",
+        ConcreteShiftProfileStatus2x2::ShiftWitnessOnly => "shift_witness_only",
+        ConcreteShiftProfileStatus2x2::Exhausted => "bounded_exhausted",
+        ConcreteShiftProfileStatus2x2::SearchLimitReached => "search_limit_reached",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        available_cases, parse_cli, run_case, CliAction, ControlCase2x2, ReportSurface,
-        REPORT_SCHEMA_VERSION,
+        available_cases, parse_cli, profile_status_label, run_case, CliAction, ControlCase2x2,
+        ReportSurface, REPORT_SCHEMA_VERSION,
     };
-    use sse_core::concrete_shift::{ConcreteShiftProposalBounds2x2, ConcreteShiftSearchConfig2x2};
+    use sse_core::concrete_shift::{
+        ConcreteShiftProfileConfig2x2, ConcreteShiftProfileStatus2x2,
+        ConcreteShiftProposalBounds2x2, ConcreteShiftSearchConfig2x2,
+    };
     use sse_core::matrix::SqMatrix;
 
     #[test]
@@ -362,11 +477,19 @@ mod tests {
         assert_eq!(cli.case_ids, vec!["lag_one_shortcut_control"]);
         assert_eq!(cli.bridge_sample_limit, 2);
         assert_eq!(cli.bounds.max_lag, 1);
+        assert_eq!(cli.profile_config.max_lag, 1);
+        assert_eq!(cli.profile_config.max_entry, 1);
+        assert_eq!(cli.profile_config.max_witnesses, 32);
     }
 
     #[test]
     fn report_schema_version_tracks_bounded_status_rename() {
-        assert_eq!(REPORT_SCHEMA_VERSION, 2);
+        assert!(REPORT_SCHEMA_VERSION >= 2);
+    }
+
+    #[test]
+    fn report_schema_version_tracks_profile_telemetry() {
+        assert_eq!(REPORT_SCHEMA_VERSION, 3);
     }
 
     #[test]
@@ -385,6 +508,14 @@ mod tests {
                 "64".to_string(),
                 "--bridge-sample-limit".to_string(),
                 "1".to_string(),
+                "--profile-relation".to_string(),
+                "compatible".to_string(),
+                "--profile-max-lag".to_string(),
+                "3".to_string(),
+                "--profile-max-entry".to_string(),
+                "2".to_string(),
+                "--profile-max-witnesses".to_string(),
+                "128".to_string(),
             ]
             .into_iter(),
         )
@@ -398,6 +529,10 @@ mod tests {
         assert_eq!(cli.bounds.max_entry, 3);
         assert_eq!(cli.bounds.max_witnesses, 64);
         assert_eq!(cli.bridge_sample_limit, 1);
+        assert_eq!(cli.profile_config.relation.as_str(), "compatible");
+        assert_eq!(cli.profile_config.max_lag, 3);
+        assert_eq!(cli.profile_config.max_entry, 2);
+        assert_eq!(cli.profile_config.max_witnesses, 128);
     }
 
     #[test]
@@ -450,11 +585,16 @@ mod tests {
             max_witnesses: 10_000,
         };
 
-        for case in available_cases() {
+        for case_id in ["identity", "lag_one_shortcut_control"] {
+            let case = available_cases()
+                .into_iter()
+                .find(|case| case.id == case_id)
+                .expect("positive control should exist");
             let report = run_case(
-                case.clone(),
+                case,
                 &config,
                 &bounds,
+                &ConcreteShiftProfileConfig2x2::default(),
                 1,
                 ReportSurface::BooleanBridgeAligned,
             )
@@ -471,6 +611,26 @@ mod tests {
             assert!(proposal.bridge_r.max_entry <= 1);
             assert!(proposal.bridge_s.max_entry <= 1);
         }
+    }
+
+    #[test]
+    fn available_cases_include_brix_ruiz_profile_controls() {
+        let case_ids = available_cases()
+            .into_iter()
+            .map(|case| case.id)
+            .collect::<Vec<_>>();
+
+        assert!(case_ids.contains(&"brix_ruiz_k3"));
+        assert!(case_ids.contains(&"brix_ruiz_k3_seeded_start_transpose"));
+        assert!(case_ids.contains(&"brix_ruiz_k4_probe"));
+    }
+
+    #[test]
+    fn profile_status_labels_bounded_exhaustion_explicitly() {
+        assert_eq!(
+            profile_status_label(ConcreteShiftProfileStatus2x2::Exhausted),
+            "bounded_exhausted"
+        );
     }
 
     fn bounded_exhausted_control() -> (
@@ -502,11 +662,19 @@ mod tests {
     fn general_surface_labels_negative_exhaustion_as_bounded() {
         let (case, bounds, config) = bounded_exhausted_control();
 
-        let report = run_case(case, &config, &bounds, 1, ReportSurface::General)
-            .expect("expected case report");
+        let report = run_case(
+            case,
+            &config,
+            &bounds,
+            &ConcreteShiftProfileConfig2x2::default(),
+            1,
+            ReportSurface::General,
+        )
+        .expect("expected case report");
 
         assert_eq!(report.result_status, "bounded_exhausted");
         assert!(report.proposal.is_none());
+        assert_eq!(report.profile.max_lag, 1);
     }
 
     #[test]
@@ -517,6 +685,7 @@ mod tests {
             case,
             &config,
             &bounds,
+            &ConcreteShiftProfileConfig2x2::default(),
             1,
             ReportSurface::BooleanBridgeAligned,
         )
