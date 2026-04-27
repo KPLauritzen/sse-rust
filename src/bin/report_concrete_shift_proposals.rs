@@ -381,6 +381,19 @@ fn available_cases() -> Vec<ControlCase2x2> {
             target: SqMatrix::new([[1, 2], [3, 1]]),
         },
         ControlCase2x2 {
+            id: "brix_ruiz_k3_non_baker_near_target",
+            description: "Brix-Ruiz k=3 non-Baker lag-7 replay penultimate 2x2 state to target",
+            source: SqMatrix::new([[0, 5], [1, 2]]),
+            target: SqMatrix::new([[1, 6], [1, 1]]),
+        },
+        ControlCase2x2 {
+            id: "brix_ruiz_k3_retained_near_target_transpose",
+            description:
+                "Brix-Ruiz k=3 retained exact-meet penultimate transposed 2x2 state to target",
+            source: SqMatrix::new([[0, 1], [5, 2]]),
+            target: SqMatrix::new([[1, 6], [1, 1]]),
+        },
+        ControlCase2x2 {
             id: "brix_ruiz_k4_probe",
             description: "open Brix-Ruiz k=4 evidence lane from research/cases.json",
             source: SqMatrix::new([[1, 4], [3, 1]]),
@@ -632,6 +645,8 @@ mod tests {
 
         assert!(case_ids.contains(&"brix_ruiz_k3"));
         assert!(case_ids.contains(&"brix_ruiz_k3_seeded_start_transpose"));
+        assert!(case_ids.contains(&"brix_ruiz_k3_non_baker_near_target"));
+        assert!(case_ids.contains(&"brix_ruiz_k3_retained_near_target_transpose"));
         assert!(case_ids.contains(&"brix_ruiz_k4_probe"));
     }
 
