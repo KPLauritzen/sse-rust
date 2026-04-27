@@ -1677,7 +1677,9 @@ fn endpoint_witness_orientation_status(surface: &EndpointExactMeetSurface) -> &'
 }
 
 fn endpoint_witness_orientation_note(surface: &EndpointExactMeetSurface) -> &'static str {
-    if endpoint_witness_orientation_status(surface) == "recorded" {
+    if surface.retained.is_empty() {
+        "no retained exact-meet rows were present, so endpoint orientation is not applicable"
+    } else if endpoint_witness_orientation_status(surface) == "recorded" {
         "endpoint_orientation records the frontier expansion direction that produced each retained exact meet: forward from the source frontier or backward from the target frontier"
     } else {
         "at least one retained exact-meet row does not record the frontier expansion direction that produced the meet"
@@ -2989,6 +2991,19 @@ mod tests {
             unrecorded_inventory.rows[0].endpoint_orientation,
             "not_recorded"
         );
+
+        let empty_inventory = build_endpoint_witness_inventory(
+            &request,
+            &EndpointExactMeetSurface {
+                requested_cap: 1,
+                retained: vec![],
+            },
+            &controls,
+            vec![],
+        );
+        assert_eq!(empty_inventory.orientation_status, "not_recorded");
+        assert!(empty_inventory.orientation_note.contains("no retained"));
+        assert!(empty_inventory.rows.is_empty());
     }
 
     #[test]

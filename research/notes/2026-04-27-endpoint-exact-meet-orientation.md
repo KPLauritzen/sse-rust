@@ -35,7 +35,8 @@ This is a frontier expansion direction, not a new path class.
   `meet_direction`.
 - Inventory: `rows[].endpoint_orientation` now reports `forward` or
   `backward`; `orientation_status` is `recorded` only when every retained row
-  has a recorded direction, otherwise it remains `not_recorded`.
+  has a recorded direction, otherwise it remains `not_recorded`. Empty
+  retained surfaces keep `not_recorded` with an explicit not-applicable note.
 
 Before:
 
