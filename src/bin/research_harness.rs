@@ -19,15 +19,19 @@ use sse_core::types::{
 mod execution;
 #[path = "research_harness/reporting.rs"]
 mod reporting;
+#[path = "research_harness/scoring.rs"]
+mod scoring;
 #[path = "research_harness/summary.rs"]
 mod summary;
 
 use self::execution::run_case;
 use self::reporting::format_pretty_summary;
+use self::scoring::{load_reused_results, BestKnownWitness, OutcomePoints};
 use self::summary::run_harness;
 #[cfg(test)]
 use self::{
     execution::execute_case_for_harness,
+    scoring::{endpoint_identity_key, merge_best_known_witness},
     summary::{
         build_campaign_summaries, build_comparison_summaries, build_deepening_schedule_summaries,
         build_strategy_summaries, derive_telemetry_summary, lag_score, scheduled_cases,
@@ -256,15 +260,6 @@ fn default_move_family_policy() -> MoveFamilyPolicy {
     MoveFamilyPolicy::Mixed
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct OutcomePoints {
-    equivalent: i64,
-    not_equivalent: i64,
-    unknown: i64,
-    timeout: i64,
-    panic: i64,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct WorkerCaseResult {
     id: String,
@@ -410,13 +405,6 @@ struct ComparisonVariantSummary {
     hit_target: bool,
     points: i64,
     elapsed_ms: u128,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct BestKnownWitness {
-    lag: usize,
-    elapsed_ms: u128,
-    source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1098,103 +1086,6 @@ fn materialize_seeded_guide_artifact(
     })
 }
 
-#[derive(Debug, Default)]
-struct ReusedResults {
-    endpoint_best_witness: BTreeMap<String, BestKnownWitness>,
-    sources: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PersistedHarnessSummary {
-    #[serde(default)]
-    cases: Vec<PersistedCaseSummary>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PersistedCaseSummary {
-    endpoint: EndpointSummary,
-    elapsed_ms: u128,
-    result_model: PersistedResultModel,
-}
-
-#[derive(Debug, Deserialize)]
-struct PersistedResultModel {
-    witness_lag: Option<usize>,
-}
-
-fn load_reused_results(
-    reuse_runs: &[PathBuf],
-    reuse_dirs: &[PathBuf],
-) -> Result<ReusedResults, String> {
-    let mut sources = reuse_runs.to_vec();
-    for dir in reuse_dirs {
-        let entries = match fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => {
-                return Err(format!(
-                    "failed to read reuse directory {}: {err}",
-                    dir.display()
-                ))
-            }
-        };
-        let mut dir_sources = Vec::new();
-        for entry in entries {
-            let entry =
-                entry.map_err(|err| format!("failed to read entry in {}: {err}", dir.display()))?;
-            let path = entry.path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
-                dir_sources.push(path);
-            }
-        }
-        dir_sources.sort();
-        sources.extend(dir_sources);
-    }
-
-    let mut reused = ReusedResults::default();
-    for source in sources {
-        let raw = fs::read_to_string(&source)
-            .map_err(|err| format!("failed to read reuse artifact {}: {err}", source.display()))?;
-        let parsed: PersistedHarnessSummary = serde_json::from_str(&raw)
-            .map_err(|err| format!("failed to parse reuse artifact {}: {err}", source.display()))?;
-        let source_label = source.display().to_string();
-        reused.sources.push(source_label.clone());
-
-        for case in parsed.cases {
-            let Some(lag) = case.result_model.witness_lag else {
-                continue;
-            };
-            let endpoint_key = endpoint_identity_key(&case.endpoint);
-            let candidate = BestKnownWitness {
-                lag,
-                elapsed_ms: case.elapsed_ms,
-                source: source_label.clone(),
-            };
-            match reused.endpoint_best_witness.get(&endpoint_key) {
-                Some(existing) if !best_known_witness_beats(&candidate, existing) => {}
-                _ => {
-                    reused.endpoint_best_witness.insert(endpoint_key, candidate);
-                }
-            }
-        }
-    }
-
-    Ok(reused)
-}
-
-fn endpoint_identity_key(endpoint: &EndpointSummary) -> String {
-    serde_json::to_string(&(
-        endpoint.source_dim,
-        endpoint.target_dim,
-        &endpoint.a,
-        &endpoint.b,
-    ))
-    .expect("endpoint identity key should serialise")
-}
-
 fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
     if rows.is_empty() {
         return Err("matrix must have at least one row".to_string());
@@ -1208,45 +1099,6 @@ fn case_matrix(rows: &[Vec<u32>]) -> Result<DynMatrix, String> {
         dim,
         rows.iter().flat_map(|row| row.iter().copied()).collect(),
     ))
-}
-
-fn best_known_witness_beats(candidate: &BestKnownWitness, existing: &BestKnownWitness) -> bool {
-    candidate.lag < existing.lag
-        || (candidate.lag == existing.lag && candidate.elapsed_ms < existing.elapsed_ms)
-        || (candidate.lag == existing.lag
-            && candidate.elapsed_ms == existing.elapsed_ms
-            && candidate.source < existing.source)
-}
-
-fn merge_best_known_witness(
-    current: Option<BestKnownWitness>,
-    historical: Option<&BestKnownWitness>,
-) -> (Option<BestKnownWitness>, bool) {
-    match (current, historical) {
-        (Some(current), Some(historical)) => {
-            if best_known_witness_beats(&current, historical) {
-                (Some(current), true)
-            } else {
-                (Some(historical.clone()), false)
-            }
-        }
-        (Some(current), None) => (Some(current), true),
-        (None, Some(historical)) => (Some(historical.clone()), false),
-        (None, None) => (None, false),
-    }
-}
-
-impl OutcomePoints {
-    fn for_outcome(&self, outcome: &str) -> i64 {
-        match outcome {
-            "equivalent" => self.equivalent,
-            "not_equivalent" => self.not_equivalent,
-            "unknown" => self.unknown,
-            "timeout" => self.timeout,
-            "panic" => self.panic,
-            _ => self.panic,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1632,10 +1484,13 @@ mod tests {
         fs::remove_dir_all(temp_dir).expect("temporary fixture directory should be removed");
     }
 
-    #[test]
-    fn run_case_guided_refinement_uses_guide_artifact_inputs() {
-        let case = ResearchCase {
-            id: "guided-artifact".to_string(),
+    fn guided_artifact_research_case(
+        id: &str,
+        guided_refinement: GuidedRefinementConfig,
+        expected_witness_signature: Option<&str>,
+    ) -> ResearchCase {
+        ResearchCase {
+            id: id.to_string(),
             description: "guided 3x3 artifact case".to_string(),
             a: vec![],
             b: vec![],
@@ -1646,10 +1501,7 @@ mod tests {
             guide_artifact_paths: vec![
                 "research/guide_artifacts/generic_guided_permutation_3x3.json".to_string(),
             ],
-            expected_witness_signature: Some(
-                "3x3:1,0,1,2,1,0,0,1,2 -> 3x3:2,1,0,0,1,2,1,0,1 -> 3x3:2,0,1,1,1,0,0,2,1"
-                    .to_string(),
-            ),
+            expected_witness_signature: expected_witness_signature.map(str::to_string),
             config: JsonSearchConfig {
                 max_lag: 2,
                 max_intermediate_dim: 3,
@@ -1660,13 +1512,7 @@ mod tests {
                 beam_bfs_handoff_deferred_cap: None,
                 move_family_policy: MoveFamilyPolicy::GraphOnly,
                 stage: SearchStage::GuidedRefinement,
-                guided_refinement: GuidedRefinementConfig {
-                    max_shortcut_lag: 1,
-                    min_gap: 2,
-                    max_gap: Some(2),
-                    rounds: 1,
-                    segment_timeout_secs: None,
-                },
+                guided_refinement,
                 shortcut_search: ShortcutSearchConfig::default(),
             },
             timeout_ms: 1_000,
@@ -1684,12 +1530,50 @@ mod tests {
             campaign: None,
             measurement: None,
             deepening: None,
-        };
+        }
+    }
+
+    #[test]
+    fn run_case_guided_refinement_replays_guide_artifact_path() {
+        let case = guided_artifact_research_case(
+            "guided-artifact-replay",
+            GuidedRefinementConfig {
+                max_shortcut_lag: 1,
+                min_gap: 3,
+                max_gap: Some(3),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            Some("3x3:1,0,1,2,1,0,0,1,2 -> 3x3:2,1,0,0,1,2,1,0,1 -> 3x3:2,0,1,1,1,0,0,2,1"),
+        );
+
+        let result = run_case(&case, Path::new("research/cases.json"));
+        assert_eq!(result.actual_outcome, "equivalent");
+        assert_eq!(result.steps, Some(2));
+        assert_eq!(result.telemetry.guide_artifacts_accepted, 1);
+        assert_eq!(result.telemetry.guided_segments_considered, 0);
+        assert_eq!(result.telemetry.guided_segments_improved, 0);
+    }
+
+    #[test]
+    fn run_case_guided_refinement_reports_guide_artifact_improvement() {
+        let case = guided_artifact_research_case(
+            "guided-artifact-improvement",
+            GuidedRefinementConfig {
+                max_shortcut_lag: 1,
+                min_gap: 2,
+                max_gap: Some(2),
+                rounds: 1,
+                segment_timeout_secs: None,
+            },
+            None,
+        );
 
         let result = run_case(&case, Path::new("research/cases.json"));
         assert_eq!(result.actual_outcome, "equivalent");
         assert_eq!(result.steps, Some(1));
         assert_eq!(result.telemetry.guide_artifacts_accepted, 1);
+        assert_eq!(result.telemetry.guided_segments_considered, 1);
         assert_eq!(result.telemetry.guided_segments_improved, 1);
     }
 

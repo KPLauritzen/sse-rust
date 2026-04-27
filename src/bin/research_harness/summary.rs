@@ -5,12 +5,14 @@ use std::path::Path;
 use sse_core::types::{SearchLayerTelemetry, SearchStage, SearchTelemetry};
 
 use super::execution::{execute_case_for_harness, run_case_in_subprocess};
+use super::scoring::{
+    endpoint_identity_key, merge_best_known_witness, BestKnownWitness, ReusedResults,
+};
 use super::{
-    endpoint_identity_key, merge_best_known_witness, resolve_case, BestKnownWitness,
-    CampaignCaseSummary, CampaignConfig, CampaignSummary, CaseCorpus, CaseSummary,
+    resolve_case, CampaignCaseSummary, CampaignConfig, CampaignSummary, CaseCorpus, CaseSummary,
     ComparisonSummary, ComparisonVariantSummary, DeepeningScheduleCaseSummary,
     DeepeningScheduleSummary, DerivedTelemetrySummary, FitnessSummary, HarnessSummary,
-    JsonSearchConfig, ResearchCase, ReusedResults, StrategySummary,
+    JsonSearchConfig, ResearchCase, StrategySummary,
 };
 
 pub(crate) fn run_harness(
