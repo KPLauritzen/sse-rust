@@ -274,6 +274,10 @@ pub fn score_node_with_witness_bridge_profile(node: &DynMatrix, target: &DynMatr
     score_node(node, target) + witness_bridge_profile_score(node)
 }
 
+pub fn score_node_with_sparse_k4_bridge_profile(node: &DynMatrix, target: &DynMatrix) -> f64 {
+    score_node(node, target) + sparse_k4_bridge_profile_score(node)
+}
+
 fn witness_bridge_profile_score(node: &DynMatrix) -> f64 {
     if matches_witness_bridge_profile(node) {
         -48.0
@@ -301,6 +305,26 @@ fn matches_witness_bridge_profile(node: &DynMatrix) -> bool {
         }
         _ => false,
     }
+}
+
+fn sparse_k4_bridge_profile_score(node: &DynMatrix) -> f64 {
+    if matches_sparse_k4_bridge_profile(node) {
+        -48.0
+    } else {
+        0.0
+    }
+}
+
+fn matches_sparse_k4_bridge_profile(node: &DynMatrix) -> bool {
+    if node.rows != 4 || !node.is_square() {
+        return false;
+    }
+
+    // Retained Brix-Ruiz k4 diagonal-refactorization near-hit shape.
+    let (support, row_supports, col_supports) = support_profile(node);
+    support == 7
+        && ((row_supports == [0, 0, 3, 4] && col_supports == [1, 2, 2, 2])
+            || (row_supports == [1, 2, 2, 2] && col_supports == [0, 0, 3, 4]))
 }
 
 fn support_profile(node: &DynMatrix) -> (usize, Vec<usize>, Vec<usize>) {
@@ -542,8 +566,8 @@ fn sorted_l1_u8(left: &[u8], right: &[u8]) -> u64 {
 mod tests {
     use super::{
         candidate_score_specs, concrete_shift_profile_status_score, rank_target, score_node,
-        score_node_with_concrete_shift_profile, score_node_with_weights,
-        score_node_with_witness_bridge_profile, signature_distance,
+        score_node_with_concrete_shift_profile, score_node_with_sparse_k4_bridge_profile,
+        score_node_with_weights, score_node_with_witness_bridge_profile, signature_distance,
         BEAM_DIMENSION_STRICT_SCORE_WEIGHTS, DEFAULT_BEAM_SCORE_NAME,
     };
     use crate::concrete_shift::ConcreteShiftProfileStatus2x2;
@@ -680,6 +704,31 @@ mod tests {
         let bonus = score_node_with_witness_bridge_profile(&outside_frozen_dims, &target)
             - score_node(&outside_frozen_dims, &target);
         assert_eq!(bonus, 0.0);
+    }
+
+    #[test]
+    fn sparse_k4_bridge_profile_score_targets_retained_sparse_active_blocks() {
+        let target = DynMatrix::new(2, 2, vec![1, 12, 1, 1]);
+        let sparse_rows =
+            DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let sparse_cols =
+            DynMatrix::new(4, 4, vec![1, 3, 0, 0, 4, 1, 0, 0, 2, 0, 0, 0, 7, 6, 0, 0]);
+        let dense_witness_profile =
+            DynMatrix::new(4, 4, vec![1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1]);
+        let same_dim_miss =
+            DynMatrix::new(4, 4, vec![1, 4, 2, 7, 3, 1, 1, 5, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        for profile in [sparse_rows, sparse_cols] {
+            let bonus = score_node_with_sparse_k4_bridge_profile(&profile, &target)
+                - score_node(&profile, &target);
+            assert_eq!(bonus, -48.0);
+        }
+
+        for profile in [dense_witness_profile, same_dim_miss] {
+            let bonus = score_node_with_sparse_k4_bridge_profile(&profile, &target)
+                - score_node(&profile, &target);
+            assert_eq!(bonus, 0.0);
+        }
     }
 
     #[test]

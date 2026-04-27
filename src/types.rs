@@ -12,6 +12,7 @@ pub enum FrontierMode {
     Beam,
     ConcreteShiftProfileBeam,
     WitnessBridgeProfileBeam,
+    SparseK4BridgeProfileBeam,
     SameFuturePastDiversityBeam,
     BeamBfsHandoff,
     StratifiedBeamRefill,
@@ -42,6 +43,7 @@ impl FrontierMode {
             Self::Beam
                 | Self::ConcreteShiftProfileBeam
                 | Self::WitnessBridgeProfileBeam
+                | Self::SparseK4BridgeProfileBeam
                 | Self::SameFuturePastDiversityBeam
                 | Self::BeamBfsHandoff
                 | Self::StratifiedBeamRefill
@@ -777,6 +779,8 @@ mod tests {
             serde_json::from_str("\"concrete_shift_profile_beam\"").unwrap();
         let witness_bridge_profile_beam: FrontierMode =
             serde_json::from_str("\"witness_bridge_profile_beam\"").unwrap();
+        let sparse_k4_bridge_profile_beam: FrontierMode =
+            serde_json::from_str("\"sparse_k4_bridge_profile_beam\"").unwrap();
         let same_future_past_diversity_beam: FrontierMode =
             serde_json::from_str("\"same_future_past_diversity_beam\"").unwrap();
         let beam_bfs_handoff: FrontierMode = serde_json::from_str("\"beam_bfs_handoff\"").unwrap();
@@ -792,6 +796,10 @@ mod tests {
         assert_eq!(
             witness_bridge_profile_beam,
             FrontierMode::WitnessBridgeProfileBeam
+        );
+        assert_eq!(
+            sparse_k4_bridge_profile_beam,
+            FrontierMode::SparseK4BridgeProfileBeam
         );
         assert_eq!(
             same_future_past_diversity_beam,

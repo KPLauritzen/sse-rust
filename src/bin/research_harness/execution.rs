@@ -507,7 +507,7 @@ fn normalized_beam_width(
     if !frontier_mode.uses_beam_width() {
         if beam_width.is_some() {
             return Err(
-                "beam_width requires frontier_mode to be beam, concrete_shift_profile_beam, same_future_past_diversity_beam, beam_bfs_handoff, or stratified_beam_refill"
+                "beam_width requires frontier_mode to be beam, concrete_shift_profile_beam, witness_bridge_profile_beam, sparse_k4_bridge_profile_beam, same_future_past_diversity_beam, beam_bfs_handoff, or stratified_beam_refill"
                     .to_string(),
             );
         }

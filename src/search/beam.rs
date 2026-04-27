@@ -6,7 +6,8 @@ use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use crate::graph_moves::{same_future_past_signature, SameFuturePastSignature};
 use crate::matrix::DynMatrix;
 use crate::path_scoring::{
-    score_node, score_node_with_concrete_shift_profile, score_node_with_witness_bridge_profile,
+    score_node, score_node_with_concrete_shift_profile, score_node_with_sparse_k4_bridge_profile,
+    score_node_with_witness_bridge_profile,
 };
 use crate::types::SearchConfig;
 
@@ -192,6 +193,7 @@ pub(super) enum BeamScoringMode {
     Default,
     ConcreteShiftProfile,
     WitnessBridgeProfile,
+    SparseK4BridgeProfile,
     SameFuturePastDiversity,
 }
 
@@ -652,6 +654,9 @@ fn beam_candidate_score(
         }
         BeamScoringMode::WitnessBridgeProfile => {
             score_node_with_witness_bridge_profile(matrix, target)
+        }
+        BeamScoringMode::SparseK4BridgeProfile => {
+            score_node_with_sparse_k4_bridge_profile(matrix, target)
         }
     };
     let score = (raw_score * 4.0).round() as i64;

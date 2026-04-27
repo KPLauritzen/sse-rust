@@ -567,6 +567,10 @@ fn print_profiles(profiles: &[SearchProfile]) {
                 "witness-bridge-profile-beam({})",
                 profile.config.beam_width.unwrap_or(0)
             ),
+            FrontierMode::SparseK4BridgeProfileBeam => format!(
+                "sparse-k4-bridge-profile-beam({})",
+                profile.config.beam_width.unwrap_or(0)
+            ),
             FrontierMode::SameFuturePastDiversityBeam => format!(
                 "same-future-past-diversity-beam({})",
                 profile.config.beam_width.unwrap_or(0)

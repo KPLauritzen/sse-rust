@@ -792,6 +792,18 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                 BeamScoringMode::WitnessBridgeProfile,
             );
         }
+        FrontierMode::SparseK4BridgeProfileBeam => {
+            return search_beam_dyn_with_telemetry(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                deadline,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::SparseK4BridgeProfile,
+            );
+        }
         FrontierMode::SameFuturePastDiversityBeam => {
             return search_beam_dyn_with_telemetry(
                 a,
@@ -1449,6 +1461,17 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                 &request,
                 config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
                 BeamScoringMode::WitnessBridgeProfile,
+            );
+        }
+        FrontierMode::SparseK4BridgeProfileBeam => {
+            return search_beam_2x2_with_telemetry_and_observer(
+                a,
+                b,
+                config,
+                observer,
+                &request,
+                config.beam_width.unwrap_or(DEFAULT_BEAM_WIDTH),
+                BeamScoringMode::SparseK4BridgeProfile,
             );
         }
         FrontierMode::SameFuturePastDiversityBeam => {

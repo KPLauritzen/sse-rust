@@ -960,3 +960,10 @@
   `tmp/2026-04-25-concrete-shift-proposal-report.json` and documented keep vs
   reject fields in
   `research/notes/2026-04-25-concrete-shift-proposal-data.md`.
+
+- `working tree` Tested one Brix-Ruiz `k=4` retained-lane sparse active-block
+  ranking hypothesis as opt-in `sparse_k4_bridge_profile_beam`. Rejected for
+  the open graph-plus-structured lane: same-budget beam256/lag40/dim4/entry12
+  A/B dropped approximate hits `184 -> 133` and directed progress
+  `19783000 -> 14550000`, despite lower work and elapsed time. Details:
+  `research/notes/2026-04-27-brix-ruiz-k4-sparse-k4-bridge-profile-beam-reject.md`.

@@ -88,7 +88,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam|beam-bfs-handoff] [--move-policy mixed|graph-plus-structured|graph-only] [--graph-only] [--search-mode mixed|graph-plus-structured|graph-only|beam] [--beam-width N]"
+                    "usage: brix_ruiz_k3 [--max-lag N] [--max-dim N] [--max-entry N] [--frontier-mode bfs|beam|concrete-shift-profile-beam|witness-bridge-profile-beam|sparse-k4-bridge-profile-beam|same-future-past-diversity-beam|beam-bfs-handoff|stratified-beam-refill] [--move-policy mixed|graph-plus-structured|graph-only] [--graph-only] [--search-mode mixed|graph-plus-structured|graph-only|beam] [--beam-width N]"
                 );
                 return;
             }
@@ -100,7 +100,7 @@ fn main() {
     }
     assert!(
         frontier_mode.uses_beam_width() || beam_width.is_none(),
-        "--beam-width requires beam or beam-bfs-handoff frontier"
+        "--beam-width requires a beam-style frontier"
     );
 
     let config = SearchConfig {
@@ -230,6 +230,9 @@ fn parse_frontier_mode(value: &str) -> FrontierMode {
         }
         "witness-bridge-profile-beam" | "witness_bridge_profile_beam" => {
             FrontierMode::WitnessBridgeProfileBeam
+        }
+        "sparse-k4-bridge-profile-beam" | "sparse_k4_bridge_profile_beam" => {
+            FrontierMode::SparseK4BridgeProfileBeam
         }
         "same-future-past-diversity-beam" | "same_future_past_diversity_beam" => {
             FrontierMode::SameFuturePastDiversityBeam
