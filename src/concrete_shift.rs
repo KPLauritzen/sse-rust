@@ -124,7 +124,13 @@ impl Default for ConcreteShiftSearchConfig2x2 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConcreteShiftSearchResult2x2 {
     Equivalent(ConcreteShiftWitness2x2),
+    /// No witness was found inside the configured 2x2 lag/entry envelope.
+    ///
+    /// This is bounded exhaustion of the implemented witness surface, not a
+    /// theorem-grade proof that no concrete-shift witness exists.
     Exhausted,
+    /// The configured concrete-witness budget was hit before the bounded
+    /// witness surface was fully checked.
     SearchLimitReached,
 }
 
@@ -152,7 +158,11 @@ impl Default for ConcreteShiftProfileConfig2x2 {
 pub enum ConcreteShiftProfileStatus2x2 {
     Equivalent,
     ShiftWitnessOnly,
+    /// No bounded shift witness was found inside the profile envelope.
+    ///
+    /// This is only a profile/ranking signal, not lower-bound evidence.
     Exhausted,
+    /// The profile search hit its local concrete-witness budget.
     SearchLimitReached,
 }
 

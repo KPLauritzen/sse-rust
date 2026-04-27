@@ -327,7 +327,7 @@ fn run_case(
                 bridge_sample_limit,
             )?),
         ),
-        ConcreteShiftSearchResult2x2::Exhausted => ("exhausted", None),
+        ConcreteShiftSearchResult2x2::Exhausted => ("bounded_exhausted", None),
         ConcreteShiftSearchResult2x2::SearchLimitReached => ("search_limit_reached", None),
     };
 
@@ -343,8 +343,9 @@ fn run_case(
 
 #[cfg(test)]
 mod tests {
-    use super::{available_cases, parse_cli, run_case, CliAction, ReportSurface};
+    use super::{available_cases, parse_cli, run_case, CliAction, ControlCase2x2, ReportSurface};
     use sse_core::concrete_shift::{ConcreteShiftProposalBounds2x2, ConcreteShiftSearchConfig2x2};
+    use sse_core::matrix::SqMatrix;
 
     #[test]
     fn parse_cli_defaults_to_nontrivial_control() {
@@ -458,6 +459,33 @@ mod tests {
             assert!(proposal.bridge_r.max_entry <= 1);
             assert!(proposal.bridge_s.max_entry <= 1);
         }
+    }
+
+    #[test]
+    fn general_surface_labels_negative_exhaustion_as_bounded() {
+        let case = ControlCase2x2 {
+            id: "bounded_exhausted_control",
+            description: "control with no bounded shift witness",
+            source: SqMatrix::identity(),
+            target: SqMatrix::new([[0, 0], [0, 0]]),
+        };
+        let bounds = ConcreteShiftProposalBounds2x2 {
+            max_lag: 1,
+            max_entry: 0,
+            max_witnesses: 16,
+        };
+        let config = ConcreteShiftSearchConfig2x2 {
+            relation: sse_core::concrete_shift::ConcreteShiftRelation2x2::Aligned,
+            max_lag: bounds.max_lag,
+            max_entry: bounds.max_entry,
+            max_witnesses: bounds.max_witnesses,
+        };
+
+        let report = run_case(case, &config, &bounds, 1, ReportSurface::General)
+            .expect("expected case report");
+
+        assert_eq!(report.result_status, "bounded_exhausted");
+        assert!(report.proposal.is_none());
     }
 
     #[test]
