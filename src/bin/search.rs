@@ -24,8 +24,8 @@ use sse_core::sqlite_graph::SqliteGraphRecorder;
 use sse_core::types::{
     DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness, FrontierMode,
     GuideArtifactCompatibility, GuideArtifactPayload, GuideArtifactProvenance,
-    GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult,
-    SearchStage, SearchTelemetry, ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
+    GuidedRefinementConfig, MoveFamilyPolicy, SearchConfig, SearchDirection, SearchRequest,
+    SearchRunResult, SearchStage, SearchTelemetry, ShortcutSearchConfig, DEFAULT_BEAM_WIDTH,
 };
 
 #[derive(Debug)]
@@ -1611,8 +1611,8 @@ fn build_endpoint_witness_inventory(
         target: dyn_matrix_to_vecs(&request.target),
         requested_cap: surface.requested_cap,
         retained_count: surface.retained.len(),
-        orientation_status: "not_recorded",
-        orientation_note: "retained exact-meet telemetry stores the canonical meeting state and reconstructed source-to-target path, but not the frontier side/orientation that produced the meet",
+        orientation_status: endpoint_witness_orientation_status(surface),
+        orientation_note: endpoint_witness_orientation_note(surface),
         controls_loaded: controls
             .iter()
             .map(|control| EndpointWitnessControlSummary {
@@ -1646,7 +1646,7 @@ fn endpoint_witness_inventory_row(
         retained_index: index,
         meet_lag: witness.path_lag,
         reconstructed_path_length: witness.path.steps.len(),
-        endpoint_orientation: "not_recorded",
+        endpoint_orientation: endpoint_orientation_label(witness.meet_direction),
         meeting_state_signature: matrix_signature(&witness.meeting_canonical),
         control_matches: controls
             .iter()
@@ -1660,6 +1660,40 @@ fn endpoint_witness_inventory_row(
             .collect(),
         full_path_signature,
         full_path_hash,
+    }
+}
+
+fn endpoint_witness_orientation_status(surface: &EndpointExactMeetSurface) -> &'static str {
+    if !surface.retained.is_empty()
+        && surface
+            .retained
+            .iter()
+            .all(|witness| witness.meet_direction.is_some())
+    {
+        "recorded"
+    } else {
+        "not_recorded"
+    }
+}
+
+fn endpoint_witness_orientation_note(surface: &EndpointExactMeetSurface) -> &'static str {
+    if endpoint_witness_orientation_status(surface) == "recorded" {
+        "endpoint_orientation records the frontier expansion direction that produced each retained exact meet: forward from the source frontier or backward from the target frontier"
+    } else {
+        "at least one retained exact-meet row does not record the frontier expansion direction that produced the meet"
+    }
+}
+
+fn endpoint_orientation_label(direction: Option<SearchDirection>) -> &'static str {
+    direction
+        .map(search_direction_label)
+        .unwrap_or("not_recorded")
+}
+
+fn search_direction_label(direction: SearchDirection) -> &'static str {
+    match direction {
+        SearchDirection::Forward => "forward",
+        SearchDirection::Backward => "backward",
     }
 }
 
@@ -2094,6 +2128,7 @@ fn endpoint_exact_meets_json(surface: &EndpointExactMeetSurface) -> serde_json::
             .iter()
             .map(|witness| serde_json::json!({
                 "path_lag": witness.path_lag,
+                "meet_direction": witness.meet_direction.map(search_direction_label),
                 "meeting_canonical": dyn_matrix_to_vecs(&witness.meeting_canonical),
                 "path": {
                     "matrices": witness
@@ -2161,8 +2196,8 @@ mod tests {
     use sse_core::types::{
         ConcreteShiftProof2x2, DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness,
         EsseStep, FrontierMode, GuideArtifact, GuideArtifactPayload, GuidedRefinementConfig,
-        MoveFamilyPolicy, SearchConfig, SearchRequest, SearchRunResult, SearchStage,
-        SearchTelemetry, ShortcutSearchConfig,
+        MoveFamilyPolicy, SearchConfig, SearchDirection, SearchRequest, SearchRunResult,
+        SearchStage, SearchTelemetry, ShortcutSearchConfig,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2460,6 +2495,7 @@ mod tests {
             requested_cap: 2,
             retained: vec![EndpointExactMeetWitness {
                 path_lag: 1,
+                meet_direction: Some(SearchDirection::Backward),
                 meeting_canonical: DynMatrix::new(2, 2, vec![1, 1, 1, 1]),
                 path: DynSsePath {
                     matrices: vec![a.clone(), b.clone()],
@@ -2484,6 +2520,10 @@ mod tests {
         );
 
         assert_eq!(json["endpoint_exact_meets"]["requested_cap"], 2);
+        assert_eq!(
+            json["endpoint_exact_meets"]["retained"][0]["meet_direction"],
+            "backward"
+        );
         assert_eq!(
             json["endpoint_exact_meets"]["retained"][0]["meeting_canonical"],
             serde_json::json!([[1, 1], [1, 1]])
@@ -2912,6 +2952,7 @@ mod tests {
             requested_cap: 1,
             retained: vec![EndpointExactMeetWitness {
                 path_lag: 3,
+                meet_direction: Some(SearchDirection::Forward),
                 meeting_canonical: request.source.clone(),
                 path: path.clone(),
             }],
@@ -2929,7 +2970,8 @@ mod tests {
         let inventory = build_endpoint_witness_inventory(&request, &surface, &controls, vec![]);
 
         assert_eq!(inventory.retained_count, 1);
-        assert_eq!(inventory.orientation_status, "not_recorded");
+        assert_eq!(inventory.orientation_status, "recorded");
+        assert_eq!(inventory.rows[0].endpoint_orientation, "forward");
         assert_eq!(inventory.rows[0].retained_rank, 1);
         assert_eq!(inventory.rows[0].retained_index, 0);
         assert_eq!(inventory.rows[0].meet_lag, 3);
@@ -2937,6 +2979,16 @@ mod tests {
         assert_eq!(inventory.rows[0].meeting_state_signature, "2x2:1,0,0,1");
         assert!(inventory.rows[0].full_path_hash.starts_with("fnv1a64:"));
         assert_eq!(inventory.rows[0].control_matches[0].class, "baker");
+
+        let mut unrecorded_surface = surface.clone();
+        unrecorded_surface.retained[0].meet_direction = None;
+        let unrecorded_inventory =
+            build_endpoint_witness_inventory(&request, &unrecorded_surface, &controls, vec![]);
+        assert_eq!(unrecorded_inventory.orientation_status, "not_recorded");
+        assert_eq!(
+            unrecorded_inventory.rows[0].endpoint_orientation,
+            "not_recorded"
+        );
     }
 
     #[test]
@@ -2946,6 +2998,7 @@ mod tests {
             requested_cap: 1,
             retained: vec![EndpointExactMeetWitness {
                 path_lag: 0,
+                meet_direction: Some(SearchDirection::Forward),
                 meeting_canonical: request.source.clone(),
                 path: DynSsePath {
                     matrices: vec![request.source.clone()],

@@ -1068,7 +1068,7 @@ fn search_sse_with_telemetry_dyn_with_deadline_and_observer(
                     });
                 }
                 if let Some(retention) = retained_exact_meets.as_mut() {
-                    retention.retain(&expansion.next_canon, path_depth);
+                    retention.retain(&expansion.next_canon, path_depth, direction);
                     continue;
                 }
 
@@ -1746,7 +1746,7 @@ pub fn search_sse_2x2_with_telemetry_and_observer(
                     });
                 }
                 if let Some(retention) = retained_exact_meets.as_mut() {
-                    retention.retain(&expansion.next_canon, path_depth);
+                    retention.retain(&expansion.next_canon, path_depth, direction);
                     continue;
                 }
 
@@ -2233,7 +2233,7 @@ fn search_graph_plus_structured_2x2_with_telemetry_and_observer(
                     });
                 }
                 if let Some(retention) = retained_exact_meets.as_mut() {
-                    retention.retain(&expansion.next_canon, path_depth);
+                    retention.retain(&expansion.next_canon, path_depth, direction);
                     continue;
                 }
 
@@ -4818,7 +4818,7 @@ fn search_graph_only_2x2_with_telemetry_and_observer(
                             });
                         }
                         if let Some(retention) = retained_exact_meets.as_mut() {
-                            retention.retain(&successor.matrix, path_depth);
+                            retention.retain(&successor.matrix, path_depth, direction);
                             continue;
                         }
                         layer.next_frontier_nodes = next_frontier.len();
@@ -5221,7 +5221,7 @@ fn search_graph_only_dyn_with_telemetry(
                                 });
                             }
                             if let Some(retention) = retained_exact_meets.as_mut() {
-                                retention.retain(&successor.matrix, path_depth);
+                                retention.retain(&successor.matrix, path_depth, direction);
                                 continue;
                             }
                             layer.next_frontier_nodes = next_frontier.len();
@@ -5657,6 +5657,13 @@ mod tests {
             .retained
             .windows(2)
             .all(|window| window[0].path_lag <= window[1].path_lag));
+        assert!(
+            surface
+                .retained
+                .iter()
+                .all(|witness| witness.meet_direction.is_some()),
+            "retained endpoint exact meets should record the producing frontier direction",
+        );
         assert_eq!(
             surface
                 .retained
@@ -5806,8 +5813,8 @@ mod tests {
             ExactMeetRetention::from_config(&config).expect("valid config should retain meets");
         let retention = {
             let mut retention = retention;
-            retention.retain(&meet_b, 2);
-            retention.retain(&meet_a, 1);
+            retention.retain(&meet_b, 2, SearchDirection::Backward);
+            retention.retain(&meet_a, 1, SearchDirection::Forward);
             retention
         };
 
@@ -5847,6 +5854,22 @@ mod tests {
                 .as_ref()
                 .map(|surface| surface.retained.len()),
             Some(2)
+        );
+        assert_eq!(
+            complete_telemetry
+                .endpoint_exact_meets
+                .as_ref()
+                .map(|surface| {
+                    surface
+                        .retained
+                        .iter()
+                        .map(|witness| witness.meet_direction)
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec![
+                Some(SearchDirection::Forward),
+                Some(SearchDirection::Backward)
+            ])
         );
     }
 

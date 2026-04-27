@@ -638,6 +638,7 @@ impl SameFuturePastDiversityTelemetry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EndpointExactMeetWitness {
     pub path_lag: usize,
+    pub meet_direction: Option<SearchDirection>,
     pub meeting_canonical: DynMatrix,
     pub path: DynSsePath,
 }

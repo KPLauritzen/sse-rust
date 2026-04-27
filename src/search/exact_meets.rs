@@ -1,12 +1,14 @@
 use crate::matrix::DynMatrix;
 use crate::types::{
-    DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness, SearchConfig, SearchTelemetry,
+    DynSsePath, EndpointExactMeetSurface, EndpointExactMeetWitness, SearchConfig, SearchDirection,
+    SearchTelemetry,
 };
 
 #[derive(Clone, Debug)]
 struct RetainedExactMeetCandidate<M> {
     canonical: M,
     path_depth: usize,
+    meet_direction: SearchDirection,
     discovery_order: usize,
 }
 
@@ -37,10 +39,16 @@ impl<M: Clone + PartialEq> ExactMeetRetention<M> {
         !self.retained.is_empty()
     }
 
-    pub(super) fn retain(&mut self, canonical: &M, path_depth: usize) {
+    pub(super) fn retain(
+        &mut self,
+        canonical: &M,
+        path_depth: usize,
+        meet_direction: SearchDirection,
+    ) {
         let candidate = RetainedExactMeetCandidate {
             canonical: canonical.clone(),
             path_depth,
+            meet_direction,
             discovery_order: self.next_discovery_order,
         };
         self.next_discovery_order += 1;
@@ -110,6 +118,7 @@ pub(super) fn store_endpoint_exact_meets<M, FPath, FCanon>(
             .iter()
             .map(|candidate| EndpointExactMeetWitness {
                 path_lag: candidate.path_depth,
+                meet_direction: Some(candidate.meet_direction),
                 meeting_canonical: to_dyn_matrix(&candidate.canonical),
                 path: reconstruct_path(&candidate.canonical),
             })
