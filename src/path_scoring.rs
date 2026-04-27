@@ -291,7 +291,7 @@ fn matches_witness_bridge_profile(node: &DynMatrix) -> bool {
         return false;
     }
 
-    let (support, row_supports, col_supports) = support_profile(node);
+    let (support, row_supports, col_supports) = support_profile_multisets(node);
     match node.rows {
         3 => {
             (support == 7 && row_supports == [1, 3, 3] && col_supports == [2, 2, 3])
@@ -321,13 +321,13 @@ fn matches_sparse_k4_bridge_profile(node: &DynMatrix) -> bool {
     }
 
     // Retained Brix-Ruiz k4 diagonal-refactorization near-hit shape.
-    let (support, row_supports, col_supports) = support_profile(node);
+    let (support, row_supports, col_supports) = support_profile_multisets(node);
     support == 7
         && ((row_supports == [0, 0, 3, 4] && col_supports == [1, 2, 2, 2])
             || (row_supports == [1, 2, 2, 2] && col_supports == [0, 0, 3, 4]))
 }
 
-fn support_profile(node: &DynMatrix) -> (usize, Vec<usize>, Vec<usize>) {
+fn support_profile_multisets(node: &DynMatrix) -> (usize, Vec<usize>, Vec<usize>) {
     let mut support = 0usize;
     let mut row_supports = vec![0usize; node.rows];
     let mut col_supports = vec![0usize; node.cols];
@@ -342,9 +342,14 @@ fn support_profile(node: &DynMatrix) -> (usize, Vec<usize>, Vec<usize>) {
         }
     }
 
-    row_supports.sort_unstable();
-    col_supports.sort_unstable();
-    (support, row_supports, col_supports)
+    let row_support_multiset = sorted_multiset(row_supports);
+    let col_support_multiset = sorted_multiset(col_supports);
+    (support, row_support_multiset, col_support_multiset)
+}
+
+fn sorted_multiset(mut values: Vec<usize>) -> Vec<usize> {
+    values.sort_unstable();
+    values
 }
 
 fn concrete_shift_profile_score(node: &DynMatrix, target: &DynMatrix) -> Option<f64> {
@@ -717,6 +722,8 @@ mod tests {
             DynMatrix::new(4, 4, vec![0, 0, 0, 0, 1, 4, 2, 7, 0, 0, 0, 0, 3, 1, 0, 6]);
         let col_permuted_sparse =
             DynMatrix::new(4, 4, vec![2, 1, 7, 4, 0, 3, 6, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let row_and_col_permuted_sparse =
+            DynMatrix::new(4, 4, vec![0, 0, 0, 0, 6, 3, 0, 1, 0, 0, 0, 0, 7, 1, 2, 4]);
         let dense_witness_profile =
             DynMatrix::new(4, 4, vec![1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1]);
         let same_dim_miss =
@@ -727,6 +734,7 @@ mod tests {
             sparse_cols,
             row_permuted_sparse,
             col_permuted_sparse,
+            row_and_col_permuted_sparse,
         ] {
             let bonus = score_node_with_sparse_k4_bridge_profile(&profile, &target)
                 - score_node(&profile, &target);
