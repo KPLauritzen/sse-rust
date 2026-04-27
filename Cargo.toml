@@ -225,6 +225,11 @@ path = "src/bin/probe_k3_direct_entry_replacement.rs"
 required-features = ["research-tools"]
 
 [[bin]]
+name = "probe_sparse_4x4_layout_transfer_words"
+path = "src/bin/probe_sparse_4x4_layout_transfer_words.rs"
+required-features = ["research-tools"]
+
+[[bin]]
 name = "diagnose_endpoint_neighborhood_normal_forms"
 path = "src/bin/diagnose_endpoint_neighborhood_normal_forms.rs"
 required-features = ["research-tools"]
