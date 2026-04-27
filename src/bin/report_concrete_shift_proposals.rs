@@ -2,8 +2,9 @@ use serde::Serialize;
 use sse_core::concrete_shift::{
     concrete_shift_profile_2x2, concrete_shift_proposal_data_2x2,
     search_concrete_shift_equivalence_2x2, ConcreteShiftProfile2x2, ConcreteShiftProfileConfig2x2,
-    ConcreteShiftProfileStatus2x2, ConcreteShiftProposalBounds2x2, ConcreteShiftProposalData2x2,
-    ConcreteShiftRelation2x2, ConcreteShiftSearchConfig2x2, ConcreteShiftSearchResult2x2,
+    ConcreteShiftProfileResiduals2x2, ConcreteShiftProfileStatus2x2,
+    ConcreteShiftProposalBounds2x2, ConcreteShiftProposalData2x2, ConcreteShiftRelation2x2,
+    ConcreteShiftSearchConfig2x2, ConcreteShiftSearchResult2x2,
 };
 use sse_core::matrix::SqMatrix;
 
@@ -31,11 +32,13 @@ enum CliAction {
     Help,
 }
 
+/// Schema v4 adds bounded per-profile residual counts.
+///
 /// Schema v3 adds per-case bounded concrete-shift profile telemetry.
 ///
 /// Schema v2 renamed negative bounded exhaustion from `exhausted` to
 /// `bounded_exhausted` in `result_status`.
-const REPORT_SCHEMA_VERSION: u32 = 3;
+const REPORT_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Serialize)]
 struct Report {
@@ -68,6 +71,7 @@ struct ProfileReport {
     shift_witnesses: usize,
     concrete_witness_lag: Option<u32>,
     limit_reached: bool,
+    residuals: ConcreteShiftProfileResiduals2x2,
 }
 
 #[derive(Debug, Serialize)]
@@ -445,6 +449,7 @@ fn profile_report(profile: ConcreteShiftProfile2x2) -> ProfileReport {
         shift_witnesses: profile.shift_witnesses,
         concrete_witness_lag: profile.concrete_witness_lag,
         limit_reached: profile.limit_reached,
+        residuals: profile.residuals,
     }
 }
 
@@ -489,7 +494,12 @@ mod tests {
 
     #[test]
     fn report_schema_version_tracks_profile_telemetry() {
-        assert_eq!(REPORT_SCHEMA_VERSION, 3);
+        assert!(REPORT_SCHEMA_VERSION >= 3);
+    }
+
+    #[test]
+    fn report_schema_version_tracks_profile_residuals() {
+        assert_eq!(REPORT_SCHEMA_VERSION, 4);
     }
 
     #[test]
@@ -675,6 +685,7 @@ mod tests {
         assert_eq!(report.result_status, "bounded_exhausted");
         assert!(report.proposal.is_none());
         assert_eq!(report.profile.max_lag, 1);
+        assert!(report.profile.residuals.r_intertwiner_candidates > 0);
     }
 
     #[test]
@@ -693,6 +704,7 @@ mod tests {
 
         assert_eq!(report.result_status, "bounded_exhausted");
         assert!(report.proposal.is_none());
+        assert!(report.profile.residuals.r_intertwiner_candidates > 0);
     }
 
     #[test]
